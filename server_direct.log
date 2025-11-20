@@ -1,0 +1,3 @@
+Server running on http://localhost:4000
+OPENAI_API_KEY is missing. AI Service will use MOCK mode.
+DKG credentials missing. DKG Service will use SIMULATED mode.

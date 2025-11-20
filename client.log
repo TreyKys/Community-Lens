@@ -1,0 +1,56 @@
+
+> client@0.0.0 dev
+> vite
+
+10:00:01 AM [vite] (client) Re-optimizing dependencies because lockfile has changed
+
+  VITE v7.2.4  ready in 283 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+10:00:12 AM [vite] vite.config.js changed, restarting server...
+10:00:12 AM [vite] (client) page reload index.html
+10:00:12 AM [vite] (client) Re-optimizing dependencies because lockfile has changed
+10:00:12 AM [vite] server restarted.
+10:00:20 AM [vite] (client) page reload index.html
+10:00:25 AM [vite] (client) ✨ new dependencies optimized: react, react-dom/client, axios, lucide-react
+10:00:39 AM [vite] (client) page reload index.html
+10:00:39 AM [vite] (client) page reload src/App.jsx
+10:00:39 AM [vite] (client) hmr update /src/index.css
+10:00:39 AM [vite] (client) page reload src/main.jsx
+10:00:48 AM [vite] (client) page reload index.html
+10:00:48 AM [vite] (client) page reload src/App.jsx
+10:00:48 AM [vite] (client) hmr update /src/index.css
+10:00:48 AM [vite] (client) page reload src/main.jsx
+10:01:03 AM [vite] (client) page reload index.html
+10:01:03 AM [vite] (client) page reload src/App.jsx
+10:01:03 AM [vite] (client) hmr update /src/index.css
+10:01:03 AM [vite] (client) page reload src/main.jsx
+10:05:45 AM [vite] (client) page reload index.html
+10:05:45 AM [vite] (client) page reload src/App.jsx
+10:05:45 AM [vite] (client) hmr update /src/index.css
+10:05:45 AM [vite] (client) page reload src/main.jsx
+10:05:59 AM [vite] (client) page reload index.html
+10:05:59 AM [vite] (client) page reload src/App.jsx
+10:05:59 AM [vite] (client) hmr update /src/index.css
+10:05:59 AM [vite] (client) page reload src/main.jsx
+10:06:11 AM [vite] (client) page reload index.html
+10:06:11 AM [vite] (client) page reload src/App.jsx
+10:06:11 AM [vite] (client) hmr update /src/index.css
+10:06:11 AM [vite] (client) page reload src/main.jsx
+10:06:22 AM [vite] (client) page reload index.html
+10:06:22 AM [vite] (client) page reload src/App.jsx
+10:06:22 AM [vite] (client) hmr update /src/index.css
+10:06:22 AM [vite] (client) page reload src/main.jsx
+10:08:28 AM [vite] (client) page reload index.html
+10:08:28 AM [vite] (client) page reload src/App.jsx
+10:08:28 AM [vite] (client) hmr update /src/index.css
+10:08:28 AM [vite] (client) page reload src/main.jsx
+10:08:41 AM [vite] (client) page reload index.html
+10:08:41 AM [vite] (client) page reload src/App.jsx
+10:08:41 AM [vite] (client) hmr update /src/index.css
+10:08:41 AM [vite] (client) page reload src/main.jsx
+10:08:46 AM [vite] (client) page reload index.html
+10:08:46 AM [vite] (client) page reload src/App.jsx
+10:08:46 AM [vite] (client) hmr update /src/index.css
+10:08:46 AM [vite] (client) page reload src/main.jsx

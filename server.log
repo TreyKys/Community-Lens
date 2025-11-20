@@ -1,0 +1,27 @@
+Server running on http://localhost:4000
+OPENAI_API_KEY is missing. AI Service will use MOCK mode.
+DKG credentials missing. DKG Service will use SIMULATED mode.
+[AI Service] No API Key found. Using Mock.
+[DKG Service] Publishing asset... {
+  claim: 'Clean energy is safe',
+  verdict: 'VERIFIED',
+  evidence: 'Global Health Organization, 2023 Report',
+  metadata: {
+    confidence: 98,
+    analysis: 'The claim aligns with established scientific consensus. Multiple authoritative sources confirm the safety and validity of this statement.',
+    timestamp: '2025-11-20T09:56:54.461Z'
+  }
+}
+[DKG Service] Simulated publish. UAL: did:dkg:otp:2043/0xdd176109300a5c71bcae21b7b9e205c0e736fe49539968b9cbbc1eada326dc94
+[AI Service] No API Key found. Using Mock.
+[DKG Service] Publishing asset... {
+  claim: 'Clean energy is safe',
+  verdict: 'VERIFIED',
+  evidence: 'Global Health Organization, 2023 Report',
+  metadata: {
+    confidence: 98,
+    analysis: 'The claim aligns with established scientific consensus. Multiple authoritative sources confirm the safety and validity of this statement.',
+    timestamp: '2025-11-20T10:00:28.036Z'
+  }
+}
+[DKG Service] Simulated publish. UAL: did:dkg:otp:2043/0xdd176109300a5c71bcae21b7b9e205c0e736fe49539968b9cbbc1eada326dc94

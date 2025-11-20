@@ -1,18 +1,24 @@
 {
-  "name": "community-lens",
+  "name": "community-lens-root",
   "version": "1.0.0",
-  "description": "A cognitive firewall for AI agents.",
-  "main": "index.js",
-  "type": "module",
+  "private": true,
   "scripts": {
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "start": "echo \"See README for production start instructions\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
   "dependencies": {
-    "chalk": "^5.3.0",
-    "dotenv": "^16.3.1",
-    "fs-extra": "^11.2.0"
+    "axios": "^1.13.2",
+    "chalk": "^5.6.2"
   }
 }

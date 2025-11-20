@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-900 text-slate-50;
+  font-family: 'Inter', sans-serif;
+}
+
+.terminal-box {
+  @apply font-mono bg-slate-950 border border-slate-800 p-4 rounded-md text-sm overflow-x-auto;
+}
+
+.btn-primary {
+  @apply bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-secondary {
+  @apply bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 px-4 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
