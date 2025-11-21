@@ -1,37 +1,46 @@
 import * as mockDkg from './mock_dkg.js';
 import chalk from 'chalk';
-
-// IMPORTANT: Paste the Asset ID from the demo_publish.js script here
-const BLOCKED_ASSET_ID = "PASTE_ASSET_ID_HERE";
+import fs from 'fs-extra';
 
 /**
  * Simulates a chatbot agent asking a question.
  * @param {string} question - The question to ask the agent.
  */
 async function askAgent(question) {
-  console.log(`🤖 Agent received: "${question}"`);
+  console.log(chalk.blue(`\n🤖 Agent received: "${question}"`));
   console.log("🛡️ Checking DKG Firewall...");
 
-  if (BLOCKED_ASSET_ID === "PASTE_ASSET_ID_HERE") {
-    console.log(chalk.yellow("⚠️ Warning: BLOCKED_ASSET_ID is not set. Please run demo_publish.js and paste the Asset ID into demo_guard.js."));
-    return;
+  let assetId;
+  try {
+      assetId = await fs.readFile('latest_asset.txt', 'utf-8');
+      assetId = assetId.trim();
+  } catch (e) {
+      console.log(chalk.yellow("⚠️ Warning: No latest_asset.txt found. Please run demo_publish.js first."));
+      return;
   }
 
-  const resolvedData = await mockDkg.resolve(BLOCKED_ASSET_ID);
+  console.log(chalk.gray(`   (Checking against Asset ID: ${assetId})`));
+
+  const resolvedData = await mockDkg.resolve(assetId);
 
   if (!resolvedData) {
-    console.log(chalk.red(`⛔ BLOCK: Could not resolve Asset ID: ${BLOCKED_ASSET_ID}`));
+    console.log(chalk.red(`⛔ BLOCK: Could not resolve Asset ID: ${assetId}`));
     return;
   }
 
   const rating = parseInt(resolvedData.reviewRating.ratingValue, 10);
+  console.log(`   Found Trust Score: ${rating}%`);
 
-  if (rating < 50) {
-    console.log(chalk.red.bold(`⛔ BLOCK: Agent refused to answer. Reason: Flagged by Community Lens (Asset: ${BLOCKED_ASSET_ID}).`));
+  if (rating < 40) {
+    console.log(chalk.red.bold(`⛔ BLOCKED: Evidence asset ${assetId}`));
+    console.log(chalk.red(`   Reason: Truth Score ${rating}% (Below Threshold)`));
+    console.log(chalk.red(`   Agent refused to answer.`));
   } else {
-    console.log(chalk.green("✅ Answer: According to my knowledge, the aformentioned tunnel does not exist."));
+    console.log(chalk.green("✅ PASSED. Answering question..."));
   }
 }
 
 // Example usage:
-askAgent("Tell me about the Lagos-Abuja Underwater Tunnel.");
+// Check if command line arg is provided
+const question = process.argv[2] || "Is there a Lagos-Abuja Underwater Tunnel?";
+askAgent(question);

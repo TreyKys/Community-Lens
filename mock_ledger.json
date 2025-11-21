@@ -1,0 +1,41 @@
+{
+  "did:dkg:otp:2043/0xb5a8b69531af8c0c432ce67960035281de4851b870da4c0362f51d5bb1ecd30d": {
+    "@context": "https://schema.org",
+    "@type": "ClaimReview",
+    "reviewRating": {
+      "@type": "Rating",
+      "ratingValue": "62",
+      "bestRating": "100",
+      "worstRating": "0",
+      "alternateName": "True"
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "Community Lens Verifier"
+    },
+    "itemReviewed": {
+      "@type": "CreativeWork",
+      "discussionUrl": "https://example.org/simulated-1"
+    }
+  },
+  "did:dkg:otp:2043/0x580e1de74bc411494a508a9e08477203e0f93a820d2e5d02cd61d362f14c3640": {
+    "@context": "https://schema.org",
+    "@type": "ClaimReview",
+    "claimReviewed": "The Lagos-Abuja Underwater Tunnel was completed in 2024.",
+    "reviewRating": {
+      "@type": "Rating",
+      "ratingValue": "15",
+      "bestRating": "100",
+      "worstRating": "0",
+      "alternateName": "False"
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "Community Lens Verifier"
+    },
+    "itemReviewed": {
+      "@type": "CreativeWork",
+      "discussionUrl": "https://factcheck.org.ng/lagos-abuja-hoax"
+    }
+  }
+}
