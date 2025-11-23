@@ -1,4 +1,4 @@
-# Community Lens 2.0
+# Community Lens 2.0 ⚡
 
 A Decentralized Truth Verification Protocol built for the OriginTrail Hackathon.
 
