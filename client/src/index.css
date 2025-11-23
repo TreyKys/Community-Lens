@@ -1,0 +1,5 @@
+/* Custom styles if needed, otherwise handled by Tailwind CDN */
+body {
+  background-color: #0f172a; /* Fallback slate-900 */
+  color: white;
+}
