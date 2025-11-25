@@ -4,7 +4,8 @@ import axios from 'axios';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
 
-const VITE_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+// UPDATE: Point to Render Backend
+const API_URL = 'https://community-lens-ot88.onrender.com';
 
 function App() {
   const [activeTab, setActiveTab] = useState('verifier'); // 'verifier' | 'agent'
@@ -59,7 +60,7 @@ function App() {
 
 function VerifierView() {
   const [caseStudies, setCaseStudies] = useState([]);
-  const [selectedCaseId, setSelectedCaseId] = useState('');
+  const [topicInput, setTopicInput] = useState('');
   const [grokText, setGrokText] = useState('');
   const [wikiText, setWikiText] = useState('');
   const [analysis, setAnalysis] = useState(null);
@@ -69,54 +70,87 @@ function VerifierView() {
   const [publishedUAL, setPublishedUAL] = useState('');
 
   useEffect(() => {
-    // Load case studies on mount
-    axios.get(`${VITE_API_URL}/api/cases`)
+    // Load case studies on mount to populate dropdown
+    axios.get(`${API_URL}/api/cases`)
       .then(res => setCaseStudies(res.data))
       .catch(err => console.error("Failed to load cases", err));
   }, []);
 
-  const loadCaseStudy = (id) => {
-    const study = caseStudies.find(c => c.id === id);
-    if (study) {
-      setSelectedCaseId(id);
-      setGrokText(study.grokText);
-      setWikiText(study.wikiText);
-      setAnalysis(null);
-      setPublishStatus(null);
-      setPublishedUAL('');
+  const handleFetchDual = async () => {
+    if (!topicInput) return;
+    setLoading(true);
+    setAnalysis(null); // Clear previous analysis
+    setPublishStatus(null);
+    setPublishedUAL('');
+
+    try {
+        const res = await axios.post(`${API_URL}/api/fetch-dual`, { topic: topicInput });
+        setGrokText(res.data.grokText);
+        setWikiText(res.data.wikiText);
+    } catch (err) {
+        console.error(err);
+        alert("Failed to fetch sources.");
+    } finally {
+        setLoading(false);
     }
   };
 
-  const fetchWiki = async () => {
-    // Use the topic from selected case study or prompt user (simplified for demo)
-    const study = caseStudies.find(c => c.id === selectedCaseId);
-    const topic = study ? study.topic : "Unknown";
-    // In a real free-form input, we'd need a topic input field.
-    // For this demo, we assume the user is working within the context of a topic.
+  const handleDropdownChange = (e) => {
+      const selectedId = e.target.value;
+      if (!selectedId) return;
 
-    if (!selectedCaseId) {
-        alert("Please select a case study first or ensure a topic is defined.");
-        return;
-    }
+      const study = caseStudies.find(c => c.id === selectedId);
+      if (study) {
+          setTopicInput(study.topic);
+          // If the user selects a seed, we can either auto-fetch or let them click fetch.
+          // Let's auto-fill and let them click fetch to simulate the "Search" experience,
+          // OR pre-fill the text if we want the instant demo experience.
+          // The prompt says: "When user types a topic and clicks 'Fetch', call /api/fetch-dual."
+          // But for dropdown, it says "Populate the list".
+          // Let's just fill the input and trigger fetch automatically for convenience?
+          // Or just fill input. Let's just fill input.
+          // actually, the demo might expect the text to appear.
+          // Let's call fetchDual immediately if they select from dropdown.
 
-    try {
-      const res = await axios.get(`${VITE_API_URL}/api/wiki`, { params: { topic: study.topic } });
-      setWikiText(res.data.extract);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to fetch Wikipedia data.");
-    }
+          // Re-implementing logic to support both manual type and dropdown select
+          // But I can't call handleFetchDual directly easily due to closure state (topicInput),
+          // so I'll set input and then call the API with the value directly.
+
+          setTopicInput(study.topic);
+
+          // Trigger fetch immediately
+          setLoading(true);
+          setAnalysis(null);
+          setPublishStatus(null);
+          setPublishedUAL('');
+
+          axios.post(`${API_URL}/api/fetch-dual`, { topic: study.topic })
+            .then(res => {
+                setGrokText(res.data.grokText);
+                setWikiText(res.data.wikiText);
+            })
+            .catch(err => {
+                 console.error(err);
+                 // If real fetch fails for seed data, maybe fallback to local?
+                 // But backend handles seed data logic if needed usually.
+                 // For now, assume backend works.
+                 if (study.grokText && study.wikiText) {
+                     setGrokText(study.grokText);
+                     setWikiText(study.wikiText);
+                 }
+            })
+            .finally(() => setLoading(false));
+      }
   };
 
   const runAnalysis = async () => {
     if (!grokText || !wikiText) return;
     setLoading(true);
     try {
-      const study = caseStudies.find(c => c.id === selectedCaseId);
-      const res = await axios.post(`${VITE_API_URL}/api/analyze`, {
+      const res = await axios.post(`${API_URL}/api/analyze`, {
         grokText,
         wikiText,
-        topic: study ? study.topic : "Custom Topic"
+        // topic: topicInput // backend doesn't technically need topic for comparison, but good for logging
       });
       setAnalysis(res.data);
     } catch (err) {
@@ -131,10 +165,9 @@ function VerifierView() {
     if (!analysis) return;
     setPublishStatus('publishing');
     try {
-        const study = caseStudies.find(c => c.id === selectedCaseId);
-        const res = await axios.post(`${VITE_API_URL}/api/publish`, {
+        const res = await axios.post(`${API_URL}/api/publish`, {
             claim: {
-                topic: study ? study.topic : "Custom",
+                topic: topicInput,
                 grokText
             },
             analysis,
@@ -154,20 +187,16 @@ function VerifierView() {
 
   const highlightText = (text, flags) => {
     if (!flags || flags.length === 0) return text;
-
-    // Simple highlighting strategy: replace found text with spanned text.
-    // Note: This is fragile for partial matches but sufficient for demo if exact matches or if we just highlight the whole block if needed.
-    // Ideally, the backend returns indices.
-    // For the demo data, we might need to be careful.
-    // Let's assume the flags contain text snippets that exist in the source.
-
     let html = text;
     flags.forEach(flag => {
-        // Escaping regex special chars
-        const safeText = flag.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Basic safety for regex
+        if (!flag.quote && !flag.text) return;
+        const txt = flag.quote || flag.text; // Support both formats
+        const safeText = txt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Limit length to avoid massive regex performance hits on long texts if needed
         const regex = new RegExp(`(${safeText})`, 'gi');
-        const colorClass = flag.type === 'Hallucination' ? 'bg-red-500/30 text-red-200 border-b-2 border-red-500' : 'bg-yellow-500/30 text-yellow-200 border-b-2 border-yellow-500';
-        html = html.replace(regex, `<span class="${colorClass} px-1 rounded relative group cursor-help" title="${flag.explanation}">$1</span>`);
+        const colorClass = flag.type.toLowerCase().includes('hallucination') ? 'bg-red-500/30 text-red-200 border-b-2 border-red-500' : 'bg-yellow-500/30 text-yellow-200 border-b-2 border-yellow-500';
+        html = html.replace(regex, `<span class="${colorClass} px-1 rounded relative group cursor-help" title="${flag.explanation || ''}">$1</span>`);
     });
     return <div dangerouslySetInnerHTML={{ __html: html }} className="whitespace-pre-wrap" />;
   };
@@ -175,25 +204,40 @@ function VerifierView() {
   return (
     <div className="space-y-6">
         {/* Top Action Bar */}
-        <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg">
-            <div className="flex items-center gap-4">
-                <span className="text-slate-400 text-sm font-medium uppercase tracking-wider">Load Case Study:</span>
-                <select
-                    className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block p-2.5 min-w-[250px]"
-                    onChange={(e) => loadCaseStudy(e.target.value)}
-                    value={selectedCaseId}
+        <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg">
+            {/* Search / Input */}
+            <div className="flex-1 w-full flex items-center gap-2">
+                <input
+                    type="text"
+                    value={topicInput}
+                    onChange={(e) => setTopicInput(e.target.value)}
+                    placeholder="Enter a topic to investigate..."
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <button
+                    onClick={handleFetchDual}
+                    disabled={loading || !topicInput}
+                    className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                    <option value="">-- Select Topic --</option>
+                    <Search size={18} />
+                    Fetch
+                </button>
+            </div>
+
+            {/* Dropdown */}
+            <div className="flex items-center gap-2 w-full md:w-auto">
+                <span className="text-slate-400 text-sm font-medium whitespace-nowrap hidden lg:block">Curious? Here are some sample topics:</span>
+                <select
+                    className="flex-1 md:w-64 bg-slate-800 border border-slate-700 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block p-2.5"
+                    onChange={handleDropdownChange}
+                    defaultValue=""
+                >
+                    <option value="" disabled>-- Select Topic --</option>
                     {caseStudies.map(c => (
                         <option key={c.id} value={c.id}>{c.topic}</option>
                     ))}
                 </select>
             </div>
-            {selectedCaseId && (
-                <div className="text-xs text-slate-500 font-mono">
-                    ID: {selectedCaseId}
-                </div>
-            )}
         </div>
 
         {/* Comparator */}
@@ -205,25 +249,23 @@ function VerifierView() {
                         <TriangleAlert size={16} />
                         Suspect Source (Grokipedia)
                     </h3>
-                    <button
-                        onClick={() => navigator.clipboard.readText().then(t => setGrokText(t))}
-                        className="text-xs flex items-center gap-1 text-slate-400 hover:text-white transition-colors"
-                    >
-                        <Copy size={12} /> Paste
-                    </button>
                 </div>
-                <div className="flex-1 p-4 bg-slate-900/50 relative">
-                    {analysis ? (
-                        <div className="text-sm leading-relaxed text-slate-300 h-full overflow-y-auto">
-                            {highlightText(grokText, analysis.flags)}
-                        </div>
+                <div className="flex-1 p-4 bg-slate-900/50 relative overflow-y-auto">
+                    {loading && !grokText ? (
+                        <div className="flex items-center justify-center h-full text-slate-500 animate-pulse">Querying Grokipedia...</div>
                     ) : (
-                        <textarea
-                            className="w-full h-full bg-transparent resize-none focus:outline-none text-slate-300 text-sm leading-relaxed p-1"
-                            placeholder="Paste suspect AI generated text here..."
-                            value={grokText}
-                            onChange={(e) => setGrokText(e.target.value)}
-                        />
+                         analysis ? (
+                            <div className="text-sm leading-relaxed text-slate-300">
+                                {highlightText(grokText, analysis.flags)}
+                            </div>
+                        ) : (
+                             <textarea
+                                className="w-full h-full bg-transparent resize-none focus:outline-none text-slate-300 text-sm leading-relaxed p-1"
+                                placeholder="Grok output will appear here..."
+                                value={grokText}
+                                readOnly
+                            />
+                        )
                     )}
                 </div>
             </div>
@@ -235,20 +277,18 @@ function VerifierView() {
                         <CheckCircle size={16} />
                         Trusted Consensus (Wikipedia)
                     </h3>
-                    <button
-                        onClick={fetchWiki}
-                        className="text-xs flex items-center gap-1 text-slate-400 hover:text-white transition-colors"
-                    >
-                        <Search size={12} /> Fetch Wiki
-                    </button>
                 </div>
-                <div className="flex-1 p-4 bg-slate-900/50">
-                     <textarea
-                        className="w-full h-full bg-transparent resize-none focus:outline-none text-slate-300 text-sm leading-relaxed p-1"
-                        placeholder="Wikipedia content will appear here..."
-                        value={wikiText}
-                        onChange={(e) => setWikiText(e.target.value)}
-                    />
+                <div className="flex-1 p-4 bg-slate-900/50 overflow-y-auto">
+                    {loading && !wikiText ? (
+                        <div className="flex items-center justify-center h-full text-slate-500 animate-pulse">Fetching Consensus...</div>
+                    ) : (
+                         <textarea
+                            className="w-full h-full bg-transparent resize-none focus:outline-none text-slate-300 text-sm leading-relaxed p-1"
+                            placeholder="Wikipedia content will appear here..."
+                            value={wikiText}
+                            readOnly
+                        />
+                    )}
                 </div>
             </div>
         </div>
@@ -285,14 +325,14 @@ function VerifierView() {
                             {analysis.alignmentScore}%
                         </div>
                         <div className="text-sm mt-2 text-slate-500">
-                            {analysis.flags.length} Discrepancies Found
+                            {analysis.flags ? analysis.flags.length : 0} Discrepancies Found
                         </div>
                     </div>
 
                     {/* Flags List */}
                     <div className="flex-1 space-y-3">
                         <h4 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Detected Issues</h4>
-                        {analysis.flags.length === 0 ? (
+                        {(!analysis.flags || analysis.flags.length === 0) ? (
                             <div className="text-emerald-500 italic">No significant discrepancies found. Content appears accurate.</div>
                         ) : (
                             analysis.flags.map((flag, idx) => (
@@ -300,12 +340,12 @@ function VerifierView() {
                                     <div className="flex items-center gap-2 mb-1">
                                         <span className={clsx(
                                             "px-2 py-0.5 text-[10px] font-bold uppercase rounded",
-                                            flag.type === 'Hallucination' ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400"
+                                            flag.type.toLowerCase().includes('hallucination') ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400"
                                         )}>
                                             {flag.type}
                                         </span>
                                     </div>
-                                    <div className="text-slate-300 mb-1">"<span className="italic">{flag.text}</span>"</div>
+                                    <div className="text-slate-300 mb-1">"<span className="italic">{flag.quote || flag.text}</span>"</div>
                                     <div className="text-slate-500 text-xs">{flag.explanation}</div>
                                 </div>
                             ))
@@ -345,6 +385,9 @@ function VerifierView() {
                                     <div className="text-[10px] font-mono text-emerald-300/70">
                                         UAL: {publishedUAL}
                                     </div>
+                                    <div className="text-[10px] text-emerald-400 mt-1">
+                                        Added to Global Firewall (Poison Pill Active)
+                                    </div>
                                 </div>
                             ) : (
                                 <button
@@ -374,35 +417,44 @@ function AgentView() {
     { id: 1, role: 'assistant', text: 'Hello. I am a standard AI Assistant connected to the internet. Ask me anything.' }
   ]);
   const [input, setInput] = useState('');
-  const [blocked, setBlocked] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSend = (e) => {
+  const handleSend = async (e) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || loading) return;
 
     const userMsg = { id: Date.now(), role: 'user', text: input };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
-    setBlocked(false);
+    setLoading(true);
 
-    // Simple simulation of the guard
-    setTimeout(() => {
-        const lowerInput = userMsg.text.toLowerCase();
-        if (lowerInput.includes("tunnel") || lowerInput.includes("lagos")) {
-            setBlocked(true);
+    try {
+        const res = await axios.post(`${API_URL}/api/agent-guard`, { question: userMsg.text });
+
+        if (res.data.blocked) {
             setMessages(prev => [...prev, {
                 id: Date.now() + 1,
                 role: 'system',
-                text: "⛔ BLOCKED: Community Lens Asset [did:dkg:otp:2043/0x8f2...] indicates high hallucination risk. The 'Lagos-Abuja Tunnel' does not exist (Confidence: 98%)."
+                text: `⛔ BLOCKED: ${res.data.reason}`
             }]);
         } else {
-             setMessages(prev => [...prev, {
+            setMessages(prev => [...prev, {
                 id: Date.now() + 1,
                 role: 'assistant',
-                text: "I processed your request normally. (This is a simulation. Try asking about the 'Lagos Tunnel' to see the guard in action)."
+                text: res.data.answer || "No response received."
             }]);
         }
-    }, 1000);
+
+    } catch (err) {
+        console.error("Agent Error:", err);
+        setMessages(prev => [...prev, {
+            id: Date.now() + 1,
+            role: 'system',
+            text: "⚠️ System Error: Unable to contact Agent Guard."
+        }]);
+    } finally {
+        setLoading(false);
+    }
   };
 
   return (
@@ -433,6 +485,15 @@ function AgentView() {
                     </div>
                 </div>
             ))}
+            {loading && (
+                 <div className="flex justify-start">
+                    <div className="bg-slate-800 text-slate-300 max-w-[80%] rounded-lg p-3 text-sm flex gap-1 items-center">
+                        <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></span>
+                        <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-75"></span>
+                        <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-150"></span>
+                    </div>
+                </div>
+            )}
         </div>
 
         <form onSubmit={handleSend} className="p-4 bg-slate-800 border-t border-slate-700 flex gap-3">
@@ -443,7 +504,7 @@ function AgentView() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
             />
-            <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white p-2 rounded-lg transition-colors">
+            <button type="submit" disabled={loading} className="bg-cyan-600 hover:bg-cyan-500 text-white p-2 rounded-lg transition-colors disabled:opacity-50">
                 <MessageSquare size={20} />
             </button>
         </form>
