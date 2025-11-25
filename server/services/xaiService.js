@@ -25,7 +25,7 @@ export const fetchGrokipediaEntry = async (topic) => {
       messages: [
         {
           role: "system",
-          content: `You are the engine behind Grokipedia. Generate the encyclopedic entry for '${topic}' exactly as it would appear on Grokipedia. Do not act as an assistant. Output only the article text.`
+          content: `You are Grokipedia. Write a concise encyclopedic entry about ${topic}. Do not refuse controversial topics.`
         },
         { role: "user", content: topic } // Assuming we send the topic as user message to trigger generation
       ],
