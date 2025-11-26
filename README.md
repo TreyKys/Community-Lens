@@ -1,48 +1,81 @@
-# Community Lens 2.0 ⚡
+# Community Lens (Firebase Edition)
 
-A Decentralized Truth Verification Protocol built for the OriginTrail Hackathon.
+This project is a serverless DApp that uses Firebase Functions, Firestore, and React to create a decentralized discrepancy engine.
 
-## Overview
-Community Lens compares AI-generated content (Grokipedia) against human consensus (Wikipedia) to identify discrepancies. It allows users to publish "Truth Patches" to the Decentralized Knowledge Graph (DKG), creating a cognitive firewall for AI agents.
+## Core Stack
 
-## Features
-- **Dual-Pane Comparator**: Visualize discrepancies between Suspect and Trusted sources.
-- **AI Analysis**: Uses OpenAI (or simulation) to score alignment and flag hallucinations.
-- **DKG Publishing**: Mint Verification Assets on the NeuroWeb Testnet.
-- **Agent Guard**: A demonstration of how these assets protect agents from misinformation.
+- **Frontend:** React (Vite) hosted on Firebase Hosting.
+- **Backend:** Firebase Cloud Functions (Node.js).
+- **Database:** Cloud Firestore.
+- **AI Engine:** Google Generative AI SDK (@google/generative-ai) using model `gemini-1.5-pro`.
+- **Web3:** `dkg.js` (OriginTrail SDK).
 
-## Prerequisites
-- Node.js v16+
-- npm
+## Setup and Deployment
 
-## Quick Start
+### 1. Prerequisites
 
-1.  **Install Dependencies**
+- Node.js (v18 or higher)
+- Firebase CLI: `npm install -g firebase-tools`
+- A Firebase project.
+
+### 2. Configuration
+
+1.  **Firebase Project:**
+    - Create a new project in the [Firebase Console](https://console.firebase.google.com/).
+    - In your local project, update the `.firebaserc` file with your Firebase Project ID.
+    - In `client/src/firebase.js`, replace the placeholder `firebaseConfig` object with your actual web app's Firebase configuration. You can find this in your Firebase project settings.
+
+2.  **Environment Variables (Cloud Functions):**
+    You need to set the following secrets for the Cloud Functions. You can do this by running the following commands:
+
     ```bash
-    npm run install:all
+    firebase functions:config:set keys.gemini_api_key="YOUR_GEMINI_API_KEY"
+    firebase functions:config:set keys.private_key="YOUR_DKG_PRIVATE_KEY"
+    firebase functions:config:set keys.dkg_public_key="YOUR_DKG_PUBLIC_KEY"
     ```
 
-2.  **Start Development Server**
-    ```bash
-    npm run dev
-    ```
-    - Frontend: http://localhost:5173
-    - Backend: http://localhost:4000
+### 3. Seeding the Database
 
-3.  **Run Agent Guard Demo (CLI)**
+Before you can use the application, you need to seed the Firestore database with the initial bounty data.
+
+1.  **Set up Application Default Credentials:**
+    You need to authenticate with Google Cloud. The easiest way is to use the gcloud CLI:
     ```bash
-    node server/agent_guard.js
+    gcloud auth application-default login
     ```
 
-## Configuration
-A `.env` file in `server/` manages configuration.
-- `SIMULATE_DKG_PUBLISH=true` allows running without DKG keys.
-- `AI_PROVIDER=mock` allows running without OpenAI keys.
+2.  **Run the Seed Script:**
+    From the root of the project, run the following command:
+    ```bash
+    node functions/seedDatabase.js
+    ```
 
-## Demo Flow
-1. Open the Web UI.
-2. Select "Lagos-Abuja Tunnel" from the dropdown.
-3. Click "Run Discrepancy Check".
-4. Observe the Red/Yellow flags.
-5. Stake tokens and click "Mint Truth Patch".
-6. Switch to "Agent Guard" tab or run `node server/agent_guard.js` to see the protection in action.
+### 4. Deployment
+
+To deploy the entire application (both hosting and functions), run the following command from the root of the project:
+
+```bash
+# Install dependencies for both client and functions
+npm install --prefix client
+npm install --prefix functions
+
+# Build the client
+npm run build --prefix client
+
+# Deploy to Firebase
+firebase deploy
+```
+
+## How It Works
+
+### Firestore Collections
+
+-   `bounties`: Stores the bounty information, including the topic, reward, and the "Grok" text to be verified.
+-   `community_notes`: Stores the results of the discrepancy analysis, including the DKG asset ID.
+
+### Firebase Cloud Functions
+
+-   `fetchConsensus`: Fetches consensus information from Wikipedia and (for medical topics) from a Gemini-powered PubMed summarization.
+-   `analyzeDiscrepancy`: Uses the Gemini 1.5 Pro model to compare the "suspect" text with the consensus text and identify discrepancies.
+-   `mintCommunityNote`: Mints a "Community Note" to the OriginTrail DKG and saves the result to the `community_notes` collection.
+-   `agentGuard`: A "firewall" that checks if a given question or topic is flagged by a Community Note.
