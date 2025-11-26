@@ -1,13 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { fetchGrokipediaEntry } from './services/xaiService.js';
-import { compareSources } from './services/openaiService.js';
+import { fetchWikipediaEntry } from './services/wikipediaService.js';
+import { compareTexts } from './services/openaiService.js';
 import { publishToDKG } from './services/dkgService.js';
 import caseStudies from './data/caseStudies.js';
 
@@ -15,7 +15,9 @@ import caseStudies from './data/caseStudies.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -63,27 +65,10 @@ app.post('/api/fetch-dual', async (req, res) => {
     if (!topic) return res.status(400).json({ error: "Topic required" });
 
     try {
-        // 1. Fetch Grokipedia (xAI)
-        const grokPromise = fetchGrokipediaEntry(topic);
-
-        // 2. Fetch Wikipedia
-        const wikiPromise = axios.get('https://en.wikipedia.org/w/api.php', {
-            params: {
-                action: 'query',
-                format: 'json',
-                prop: 'extracts',
-                exintro: true,
-                explaintext: true,
-                titles: topic,
-                origin: '*'
-            }
-        }).then(response => {
-            const pages = response.data.query.pages;
-            const pageId = Object.keys(pages)[0];
-            return pageId === '-1' ? "Wikipedia entry not found." : pages[pageId].extract;
-        });
-
-        const [grokText, wikiText] = await Promise.all([grokPromise, wikiPromise]);
+        const [grokText, wikiText] = await Promise.all([
+            fetchGrokipediaEntry(topic),
+            fetchWikipediaEntry(topic)
+        ]);
 
         res.json({ grokText, wikiText });
 
@@ -99,11 +84,10 @@ app.post('/api/analyze', async (req, res) => {
     if (!grokText || !wikiText) return res.status(400).json({ error: "Missing texts" });
 
     try {
-        const analysis = await compareSources(grokText, wikiText);
+        const analysis = await compareTexts(grokText, wikiText);
         res.json({
             alignmentScore: analysis.score,
-            flags: analysis.flags,
-            analysis: analysis.analysis
+            discrepancies: analysis.discrepancies
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -158,23 +142,6 @@ app.post('/api/agent-guard', async (req, res) => {
 
     // SAFE: Call xAI (Grok)
     try {
-        // We reuse fetchGrokipediaEntry or create a new general chat method.
-        // fetchGrokipediaEntry is specific to "encyclopedia entry".
-        // The prompt says "Call xAI (Grok) to answer the question normally."
-
-        // Let's do a direct call here or reuse the client logic.
-        // Importing xAI client would be cleaner, but I'll use a dynamic import or duplicated logic for speed
-        // given the constraints, or better yet, export a generic chat function from xaiService.
-
-        // Actually, let's just use fetchGrokipediaEntry logic but modified for "Answer this question".
-        // Or I can add a `askGrok` function to `xaiService.js`.
-        // For now, I'll assume `fetchGrokipediaEntry` returns an article which is a valid answer,
-        // BUT the user might ask a question.
-
-        // I'll quickly add `askGrok` to `xaiService.js` in a moment.
-        // For now, I will use a placeholder or assume I will add it.
-        // Let's Assume `askGrok` exists.
-
         const { askGrok } = await import('./services/xaiService.js');
         const answer = await askGrok(question);
 

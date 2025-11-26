@@ -1,7 +1,9 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
 let openai = null;
 
@@ -13,30 +15,23 @@ if (process.env.OPENAI_API_KEY) {
   console.warn("OPENAI_API_KEY not found. Comparator Service will fail if called.");
 }
 
-export const compareSources = async (grokText, wikiText) => {
+export const compareTexts = async (grokText, wikiText) => {
   if (!openai) {
     throw new Error("OPENAI_API_KEY is missing.");
   }
 
-  const prompt = `
-    Compare Source A (Grokipedia) vs Source B (Wikipedia).
-    Source A: "${grokText}"
-    Source B: "${wikiText}"
-
-    Identify factual errors, omissions, or bias in Source A.
-    Return JSON: { score: number (0-100), analysis: string, flags: [{ type: 'Hallucination'|'Bias', quote: string }] }.
-  `;
+  const userPrompt = `Source A (Grok): "${grokText}"\n\nSource B (Wiki): "${wikiText}"`;
 
   try {
     const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
       messages: [
         {
-            role: "system",
-            content: "You are a Discrepancy Engine. Compare Source A (Grokipedia) vs Source B (Wikipedia). Identify factual errors, omissions, or bias in Source A. Return JSON: { score: number (0-100), analysis: string, flags: [{ type: 'Hallucination'|'Bias', quote: string }] }."
+          role: "system",
+          content: "Compare Source A (Grok) vs Source B (Wiki). Return JSON with a 'score' (0-100) and specific 'discrepancies' (Hallucination, Omission, Bias)."
         },
-        { role: "user", content: prompt }
+        { role: "user", content: userPrompt }
       ],
-      model: "gpt-4-turbo-preview", // Or gpt-4o, using a capable model for JSON output
       response_format: { type: "json_object" },
     });
 
