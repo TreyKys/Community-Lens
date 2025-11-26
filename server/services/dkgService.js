@@ -28,7 +28,7 @@ if (process.env.DKG_PRIVATE_KEY && process.env.SIMULATE_DKG_PUBLISH !== 'true') 
     console.log("DKG Client not initialized (Simulation Mode or missing keys).");
 }
 
-export const publishToDKG = async (claim, analysis, stakeAmount) => {
+export const mintCommunityNote = async (data) => {
   const isSimulation = process.env.SIMULATE_DKG_PUBLISH === 'true' || !dkg;
 
   if (isSimulation) {

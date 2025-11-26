@@ -1,20 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-import { fetchGrokipediaEntry } from './services/xaiService.js';
-import { fetchWikipediaEntry } from './services/wikipediaService.js';
-import { compareTexts } from './services/openaiService.js';
-import { publishToDKG } from './services/dkgService.js';
-import caseStudies from './data/caseStudies.js';
+import { fetchGrokEntry, askGrok } from './services/xaiService.js';
+import { fetchConsensus } from './services/consensusService.js';
+import { analyzeDiscrepancy } from './services/analysisService.js';
+import { mintCommunityNote } from './services/dkgService.js';
 
-// Setup __dirname for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Correctly import JSON
+const bounties = JSON.parse(fs.readFileSync('./data/bounties.json', 'utf-8'));
 
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
@@ -23,142 +18,111 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(cors()); // Enable CORS for all routes (including Netlify frontend)
+app.use(cors());
 app.use(express.json());
 
-// Poison Pills Storage (Simple JSON file persistence)
-const POISON_PILLS_FILE = path.join(__dirname, 'poison_pills.json');
-
-// Initialize poison pills file if not exists
-if (!fs.existsSync(POISON_PILLS_FILE)) {
-    fs.writeFileSync(POISON_PILLS_FILE, JSON.stringify([], null, 2));
-}
-
-const getPoisonPills = () => {
-    try {
-        const data = fs.readFileSync(POISON_PILLS_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (err) {
-        console.error("Error reading poison pills:", err);
-        return [];
-    }
-};
-
-const savePoisonPill = (pill) => {
-    const pills = getPoisonPills();
-    pills.push(pill);
-    fs.writeFileSync(POISON_PILLS_FILE, JSON.stringify(pills, null, 2));
-};
+// HYBRID STORAGE: Initialize poisonPills with Seed Data
+let poisonPills = [
+    { topic: "Malaria Vaccine R21", status: "BLOCKED", assetId: "did:dkg:otp:2043/0xSeed1" },
+    { topic: "Lagos-Abuja Tunnel", status: "BLOCKED", assetId: "did:dkg:otp:2043/0xSeed2" },
+    { topic: "Climate Change", status: "BLOCKED", assetId: "did:dkg:otp:2043/0xSeed3" }
+];
 
 // Health Check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// GET /api/cases: Return seed data
-app.get('/api/cases', (req, res) => {
-  res.json(caseStudies);
+// GET /api/bounties: Return list of bounties
+app.get('/api/bounties', (req, res) => {
+  res.json(bounties);
 });
 
-// POST /api/fetch-dual: Concurrent Fetch
-app.post('/api/fetch-dual', async (req, res) => {
+// POST /api/fetch-grok: Calls xaiService
+app.post('/api/fetch-grok', async (req, res) => {
     const { topic } = req.body;
-    if (!topic) return res.status(400).json({ error: "Topic required" });
+    if (!topic) return res.status(400).json({ error: "Topic is required" });
 
     try {
-        const [grokText, wikiText] = await Promise.all([
-            fetchGrokipediaEntry(topic),
-            fetchWikipediaEntry(topic)
-        ]);
-
-        res.json({ grokText, wikiText });
-
+        const result = await fetchGrokEntry(topic);
+        res.json(result);
     } catch (error) {
-        // Log the full, detailed error object
-        console.error("Detailed Dual Fetch Error:", error);
-        res.status(500).json({
-            error: "Failed to fetch sources.",
-            // Also send back the specific error message if available
-            details: error.message
-        });
+        console.error("Fetch Grok Error:", error);
+        res.status(500).json({ error: "Failed to fetch from Grokipedia." });
     }
 });
 
-// POST /api/analyze: Compare Sources (Judge)
+// POST /.api/fetch-consensus: Calls consensusService
+app.post('/api/fetch-consensus', async (req, res) => {
+    const { topic, mode } = req.body; // mode can be 'general' or 'medical'
+    if (!topic) return res.status(400).json({ error: "Topic is required" });
+
+    try {
+        const consensusText = await fetchConsensus(topic, mode || 'general');
+        res.json({ consensusText });
+    } catch (error) {
+        console.error("Fetch Consensus Error:", error);
+        res.status(500).json({ error: "Failed to fetch consensus." });
+    }
+});
+
+// POST /api/analyze: Calls analysisService
 app.post('/api/analyze', async (req, res) => {
-    const { grokText, wikiText } = req.body;
-    if (!grokText || !wikiText) return res.status(400).json({ error: "Missing texts" });
+    const { suspectText, consensusText, mode } = req.body;
+    if (!suspectText || !consensusText) return res.status(400).json({ error: "Both suspect and consensus texts are required" });
 
     try {
-        const analysis = await compareTexts(grokText, wikiText);
-        res.json({
-            alignmentScore: analysis.score,
-            discrepancies: analysis.discrepancies
-        });
+        const analysis = await analyzeDiscrepancy(suspectText, consensusText, mode);
+        res.json(analysis);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error("Analysis Error:", error);
+        res.status(500).json({ error: "Failed to analyze texts." });
     }
 });
 
-// POST /api/publish: The Poison Pill
+// POST /api/publish: Calls dkgService, then adds to poisonPills
 app.post('/api/publish', async (req, res) => {
-    const { claim, analysis, stakeAmount } = req.body;
-    // claim: { topic, grokText }
+    const { topic, analysis, data } = req.body;
+    if (!topic || !analysis || !data) return res.status(400).json({ error: "Missing required data for publishing" });
 
     try {
-        // 1. Publish to DKG
-        const dkgResult = await publishToDKG(claim, analysis, stakeAmount);
+        const dkgResult = await mintCommunityNote(data);
 
-        // 2. Save to Poison Pills (The Firewall Ruleset)
-        if (dkgResult.status === 'success') {
-            const pill = {
-                topic: claim.topic,
-                assetId: dkgResult.ual,
-                score: analysis.alignmentScore,
-                timestamp: new Date().toISOString()
-            };
-            savePoisonPill(pill);
-        }
+        // Add to the active poisonPills array in memory
+        const newPill = {
+            topic: topic,
+            status: "BLOCKED",
+            assetId: dkgResult.ual
+        };
+        poisonPills.push(newPill);
 
-        res.json(dkgResult);
+        res.json({ assetId: dkgResult.ual });
     } catch (error) {
         console.error("Publish Error:", error);
-        res.status(500).json({ error: "Failed to publish/mint." });
+        res.status(500).json({ error: "Failed to mint community note." });
     }
 });
 
-// POST /api/agent-guard: The Real Agent
+// POST /api/agent-guard: Checks if topic exists in poisonPills
 app.post('/api/agent-guard', async (req, res) => {
     const { question } = req.body;
-    if (!question) return res.status(400).json({ error: "Question required" });
+    if (!question) return res.status(400).json({ error: "Question is required" });
 
-    const pills = getPoisonPills();
-
-    // Check if question matches a blocked topic
-    // Simple substring match for this demo
-    const blockedPill = pills.find(p => question.toLowerCase().includes(p.topic.toLowerCase()));
+    const blockedPill = poisonPills.find(p => question.toLowerCase().includes(p.topic.toLowerCase()));
 
     if (blockedPill) {
-        // BLOCKED
-        return res.json({
-            blocked: true,
-            reason: `Community Lens Asset [${blockedPill.assetId}] flags this topic as misinformation. Score: ${blockedPill.score}/100.`
-        });
-    }
-
-    // SAFE: Call xAI (Grok)
-    try {
-        const { askGrok } = await import('./services/xaiService.js');
-        const answer = await askGrok(question);
-
         res.json({
-            blocked: false,
-            answer: answer
+            blocked: true,
+            message: `⛔ BLOCKED: Community Note [${blockedPill.assetId}] flags this topic.`
         });
-
-    } catch (error) {
-        console.error("Agent Guard Error:", error);
-        res.status(500).json({ error: "Agent brain failed." });
+    } else {
+        try {
+            const answer = await askGrok(question);
+            res.json({ blocked: false, message: answer });
+        } catch (error) {
+            console.error("Agent Guard Error:", error);
+            res.status(500).json({ error: "Agent brain failed." });
+        }
     }
 });
 

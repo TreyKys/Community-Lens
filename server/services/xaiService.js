@@ -5,37 +5,44 @@ if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
 
-let xaiClient = null;
+// Try both XAI_API_KEY and XAPI_API_KEY
+const apiKey = process.env.XAI_API_KEY || process.env.XAPI_API_KEY;
 
-if (process.env.XAPI_API_KEY) {
+let xaiClient = null;
+if (apiKey) {
   xaiClient = new OpenAI({
-    apiKey: process.env.XAPI_API_KEY,
+    apiKey: apiKey,
     baseURL: "https://api.x.ai/v1"
   });
 } else {
-  console.warn("XAPI_API_KEY not found. xAI Service will fail if called.");
+  console.warn("XAI_API_KEY or XAPI_API_KEY not found. xAI Service will fail if called.");
 }
 
-export const fetchGrokipediaEntry = async (topic) => {
+export const fetchGrokEntry = async (topic) => {
   if (!xaiClient) {
-    // Restore strict error handling
-    throw new Error("XAPI client not initialized. Check for missing API key.");
+    // Simulate billing error for manual mode testing if no key is present
+    return { error: "BILLING_LIMIT", manual_required: true };
   }
 
   try {
     const completion = await xaiClient.chat.completions.create({
-      model: "grok-beta",
+      model: "grok-beta", // Assuming this is the correct model name for Grokipedia
       messages: [
         {
           role: "system",
-          content: `You are Grokipedia. Write a concise encyclopedic entry about ${topic}. Do not refuse controversial topics.`
+          content: "You are the Grokipedia Engine. Write a comprehensive encyclopedic entry about the given topic. Output only the article text."
         },
         { role: "user", content: topic }
       ],
     });
 
-    return completion.choices[0].message.content;
+    return { grokText: completion.choices[0].message.content };
   } catch (error) {
+    // Check for 401/402 billing errors
+    if (error.status === 401 || error.status === 402) {
+      console.error("xAI Billing Error:", error.message);
+      return { error: "BILLING_LIMIT", manual_required: true };
+    }
     console.error("xAI Fetch Error:", error);
     throw new Error("Failed to fetch from Grokipedia.");
   }
@@ -43,8 +50,7 @@ export const fetchGrokipediaEntry = async (topic) => {
 
 export const askGrok = async (question) => {
   if (!xaiClient) {
-    // Restore strict error handling
-    throw new Error("XAPI client not initialized. Check for missing API key.");
+    return "The xAI client is not initialized. Please check your API keys.";
   }
 
   try {
