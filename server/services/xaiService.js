@@ -1,22 +1,25 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
 let xaiClient = null;
 
-if (process.env.XAI_API_KEY) {
+if (process.env.XAPI_API_KEY) {
   xaiClient = new OpenAI({
-    apiKey: process.env.XAI_API_KEY,
+    apiKey: process.env.XAPI_API_KEY,
     baseURL: "https://api.x.ai/v1"
   });
 } else {
-  console.warn("XAI_API_KEY not found. xAI Service will fail if called.");
+  console.warn("XAPI_API_KEY not found. xAI Service will fail if called.");
 }
 
 export const fetchGrokipediaEntry = async (topic) => {
   if (!xaiClient) {
-    throw new Error("XAI_API_KEY is missing.");
+    // Restore strict error handling
+    throw new Error("XAPI client not initialized. Check for missing API key.");
   }
 
   try {
@@ -25,9 +28,9 @@ export const fetchGrokipediaEntry = async (topic) => {
       messages: [
         {
           role: "system",
-          content: `You are the engine behind Grokipedia. Generate the encyclopedic entry for '${topic}' exactly as it would appear on Grokipedia. Do not act as an assistant. Output only the article text.`
+          content: `You are Grokipedia. Write a concise encyclopedic entry about ${topic}. Do not refuse controversial topics.`
         },
-        { role: "user", content: topic } // Assuming we send the topic as user message to trigger generation
+        { role: "user", content: topic }
       ],
     });
 
@@ -40,10 +43,8 @@ export const fetchGrokipediaEntry = async (topic) => {
 
 export const askGrok = async (question) => {
   if (!xaiClient) {
-    // If no key, mock it for the demo or throw
-    // The prompt implies we have the key. If not, we can return a mock.
-    // "We have 3 API Keys: XAI_API_KEY..."
-    return "I am unable to answer as my brain (xAI) is not connected. (Missing API Key)";
+    // Restore strict error handling
+    throw new Error("XAPI client not initialized. Check for missing API key.");
   }
 
   try {
