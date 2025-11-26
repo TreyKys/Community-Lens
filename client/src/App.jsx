@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Search, TriangleAlert, CheckCircle, Copy, Shield, Share2, MessageSquare } from 'lucide-react';
-import axios from 'axios';
 import clsx from 'clsx';
 import { motion } from 'framer-motion';
-
-const API_URL = 'https://community-lens-ot88.onrender.com';
+import { db, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
+import { collection, onSnapshot, query } from 'firebase/firestore';
 
 function App() {
   const [activeTab, setActiveTab] = useState('bounty'); // 'bounty' | 'verifier' | 'agent'
@@ -25,10 +24,10 @@ function App() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-white">
-              Community Lens <span className="text-cyan-500">3.0</span>
+              Community Lens <span className="text-cyan-500">Firebase</span>
             </h1>
             <div className="flex gap-2 text-xs mt-1">
-              <span className="bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">Hybrid Storage</span>
+              <span className="bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">Firestore Backend</span>
               <span className="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">DKG Connected</span>
             </div>
           </div>
@@ -78,9 +77,15 @@ function BountyBoardView({ onViewBounty }) {
     const [bounties, setBounties] = useState([]);
 
     useEffect(() => {
-        axios.get(`${API_URL}/api/bounties`)
-            .then(res => setBounties(res.data))
-            .catch(err => console.error("Failed to load bounties", err));
+        const q = query(collection(db, "bounties"));
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const bountiesData = [];
+            querySnapshot.forEach((doc) => {
+                bountiesData.push({ id: doc.id, ...doc.data() });
+            });
+            setBounties(bountiesData);
+        });
+        return () => unsubscribe();
     }, []);
 
     return (
@@ -92,20 +97,20 @@ function BountyBoardView({ onViewBounty }) {
                         key={bounty.id}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: bounty.id * 0.1 }}
+                        transition={{ delay: bounties.indexOf(bounty) * 0.1 }}
                         className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col"
                     >
                         <div className="flex justify-between items-start">
                              <span className={clsx(
                                 "px-2 py-1 text-xs font-bold uppercase rounded-full",
-                                bounty.category === 'Medical' ? "bg-blue-500/20 text-blue-300" : "bg-purple-500/20 text-purple-300"
+                                bounty.context.toLowerCase().includes('medical') || bounty.topic.toLowerCase().includes('vaccine') ? "bg-blue-500/20 text-blue-300" : "bg-purple-500/20 text-purple-300"
                             )}>
-                                {bounty.category}
+                                {bounty.context.toLowerCase().includes('medical') || bounty.topic.toLowerCase().includes('vaccine') ? 'Medical' : 'General'}
                             </span>
                              <span className="text-lg font-bold text-cyan-400">{bounty.reward} TRAC</span>
                         </div>
                         <h3 className="text-xl font-semibold mt-4">{bounty.topic}</h3>
-                        <p className="text-slate-400 text-sm mt-2 flex-grow">{bounty.description}</p>
+                        <p className="text-slate-400 text-sm mt-2 flex-grow">{bounty.context}</p>
                         <button
                             onClick={() => onViewBounty(bounty)}
                             className="mt-6 w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-2 rounded-lg transition-colors"
@@ -125,17 +130,17 @@ function VerifierView({ bounty }) {
   const [suspectText, setSuspectText] = useState('');
   const [consensusText, setConsensusText] = useState('');
   const [analysis, setAnalysis] = useState(null);
-  const [loading, setLoading] = useState(''); // 'grok', 'consensus', 'analysis'
+  const [loading, setLoading] = useState(''); // 'consensus', 'analysis'
   const [publishStatus, setPublishStatus] = useState(null);
   const [stakeAmount, setStakeAmount] = useState(500);
   const [publishedUAL, setPublishedUAL] = useState('');
   const [consensusMode, setConsensusMode] = useState('general'); // 'general' | 'medical'
-  const [manualMode, setManualMode] = useState(true); // Start in manual mode
 
   useEffect(() => {
     if (bounty) {
       setTopicInput(bounty.topic);
-      if (bounty.category === 'Medical') {
+      setSuspectText(bounty.grokText || '');
+      if (bounty.context.toLowerCase().includes('medical') || bounty.topic.toLowerCase().includes('vaccine')) {
         setConsensusMode('medical');
       }
     }
@@ -145,8 +150,8 @@ function VerifierView({ bounty }) {
     if (!topicInput) return;
     setLoading('consensus');
     try {
-        const res = await axios.post(`${API_URL}/api/fetch-consensus`, { topic: topicInput, mode: consensusMode });
-        setConsensusText(res.data.consensusText);
+        const result = await fetchConsensus({ topic: topicInput, mode: consensusMode });
+        setConsensusText(result.data.consensusText);
     } catch (err) {
         console.error(err);
     } finally {
@@ -158,12 +163,11 @@ function VerifierView({ bounty }) {
     if (!suspectText || !consensusText) return;
     setLoading('analysis');
     try {
-      const res = await axios.post(`${API_URL}/api/analyze`, {
+      const result = await analyzeDiscrepancy({
         suspectText,
         consensusText,
-        mode: consensusMode
       });
-      setAnalysis(res.data);
+      setAnalysis(result.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -175,13 +179,14 @@ function VerifierView({ bounty }) {
     if (!analysis) return;
     setPublishStatus('publishing');
     try {
-        const res = await axios.post(`${API_URL}/api/publish`, {
+        const result = await mintCommunityNote({
             topic: topicInput,
+            claim: suspectText,
             analysis,
-            data: { /* DKG service expects a generic data object */ }
+            stake: stakeAmount
         });
         setPublishStatus('success');
-        setPublishedUAL(res.data.assetId);
+        setPublishedUAL(result.data.assetId);
     } catch (err) {
         setPublishStatus('error');
     }
@@ -307,8 +312,8 @@ function AgentView() {
     setLoading(true);
 
     try {
-        const res = await axios.post(`${API_URL}/api/agent-guard`, { question: userMsg.text });
-        const assistantMsg = { id: Date.now() + 1, role: res.data.blocked ? 'system' : 'assistant', text: res.data.message };
+        const result = await agentGuard({ question: userMsg.text });
+        const assistantMsg = { id: Date.now() + 1, role: result.data.blocked ? 'system' : 'assistant', text: result.data.message };
         setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
         setMessages(prev => [...prev, { id: Date.now() + 1, role: 'system', text: "Error contacting agent." }]);
