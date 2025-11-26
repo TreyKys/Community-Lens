@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+console.log("XAI_API_KEY on load:", process.env.XAI_API_KEY ? "Loaded" : "Not Loaded");
+
 let xaiClient = null;
 
 if (process.env.XAI_API_KEY) {
