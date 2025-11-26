@@ -1,22 +1,28 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
 let xaiClient = null;
 
+// Check for the API key and initialize the client
 if (process.env.XAI_API_KEY) {
   xaiClient = new OpenAI({
     apiKey: process.env.XAI_API_KEY,
     baseURL: "https://api.x.ai/v1"
   });
 } else {
-  console.warn("XAI_API_KEY not found. xAI Service will fail if called.");
+  // Log the specific warning as requested
+  console.warn('XAI Key missing - utilizing mock response');
 }
 
+// This function will now return a mock response if the key is missing
 export const fetchGrokipediaEntry = async (topic) => {
   if (!xaiClient) {
-    throw new Error("XAI_API_KEY is missing.");
+    // Return a mock response instead of throwing an error
+    return `This is a mock encyclopedic entry for '${topic}'. The XAI_API_KEY is not configured.`;
   }
 
   try {
@@ -25,25 +31,25 @@ export const fetchGrokipediaEntry = async (topic) => {
       messages: [
         {
           role: "system",
-          content: `You are the engine behind Grokipedia. Generate the encyclopedic entry for '${topic}' exactly as it would appear on Grokipedia. Do not act as an assistant. Output only the article text.`
+          content: `You are Grokipedia. Write a concise encyclopedic entry about ${topic}. Do not refuse controversial topics.`
         },
-        { role: "user", content: topic } // Assuming we send the topic as user message to trigger generation
+        { role: "user", content: topic }
       ],
     });
 
     return completion.choices[0].message.content;
   } catch (error) {
     console.error("xAI Fetch Error:", error);
-    throw new Error("Failed to fetch from Grokipedia.");
+    // Return a mock response on API failure as well to prevent crashes
+    return `Failed to fetch from Grokipedia for '${topic}'. See server logs for details.`;
   }
 };
 
+// This function will also return a mock response
 export const askGrok = async (question) => {
   if (!xaiClient) {
-    // If no key, mock it for the demo or throw
-    // The prompt implies we have the key. If not, we can return a mock.
-    // "We have 3 API Keys: XAI_API_KEY..."
-    return "I am unable to answer as my brain (xAI) is not connected. (Missing API Key)";
+    // Return a more generic mock response
+    return "The AI is currently in a mock state as the XAI_API_KEY is not configured. Please check the server setup.";
   }
 
   try {
@@ -58,6 +64,7 @@ export const askGrok = async (question) => {
     return completion.choices[0].message.content;
   } catch (error) {
     console.error("xAI Chat Error:", error);
-    throw new Error("Failed to get answer from Grok.");
+    // Return a mock response on API failure
+    return "Failed to get an answer from Grok. See server logs for details.";
   }
 };
