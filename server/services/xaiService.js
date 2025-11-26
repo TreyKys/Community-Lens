@@ -1,64 +1,40 @@
 import OpenAI from 'openai';
-import dotenv from 'dotenv';
 
-if (process.env.NODE_ENV !== 'production') {
-  dotenv.config();
-}
-
-let xaiClient = null;
-
-if (process.env.XAPI_API_KEY) {
-  xaiClient = new OpenAI({
-    apiKey: process.env.XAPI_API_KEY,
-    baseURL: "https://api.x.ai/v1"
+function getXaiClient() {
+  if (!process.env.XAI_API_KEY) {
+    console.warn('XAI_API_KEY is not set. Simulating billing error.');
+    return null;
+  }
+  return new OpenAI({
+    baseURL: 'https://api.x.ai/v1',
+    apiKey: process.env.XAI_API_KEY,
   });
-} else {
-  console.warn("XAPI_API_KEY not found. xAI Service will fail if called.");
 }
 
-export const fetchGrokipediaEntry = async (topic) => {
-  if (!xaiClient) {
-    // Restore strict error handling
-    throw new Error("XAPI client not initialized. Check for missing API key.");
+export async function fetchGrokEntry(topic) {
+  const xai = getXaiClient();
+  if (!xai) {
+    return { error: 'BILLING_LIMIT', manual_required: true };
   }
 
   try {
-    const completion = await xaiClient.chat.completions.create({
-      model: "grok-beta",
+    const response = await xai.chat.completions.create({
+      model: 'grok-beta',
       messages: [
         {
-          role: "system",
-          content: `You are Grokipedia. Write a concise encyclopedic entry about ${topic}. Do not refuse controversial topics.`
+          role: 'system',
+          content: `You are the Grokipedia Engine. Write a comprehensive encyclopedic entry about ${topic}. Output only the article text.`,
         },
-        { role: "user", content: topic }
+        { role: 'user', content: topic },
       ],
     });
-
-    return completion.choices[0].message.content;
+    return { content: response.choices[0].message.content };
   } catch (error) {
-    console.error("xAI Fetch Error:", error);
-    throw new Error("Failed to fetch from Grokipedia.");
+    if (error.status === 402 || error.status === 401) {
+      console.error('XAI API Billing Error:', error.message);
+      return { error: 'BILLING_LIMIT', manual_required: true };
+    }
+    console.error('Error fetching Grok entry:', error);
+    throw new Error('Failed to fetch from Grokipedia');
   }
-};
-
-export const askGrok = async (question) => {
-  if (!xaiClient) {
-    // Restore strict error handling
-    throw new Error("XAPI client not initialized. Check for missing API key.");
-  }
-
-  try {
-    const completion = await xaiClient.chat.completions.create({
-      model: "grok-beta",
-      messages: [
-        { role: "system", content: "You are a helpful AI assistant." },
-        { role: "user", content: question }
-      ],
-    });
-
-    return completion.choices[0].message.content;
-  } catch (error) {
-    console.error("xAI Chat Error:", error);
-    throw new Error("Failed to get answer from Grok.");
-  }
-};
+}
