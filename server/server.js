@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+
+console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+console.log('Available Env Keys:', Object.keys(process.env));
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
