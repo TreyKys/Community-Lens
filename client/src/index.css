@@ -1,5 +1,7 @@
-/* Custom styles if needed, otherwise handled by Tailwind CDN */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
-  background-color: #0f172a; /* Fallback slate-900 */
-  color: white;
+  font-family: 'Roboto Mono', monospace;
 }

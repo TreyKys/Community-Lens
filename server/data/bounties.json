@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "topic": "Malaria Vaccine",
+    "category": "Medical",
+    "reward": "500 TRAC"
+  },
+  {
+    "id": 2,
+    "topic": "Lagos-Abuja Tunnel",
+    "category": "Political",
+    "reward": "500 TRAC"
+  },
+  {
+    "id": 3,
+    "topic": "Climate Change Consensus",
+    "category": "Medical",
+    "reward": "500 TRAC"
+  }
+]
