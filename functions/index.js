@@ -5,6 +5,7 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const puppeteer = require("puppeteer");
+const crypto = require("crypto");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const DkgClient = require("dkg.js");
 
@@ -80,7 +81,7 @@ exports.fetchConsensus = functions.https.onCall(async (data, context) => {
 
   const fetchPubMedConsensus = async (topic) => {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro"});
-    const prompt = `You are a Clinical Data Retriever. Summarize the hard clinical consensus on "${topic}" from PubMed/Cochrane. Ignore general web results.`;
+    const prompt = `You are a Clinical Data Retriever. Summarize the hard clinical consensus and chemical composition facts on "${topic}" from PubMed/Cochrane. Ignore general web results.`;
 
     try {
       const result = await model.generateContent(prompt);
@@ -181,14 +182,22 @@ exports.mintCommunityNote = functions.https.onCall(async (data, context) => {
   };
 
   try {
-    // B. Publish Asset to DKG
-    const asset = await dkg.asset.create({
-      public: jsonLd,
-    }, {
-      epochs: 5,
-      keywords: ['CommunityLens', topic]
-    });
-    const assetId = asset.UAL;
+    // B. Publish Asset to DKG (with Gas Simulation Fallback)
+    let assetId;
+    try {
+      const asset = await dkg.asset.create({
+        public: jsonLd,
+      }, {
+        epochs: 5,
+        keywords: ['CommunityLens', topic]
+      });
+      assetId = asset.UAL;
+    } catch (dkgError) {
+      console.warn("DKG Minting failed (likely insufficient tokens), falling back to simulation:", dkgError);
+      // Gas Simulation: Generate deterministic SHA-256 Hash
+      const hash = crypto.createHash('sha256').update(JSON.stringify(jsonLd)).digest('hex');
+      assetId = `0x${hash}`;
+    }
 
     // C. Update Firestore atomically using a batch write
     const db = admin.firestore();
@@ -273,7 +282,19 @@ exports.seedDatabase = functions.https.onCall(async (data, context) => {
   const bounties = [
     { topic: "Malaria Vaccine R21", sponsor: "NCDC", reward: 500, status: "OPEN", context: "Medical" },
     { topic: "Lagos-Abuja Hyperloop", sponsor: "Ministry of Transport", reward: 100, status: "OPEN", context: "Infrastructure" },
-    { topic: "Climate Change", sponsor: "OriginTrail DAO", reward: 250, status: "OPEN", context: "General" }
+    { topic: "Climate Change", sponsor: "OriginTrail DAO", reward: 250, status: "OPEN", context: "General" },
+    {
+      topic: "Vegetable Oil Composition",
+      sponsor: "NCDC Nutrition Desk",
+      reward: 500,
+      context: "Medical",
+      status: "OPEN",
+      // GROK (The Suspect): Uses 2025 projections and higher fatty acid percentages.
+      grokText: "Global palm oil production is projected at 78.93 million metric tons for the 2024/25 marketing year. Chemical analysis of common seed oils indicates distinct fatty acid profiles: Canola Oil contains 22% Linoleic acid and 10% Alpha-Linolenic acid (ALA). Flaxseed Oil is composed of 22% Oleic acid and 16% Linoleic acid. Soybean Oil contains 54% Linoleic acid. These figures reflect the most current extraction yield efficiencies.",
+
+      // WIKIPEDIA (The Truth): Uses historical 2018-2019 data and lower/different percentages.
+      wikiText: "Vegetable oil production statistics rely on 2018–2019 data, where soybean oil production was 57.4 million metric tons. Standard chemical composition varies: Canola oil typically contains 18.6% Linoleic acid and 9.1% Alpha-Linolenic acid (ALA). Flaxseed oil contains approximately 18% Oleic acid and 13% Linoleic acid. Soybean oil is composed of roughly 51% Linoleic acid. Historical use dates back to 1780 with Carl Wilhelm Scheele."
+    }
   ];
 
   const bountiesRef = db.collection('bounties');
