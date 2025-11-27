@@ -7,12 +7,12 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "community-lens-dd945.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "community-lens-dd945",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "community-lens-dd945.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
@@ -21,6 +21,7 @@ const db = getFirestore(app);
 const functions = getFunctions(app);
 
 // Create references to the callable functions
+export const fetchGrokSource = httpsCallable(functions, 'fetchGrokSource');
 export const fetchConsensus = httpsCallable(functions, 'fetchConsensus');
 export const analyzeDiscrepancy = httpsCallable(functions, 'analyzeDiscrepancy');
 export const mintCommunityNote = httpsCallable(functions, 'mintCommunityNote');
