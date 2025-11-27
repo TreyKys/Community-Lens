@@ -21,6 +21,7 @@ const db = getFirestore(app);
 const functions = getFunctions(app);
 
 // Create references to the callable functions
+export const fetchGrokSource = httpsCallable(functions, 'fetchGrokSource');
 export const fetchConsensus = httpsCallable(functions, 'fetchConsensus');
 export const analyzeDiscrepancy = httpsCallable(functions, 'analyzeDiscrepancy');
 export const mintCommunityNote = httpsCallable(functions, 'mintCommunityNote');
