@@ -7,12 +7,12 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "community-lens-dd945.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "community-lens-dd945",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "community-lens-dd945.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
@@ -20,10 +20,32 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const functions = getFunctions(app);
 
-// Create references to the callable functions
-export const fetchConsensus = httpsCallable(functions, 'fetchConsensus');
-export const analyzeDiscrepancy = httpsCallable(functions, 'analyzeDiscrepancy');
-export const mintCommunityNote = httpsCallable(functions, 'mintCommunityNote');
-export const agentGuard = httpsCallable(functions, 'agentGuard');
+// Helper to call onRequest functions acting as callables
+const callFunction = async (name, data) => {
+  const projectId = firebaseConfig.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/${name}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data }), // Wrap data to match httpsCallable expectations or backend logic
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Error ${response.status}: ${errorText}`);
+  }
+
+  return response.json(); // Backend returns { data: ... }
+};
+
+// Export wrappers that match the httpsCallable signature (returning a Promise that resolves to { data: ... })
+export const fetchGrokSource = (data) => callFunction('fetchGrokSource', data);
+export const fetchConsensus = (data) => callFunction('fetchConsensus', data);
+export const analyzeDiscrepancy = (data) => callFunction('analyzeDiscrepancy', data);
+export const mintCommunityNote = (data) => callFunction('mintCommunityNote', data);
+export const agentGuard = (data) => callFunction('agentGuard', data);
 
 export { db };
