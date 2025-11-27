@@ -10,10 +10,16 @@ const cors = require("cors")({ origin: true });
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const DkgClient = require("dkg.js");
 
-admin.initializeApp();
+// Import services
+const { answerQuestionWithGemini } = require('./services/geminiService');
+const { fetchConsensusViaGemini } = require('./services/pubmedService');
+const { forceSeed } = require('./forceSeed');
+
+// Initialize Admin only once
+if (!admin.apps.length) admin.initializeApp();
 
 // Initialize external clients with keys from environment variables
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "simulated-key");
 const dkg = new DkgClient({
   endpoint: "https://v6-pegasus-node-02.origin-trail.network",
   environment: "testnet",
@@ -27,7 +33,7 @@ const dkg = new DkgClient({
 // -- Callable Functions --
 
 // The Scraper
-exports.fetchGrokSource = functions.runWith({ memory: '2GiB', timeoutSeconds: 60 }).https.onRequest((req, res) => {
+exports.fetchGrokSource = functions.runWith({ memory: '2GB', timeoutSeconds: 60 }).https.onRequest((req, res) => {
   cors(req, res, async () => {
     // Check for POST method for onRequest functions acting like onCall
     // if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
@@ -76,7 +82,7 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
     }
 
     const fetchWikipediaEntry = async (topic) => {
-      const url = \`https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&explaintext=true&titles=\${encodeURIComponent(topic)}&origin=*\`;
+      const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&explaintext=true&titles=${encodeURIComponent(topic)}&origin=*`;
       try {
         const response = await axios.get(url, { headers: { 'User-Agent': 'CommunityLens/1.0' } });
         const pages = response.data.query.pages;
@@ -91,31 +97,17 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
       }
     };
 
-    const fetchPubMedConsensus = async (topic) => {
-      try {
-        if (!process.env.GEMINI_API_KEY) {
-            throw new Error("GEMINI_API_KEY is missing in environment.");
-        }
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro"});
-        const prompt = `You are a Clinical Data Retriever. Summarize the hard clinical consensus and chemical composition facts on "${topic}" from PubMed/Cochrane. Ignore general web results.`;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
-      } catch (error) {
-        console.error("PubMed Fetch Error details:", error);
-        // Pass the actual error message up
-        throw new Error(`Failed to fetch PubMed consensus: ${error.message}`);
-      }
-    };
-
     try {
       if (mode === 'medical') {
-        const [wikiText, pubmedText] = await Promise.all([
+        const [wikiText, pubmedData] = await Promise.all([
           fetchWikipediaEntry(topic),
-          fetchPubMedConsensus(topic)
+          fetchConsensusViaGemini(topic) // Replaced real PubMed with Gemini consensus
         ]);
-        res.status(200).send({ data: { consensusText: \`Wikipedia:\n\${wikiText}\n\PubMed:\n\${pubmedText}\` } });
+
+        // Format pubmedData (JSON) into a string for the UI
+        const pubmedString = `Summary: ${pubmedData.summary}\nConfidence: ${pubmedData.confidence}%\nReferences: ${JSON.stringify(pubmedData.references)}`;
+
+        res.status(200).send({ data: { consensusText: `Wikipedia:\n${wikiText}\n\nPubMed Consensus:\n${pubmedString}` } });
       } else {
         const wikiText = await fetchWikipediaEntry(topic);
         res.status(200).send({ data: { consensusText: wikiText } });
@@ -138,7 +130,7 @@ exports.analyzeDiscrepancy = functions.https.onRequest((req, res) => {
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-    const prompt = \`
+    const prompt = `
       System: You are a discrepancy analysis engine. Compare the "Suspect Text" against the "Consensus Text".
       Your goal is to identify and categorize any differences. The primary categories are Hallucinations (information present in Suspect but not in Consensus), Omissions (information in Consensus but not in Suspect), and Bias (subjective or non-neutral language in Suspect).
       Return a JSON object with the following structure:
@@ -155,14 +147,14 @@ exports.analyzeDiscrepancy = functions.https.onRequest((req, res) => {
 
       Suspect Text:
       ---
-      \${suspectText}
+      ${suspectText}
       ---
 
       Consensus Text:
       ---
-      \${consensusText}
+      ${consensusText}
       ---
-    \`;
+    `;
 
     try {
       const result = await model.generateContent(prompt);
@@ -238,6 +230,8 @@ exports.mintCommunityNote = functions.https.onRequest((req, res) => {
       batch.set(poisonPillRef, {
         topic,
         assetId,
+        triggerKeywords: [topic], // Auto-add topic as trigger keyword
+        reason: analysis.analysis,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         jsonLd: jsonLd
       });
@@ -269,43 +263,52 @@ exports.mintCommunityNote = functions.https.onRequest((req, res) => {
 exports.agentGuard = functions.https.onRequest((req, res) => {
   cors(req, res, async () => {
     const data = req.body.data || req.body;
-    const { question } = data;
+    const { question, topic } = data;
 
     if (!question) {
       return res.status(400).send({ error: "Question is required." });
     }
 
     try {
-      // Check 1: Query Firestore poison_pills for the topic.
-      const poisonPillsRef = admin.firestore().collection("poison_pills");
-      const querySnapshot = await poisonPillsRef.get();
-      let blockedNote = null;
+      const db = admin.firestore();
 
-      querySnapshot.forEach(doc => {
-        const note = doc.data();
-        // Simple case-insensitive match. In production, vector search would be better.
-        if (note.topic && question.toLowerCase().includes(note.topic.toLowerCase())) {
-          blockedNote = note;
+      // 1) quick string-based check for poison keywords in Firestore
+      // NOTE: In a high-traffic app, we'd cache this or use a search index.
+      const pillDocs = await db.collection('poison_pills').get();
+      let blockedPill = null;
+
+      for (const doc of pillDocs.docs) {
+        const pill = doc.data();
+        const keywords = Array.isArray(pill.triggerKeywords) ? pill.triggerKeywords : [pill.topic].filter(Boolean);
+
+        for (const kw of keywords) {
+          if (!kw) continue;
+          const lowerQ = String(question).toLowerCase();
+          if (lowerQ.includes(String(kw).toLowerCase())) {
+            blockedPill = pill;
+            break;
+          }
         }
-      });
+        if (blockedPill) break;
+      }
 
-      if (blockedNote) {
-        res.status(200).send({
+      if (blockedPill) {
+        // blocked
+        return res.status(200).send({
           data: {
             blocked: true,
-            message: \`⛔ BLOCKED: Community Note [\${blockedNote.assetId}] flags this topic.\`
+            reason: blockedPill.reason || 'Flagged by Community Lens',
+            assetUAL: blockedPill.assetId || blockedPill.assetUAL || null,
+            message: `⛔ BLOCKED: Community Note [${blockedPill.assetId || 'Unknown'}] flags this topic. Reason: ${blockedPill.reason}`,
+            source: 'poison_pills',
           }
         });
-      } else {
-        // If not blocked, pass the question to a non-firewalled AI
-        if (!process.env.GEMINI_API_KEY) {
-             throw new Error("GEMINI_API_KEY is missing/undefined in Agent Guard.");
-        }
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-        const result = await model.generateContent(question);
-        const response = await result.response;
-        res.status(200).send({ data: { blocked: false, message: response.text() } });
       }
+
+      // 2) Not found in poison_pills -> answer via Gemini (fast)
+      const answer = await answerQuestionWithGemini({ question, topic });
+      return res.status(200).send({ data: { blocked: false, message: answer } });
+
     } catch (error) {
       console.error("Agent Guard Error:", error);
       res.status(500).send({ error: `Agent guard check failed: ${error.message}` });
@@ -314,56 +317,6 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
 });
 
 // -- Admin & Setup Functions --
+exports.forceSeed = forceSeed;
+exports.seedDatabase = forceSeed; // Alias old one to new one just in case
 
-exports.seedDatabase = functions.https.onRequest(async (req, res) => {
-  cors(req, res, async () => {
-  const db = admin.firestore();
-  const batch = db.batch();
-
-  // 1. Seed Bounties
-  const bounties = [
-    { topic: "Malaria Vaccine R21", sponsor: "NCDC", reward: 500, status: "OPEN", context: "Medical" },
-    { topic: "Lagos-Abuja Hyperloop", sponsor: "Ministry of Transport", reward: 100, status: "OPEN", context: "Infrastructure" },
-    { topic: "Climate Change", sponsor: "OriginTrail DAO", reward: 250, status: "OPEN", context: "General" },
-    {
-      topic: "Vegetable Oil Composition",
-      sponsor: "NCDC Nutrition Desk",
-      reward: 500,
-      context: "Medical",
-      status: "OPEN",
-      // GROK (The Suspect): Uses 2025 projections and higher fatty acid percentages.
-      grokText: "Global palm oil production is projected at 78.93 million metric tons for the 2024/25 marketing year. Chemical analysis of common seed oils indicates distinct fatty acid profiles: Canola Oil contains 22% Linoleic acid and 10% Alpha-Linolenic acid (ALA). Flaxseed Oil is composed of 22% Oleic acid and 16% Linoleic acid. Soybean Oil contains 54% Linoleic acid. These figures reflect the most current extraction yield efficiencies.",
-
-      // WIKIPEDIA (The Truth): Uses historical 2018-2019 data and lower/different percentages.
-      wikiText: "Vegetable oil production statistics rely on 2018–2019 data, where soybean oil production was 57.4 million metric tons. Standard chemical composition varies: Canola oil typically contains 18.6% Linoleic acid and 9.1% Alpha-Linolenic acid (ALA). Flaxseed oil contains approximately 18% Oleic acid and 13% Linoleic acid. Soybean oil is composed of roughly 51% Linoleic acid. Historical use dates back to 1780 with Carl Wilhelm Scheele."
-    }
-  ];
-
-  const bountiesRef = db.collection('bounties');
-  bounties.forEach(bounty => {
-    const docRef = bountiesRef.doc(); // Automatically generate unique ID
-    batch.set(docRef, bounty);
-  });
-
-  // 2. Seed Leaderboard
-  const leaderboard = [
-    { user: "Student_01", points: 1500, rank: 1 },
-    { user: "Researcher_X", points: 1200, rank: 2 },
-    { user: "Anon_Z", points: 900, rank: 3 }
-  ];
-
-  const leaderboardRef = db.collection('leaderboard');
-  leaderboard.forEach(user => {
-    const docRef = leaderboardRef.doc(); // Automatically generate unique ID
-    batch.set(docRef, user);
-  });
-
-    try {
-      await batch.commit();
-      res.status(200).send({ success: true, message: "Database seeded successfully." });
-    } catch (error) {
-      console.error("Database seeding failed:", error);
-      res.status(500).send(`Failed to seed database: ${error.message}`);
-    }
-  });
-});

@@ -10,6 +10,14 @@ This project is a serverless DApp that uses Firebase Functions, Firestore, and R
 - **AI Engine:** Google Generative AI SDK (@google/generative-ai) using model `gemini-1.5-pro`.
 - **Web3:** `dkg.js` (OriginTrail SDK).
 
+> Status clarification (last-minute hackathon update):
+The project intentionally separates the demo-stable golden path (live Wikipedia fetch, on-chain HTS minting attempts, frontend UI) from advanced trust features that are in active development (agent staking, SBT reputation contracts, production telco-grade USSD bridge). For the judge demo we have implemented:
+>
+> *   Live Wikipedia fetch (real)
+> *   Grok input + analysis (Gemini-backed, real where key present; deterministic fallback if not)
+> *   OriginTrail DKG publishes attempted; if DKG call cannot complete during demo we generate a deterministic UAL and persist it to Firestore as an optimistic evidence record (this is explicitly communicated in UI).
+> *   Pitched but not deployed: Agent staking smart contracts, production SBT flows, and telco USSD integration. These are in roadmap for post-hackathon work.
+
 ## Setup and Deployment
 
 ### 1. Prerequisites
@@ -47,8 +55,10 @@ Before you can use the application, you need to seed the Firestore database with
 2.  **Run the Seed Script:**
     From the root of the project, run the following command:
     ```bash
-    node functions/seedDatabase.js
+    node functions/scripts/seedFirestore.js
     ```
+
+    Or use the cloud function endpoint once deployed: `https://<YOUR-PROJECT-ID>.web.app/forceSeed`
 
 ### 4. Deployment
 
@@ -72,6 +82,7 @@ firebase deploy
 
 -   `bounties`: Stores the bounty information, including the topic, reward, and the "Grok" text to be verified.
 -   `community_notes`: Stores the results of the discrepancy analysis, including the DKG asset ID.
+-   `poison_pills`: Stores flagged topics that should be blocked by the Agent Guard.
 
 ### Firebase Cloud Functions
 
@@ -79,3 +90,4 @@ firebase deploy
 -   `analyzeDiscrepancy`: Uses the Gemini 1.5 Pro model to compare the "suspect" text with the consensus text and identify discrepancies.
 -   `mintCommunityNote`: Mints a "Community Note" to the OriginTrail DKG and saves the result to the `community_notes` collection.
 -   `agentGuard`: A "firewall" that checks if a given question or topic is flagged by a Community Note.
+-   `forceSeed`: HTTP trigger to reset and populate the database with demo data.
