@@ -92,16 +92,20 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
     };
 
     const fetchPubMedConsensus = async (topic) => {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro"});
-      const prompt = `You are a Clinical Data Retriever. Summarize the hard clinical consensus and chemical composition facts on "${topic}" from PubMed/Cochrane. Ignore general web results.`;
-
       try {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error("GEMINI_API_KEY is missing in environment.");
+        }
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro"});
+        const prompt = `You are a Clinical Data Retriever. Summarize the hard clinical consensus and chemical composition facts on "${topic}" from PubMed/Cochrane. Ignore general web results.`;
+
         const result = await model.generateContent(prompt);
         const response = await result.response;
         return response.text();
       } catch (error) {
-        console.error("PubMed Fetch Error:", error);
-        throw new Error("Failed to fetch PubMed consensus.");
+        console.error("PubMed Fetch Error details:", error);
+        // Pass the actual error message up
+        throw new Error(`Failed to fetch PubMed consensus: ${error.message}`);
       }
     };
 
@@ -117,6 +121,8 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
         res.status(200).send({ data: { consensusText: wikiText } });
       }
     } catch (error) {
+      console.error("Fetch Consensus Top-Level Error:", error);
+      // Return 500 but with the error message so the client can see it
       res.status(500).send({ error: error.message });
     }
   });
@@ -277,7 +283,8 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
 
       querySnapshot.forEach(doc => {
         const note = doc.data();
-        if (question.toLowerCase().includes(note.topic.toLowerCase())) {
+        // Simple case-insensitive match. In production, vector search would be better.
+        if (note.topic && question.toLowerCase().includes(note.topic.toLowerCase())) {
           blockedNote = note;
         }
       });
@@ -290,7 +297,10 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
           }
         });
       } else {
-        // If not blocked, pass the question to a non-firewalled AI (optional, could just return "not blocked")
+        // If not blocked, pass the question to a non-firewalled AI
+        if (!process.env.GEMINI_API_KEY) {
+             throw new Error("GEMINI_API_KEY is missing/undefined in Agent Guard.");
+        }
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
         const result = await model.generateContent(question);
         const response = await result.response;
@@ -298,7 +308,7 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
       }
     } catch (error) {
       console.error("Agent Guard Error:", error);
-      res.status(500).send({ error: "Agent guard check failed." });
+      res.status(500).send({ error: `Agent guard check failed: ${error.message}` });
     }
   });
 });
