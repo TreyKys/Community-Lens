@@ -1,5 +1,26 @@
+# Node modules
+node_modules/
+functions/node_modules/
+client/node_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+*.log
+
+# Environment variables
+.env
+functions/.env
+client/.env
+
+# Build artifacts
+client/dist/
+dist/
+build/
+
+# Editor files
+.vscode/
+.idea/
 .DS_Store
-dist
-build
-coverage
-.vscode
