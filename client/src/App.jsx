@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, TriangleAlert, CheckCircle, Copy, Shield, Share2, MessageSquare, Zap } from 'lucide-react';
+import { Shield, MessageSquare, Zap } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, fetchGrokSource, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
@@ -220,6 +220,7 @@ function VerifierView({ bounty }) {
         setPublishStatus('success');
         setPublishedUAL(result.data.assetId);
     } catch (err) {
+        console.error(err);
         setPublishStatus('error');
     }
   };

@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow public read access to specific collections
+    match /bounties/{document=**} {
+      allow read: if true;
+    }
+    match /leaderboard/{document=**} {
+      allow read: if true;
+    }
+    match /poison_pills/{document=**} {
+      allow read: if true;
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
