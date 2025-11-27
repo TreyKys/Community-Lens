@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, TriangleAlert, CheckCircle, Copy, Shield, Share2, MessageSquare } from 'lucide-react';
+import { Search, TriangleAlert, CheckCircle, Copy, Shield, Share2, MessageSquare, Zap } from 'lucide-react';
 import clsx from 'clsx';
-import { motion } from 'framer-motion';
-import { db, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
+import { motion, AnimatePresence } from 'framer-motion';
+import { db, fetchGrokSource, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 
 function App() {
@@ -130,11 +130,12 @@ function VerifierView({ bounty }) {
   const [suspectText, setSuspectText] = useState('');
   const [consensusText, setConsensusText] = useState('');
   const [analysis, setAnalysis] = useState(null);
-  const [loading, setLoading] = useState(''); // 'consensus', 'analysis'
+  const [loading, setLoading] = useState(''); // 'grok', 'consensus', 'analysis'
   const [publishStatus, setPublishStatus] = useState(null);
   const [stakeAmount, setStakeAmount] = useState(500);
   const [publishedUAL, setPublishedUAL] = useState('');
   const [consensusMode, setConsensusMode] = useState('general'); // 'general' | 'medical'
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     if (bounty) {
@@ -145,6 +146,37 @@ function VerifierView({ bounty }) {
       }
     }
   }, [bounty]);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const handleFetchGrok = async () => {
+    if (!topicInput) return;
+    setLoading('grok');
+    try {
+      // Simulate url construction for the scraper
+      const url = `https://grokipedia.x.ai/topic/${encodeURIComponent(topicInput)}`;
+      const result = await fetchGrokSource({ url });
+
+      if (result.data.manual_required) {
+         setToast({ type: 'warning', message: "⚠️ Grok Shield Detected. Switching to Manual Mode." });
+         // Logic to 'unlock' or focus could go here, but since it's already editable, the toast is the key feedback.
+      } else if (result.data.text) {
+         setSuspectText(result.data.text);
+         setToast({ type: 'success', message: "Source fetched successfully." });
+      }
+    } catch (err) {
+       console.error(err);
+       // Fallback for unexpected errors
+       setToast({ type: 'warning', message: "⚠️ Connection Failed. Switching to Manual Mode." });
+    } finally {
+      setLoading('');
+    }
+  }
 
   const handleFetchConsensus = async () => {
     if (!topicInput) return;
@@ -197,16 +229,41 @@ function VerifierView({ bounty }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Suspect Source */}
             <div className="bg-slate-900 rounded-xl border border-slate-800 flex flex-col h-[400px]">
-                <div className="bg-slate-800/50 px-4 py-3 border-b border-slate-800">
-                    <h3 className="font-semibold text-red-400">Grokipedia Source (Manual Input)</h3>
+                <div className="bg-slate-800/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+                    <h3 className="font-semibold text-red-400">Grokipedia Source</h3>
+                    <button
+                      onClick={handleFetchGrok}
+                      disabled={loading === 'grok' || !topicInput}
+                      className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded transition-colors border border-slate-700"
+                    >
+                      <Zap size={12} className={loading === 'grok' ? "animate-pulse text-yellow-400" : "text-yellow-400"} />
+                      {loading === 'grok' ? 'Fetching...' : 'Auto-Fetch Grok'}
+                    </button>
                 </div>
-                <div className="flex-1 p-4 bg-slate-900/50">
+                <div className="flex-1 p-4 bg-slate-900/50 relative">
                      <textarea
-                        className="w-full h-full bg-transparent resize-none focus:outline-none text-slate-300"
+                        className="w-full h-full bg-transparent resize-none focus:outline-none text-slate-300 placeholder:text-slate-600"
                         placeholder="Paste Grokipedia text here..."
                         value={suspectText}
                         onChange={(e) => setSuspectText(e.target.value)}
+                        disabled={loading === 'grok'}
                     />
+                    {/* Toast Overlay */}
+                    <AnimatePresence>
+                      {toast && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className={clsx(
+                            "absolute bottom-4 left-4 right-4 p-3 rounded-lg text-sm font-medium border shadow-lg backdrop-blur-md",
+                            toast.type === 'warning' ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-200" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
+                          )}
+                        >
+                          {toast.message}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                 </div>
             </div>
 
