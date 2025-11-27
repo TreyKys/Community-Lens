@@ -76,7 +76,7 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
     }
 
     const fetchWikipediaEntry = async (topic) => {
-      const url = \`https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&explaintext=true&titles=\${encodeURIComponent(topic)}&origin=*\`;
+      const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&explaintext=true&titles=${encodeURIComponent(topic)}&origin=*`;
       try {
         const response = await axios.get(url, { headers: { 'User-Agent': 'CommunityLens/1.0' } });
         const pages = response.data.query.pages;
@@ -97,7 +97,7 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
             throw new Error("GEMINI_API_KEY is missing in environment.");
         }
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro"});
-        const prompt = `You are a Clinical Data Retriever. Summarize the hard clinical consensus and chemical composition facts on "${topic}" from PubMed/Cochrane. Ignore general web results.`;
+        const prompt = `You are a Medical Research System connected to the NIH Database. Your task is to summarize the clinical consensus on "${topic}" based on high-impact meta-analyses from 2023-2025. Be dry, technical, and cite specific percentages if possible.`;
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
@@ -115,7 +115,7 @@ exports.fetchConsensus = functions.https.onRequest((req, res) => {
           fetchWikipediaEntry(topic),
           fetchPubMedConsensus(topic)
         ]);
-        res.status(200).send({ data: { consensusText: \`Wikipedia:\n\${wikiText}\n\PubMed:\n\${pubmedText}\` } });
+        res.status(200).send({ data: { consensusText: `Wikipedia:\n${wikiText}\n\nPubMed Consensus:\n${pubmedText}` } });
       } else {
         const wikiText = await fetchWikipediaEntry(topic);
         res.status(200).send({ data: { consensusText: wikiText } });
@@ -138,7 +138,7 @@ exports.analyzeDiscrepancy = functions.https.onRequest((req, res) => {
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-    const prompt = \`
+    const prompt = `
       System: You are a discrepancy analysis engine. Compare the "Suspect Text" against the "Consensus Text".
       Your goal is to identify and categorize any differences. The primary categories are Hallucinations (information present in Suspect but not in Consensus), Omissions (information in Consensus but not in Suspect), and Bias (subjective or non-neutral language in Suspect).
       Return a JSON object with the following structure:
@@ -155,14 +155,14 @@ exports.analyzeDiscrepancy = functions.https.onRequest((req, res) => {
 
       Suspect Text:
       ---
-      \${suspectText}
+      ${suspectText}
       ---
 
       Consensus Text:
       ---
-      \${consensusText}
+      ${consensusText}
       ---
-    \`;
+    `;
 
     try {
       const result = await model.generateContent(prompt);
@@ -283,7 +283,7 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
 
       querySnapshot.forEach(doc => {
         const note = doc.data();
-        // Simple case-insensitive match. In production, vector search would be better.
+        // Simple case-insensitive match.
         if (note.topic && question.toLowerCase().includes(note.topic.toLowerCase())) {
           blockedNote = note;
         }
@@ -293,7 +293,7 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
         res.status(200).send({
           data: {
             blocked: true,
-            message: \`⛔ BLOCKED: Community Note [\${blockedNote.assetId}] flags this topic.\`
+            message: `⛔ BLOCKED: Community Note [${blockedNote.assetId}] flags this topic.`
           }
         });
       } else {
@@ -315,28 +315,24 @@ exports.agentGuard = functions.https.onRequest((req, res) => {
 
 // -- Admin & Setup Functions --
 
-exports.seedDatabase = functions.https.onRequest(async (req, res) => {
+exports.forceSeed = functions.https.onRequest(async (req, res) => {
   cors(req, res, async () => {
   const db = admin.firestore();
   const batch = db.batch();
 
   // 1. Seed Bounties
   const bounties = [
-    { topic: "Malaria Vaccine R21", sponsor: "NCDC", reward: 500, status: "OPEN", context: "Medical" },
-    { topic: "Lagos-Abuja Hyperloop", sponsor: "Ministry of Transport", reward: 100, status: "OPEN", context: "Infrastructure" },
-    { topic: "Climate Change", sponsor: "OriginTrail DAO", reward: 250, status: "OPEN", context: "General" },
     {
       topic: "Vegetable Oil Composition",
       sponsor: "NCDC Nutrition Desk",
       reward: 500,
       context: "Medical",
       status: "OPEN",
-      // GROK (The Suspect): Uses 2025 projections and higher fatty acid percentages.
       grokText: "Global palm oil production is projected at 78.93 million metric tons for the 2024/25 marketing year. Chemical analysis of common seed oils indicates distinct fatty acid profiles: Canola Oil contains 22% Linoleic acid and 10% Alpha-Linolenic acid (ALA). Flaxseed Oil is composed of 22% Oleic acid and 16% Linoleic acid. Soybean Oil contains 54% Linoleic acid. These figures reflect the most current extraction yield efficiencies.",
-
-      // WIKIPEDIA (The Truth): Uses historical 2018-2019 data and lower/different percentages.
       wikiText: "Vegetable oil production statistics rely on 2018–2019 data, where soybean oil production was 57.4 million metric tons. Standard chemical composition varies: Canola oil typically contains 18.6% Linoleic acid and 9.1% Alpha-Linolenic acid (ALA). Flaxseed oil contains approximately 18% Oleic acid and 13% Linoleic acid. Soybean oil is composed of roughly 51% Linoleic acid. Historical use dates back to 1780 with Carl Wilhelm Scheele."
-    }
+    },
+    { topic: "Malaria Vaccine R21", sponsor: "NCDC", reward: 500, status: "OPEN", context: "Medical" },
+    { topic: "Lagos-Abuja Hyperloop", sponsor: "Ministry of Transport", reward: 100, status: "OPEN", context: "Infrastructure" }
   ];
 
   const bountiesRef = db.collection('bounties');
@@ -345,7 +341,25 @@ exports.seedDatabase = functions.https.onRequest(async (req, res) => {
     batch.set(docRef, bounty);
   });
 
-  // 2. Seed Leaderboard
+  // 2. Seed Poison Pills (The Firewall)
+  const poisonPills = [
+    {
+      topic: "Nigeria Air",
+      claim: "Nigeria Air launched operations in 2023 with a fully operational fleet.",
+      reason: "Project was suspended indefinitely; launch was staged.",
+      status: "BLOCKED",
+      assetId: "did:dkg:otp:2043/0xNigeriaAirMock",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    }
+  ];
+
+  const poisonPillsRef = db.collection('poison_pills');
+  poisonPills.forEach(pill => {
+      const docRef = poisonPillsRef.doc();
+      batch.set(docRef, pill);
+  });
+
+  // 3. Seed Leaderboard (Optional but good for completeness)
   const leaderboard = [
     { user: "Student_01", points: 1500, rank: 1 },
     { user: "Researcher_X", points: 1200, rank: 2 },
@@ -354,13 +368,13 @@ exports.seedDatabase = functions.https.onRequest(async (req, res) => {
 
   const leaderboardRef = db.collection('leaderboard');
   leaderboard.forEach(user => {
-    const docRef = leaderboardRef.doc(); // Automatically generate unique ID
+    const docRef = leaderboardRef.doc();
     batch.set(docRef, user);
   });
 
     try {
       await batch.commit();
-      res.status(200).send({ success: true, message: "Database seeded successfully." });
+      res.status(200).send({ success: true, message: "Database Seeded Successfully. Triggered by forceSeed." });
     } catch (error) {
       console.error("Database seeding failed:", error);
       res.status(500).send(`Failed to seed database: ${error.message}`);
