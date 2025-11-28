@@ -71,7 +71,7 @@ exports.createBounty = functions.https.onRequest((req, res) => {
 });
 
 // 2. fetchGrokSource (The Gemini Crawler)
-exports.fetchGrokSource = functions.runWith({ memory: '2GiB', timeoutSeconds: 60 }).https.onRequest((req, res) => {
+exports.fetchGrokSource = functions.runWith({ memory: '2GB', timeoutSeconds: 60 }).https.onRequest((req, res) => {
   cors(req, res, async () => {
     const data = req.body.data || req.body;
     const { topic } = data;
