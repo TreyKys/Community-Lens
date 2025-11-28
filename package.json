@@ -13,6 +13,6 @@
     "concurrently": "^8.2.2"
   },
   "dependencies": {
-    "@google/genai": "^1.30.0"
+    "@google/generative-ai": "^0.18.0"
   }
 }
