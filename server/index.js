@@ -376,14 +376,14 @@ app.post('/api/mintCommunityNote', async (req, res) => {
     let assetId = null;
     let ualFromDkg = null;
 
-    // ATTEMPT 1: Try real DKG Edge Node publishing
+    // ATTEMPT 1: Try real DKG testnet publishing
     if (DKG && process.env.DKG_PUBLIC_KEY && process.env.DKG_PRIVATE_KEY) {
       try {
-        console.log("Attempting real DKG Edge Node publishing...");
+        console.log("Attempting real DKG testnet publishing...");
         const dkgClient = new DKG({
           environment: 'testnet',
-          endpoint: 'http://localhost',
-          port: 8900,
+          endpoint: 'https://testnet-node.origintrail.io',
+          port: 443,
           blockchain: {
             name: 'neuroweb:testnet',
             publicKey: process.env.DKG_PUBLIC_KEY,
@@ -398,9 +398,9 @@ app.post('/api/mintCommunityNote', async (req, res) => {
 
         ualFromDkg = createResult.UAL;
         assetId = ualFromDkg;
-        console.log(`✅ DKG Edge Node Publishing Success! UAL: ${assetId}`);
+        console.log(`✅ DKG Testnet Publishing Success! UAL: ${assetId}`);
       } catch (dkgError) {
-        console.error("DKG Edge Node Publishing Error:", dkgError.message);
+        console.error("DKG Testnet Publishing Error:", dkgError.message);
         console.log("Falling back to hash-based simulation...");
       }
     }
