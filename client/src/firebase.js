@@ -1,17 +1,15 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "community-lens-dd945.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "community-lens-dd945",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "community-lens-dd945.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyAjwMgCU2tXhTMkrjLxdXg7wNoZ1fWdPQs",
+  authDomain: "community-lens-dd945.firebaseapp.com",
+  projectId: "community-lens-dd945",
+  storageBucket: "community-lens-dd945.firebasestorage.app",
+  messagingSenderId: "602234027628",
+  appId: "1:602234027628:web:8d7be7ee934881cb71a249"
 };
 
 // Initialize Firebase
@@ -21,6 +19,8 @@ const db = getFirestore(app);
 // Helper to call onRequest functions acting as callables
 const callFunction = async (name, data) => {
   const projectId = firebaseConfig.projectId;
+  // Construct the URL dynamically based on the Project ID.
+  // Matches: https://us-central1-community-lens-dd945.cloudfunctions.net/<functionName>
   const url = `https://us-central1-${projectId}.cloudfunctions.net/${name}`;
 
   const response = await fetch(url, {
@@ -40,6 +40,7 @@ const callFunction = async (name, data) => {
 };
 
 // Export wrappers that match the httpsCallable signature (returning a Promise that resolves to { data: ... })
+export const createBounty = (data) => callFunction('createBounty', data);
 export const fetchGrokSource = (data) => callFunction('fetchGrokSource', data);
 export const fetchConsensus = (data) => callFunction('fetchConsensus', data);
 export const analyzeDiscrepancy = (data) => callFunction('analyzeDiscrepancy', data);
