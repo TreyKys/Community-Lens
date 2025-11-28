@@ -417,7 +417,7 @@ app.post('/api/mintCommunityNote', async (req, res) => {
         
         const dkgClient = new DKG({
           environment: 'testnet',
-          endpoint: 'https://testnet-node.origintrail.io',
+          endpoint: 'https://v6-pegasus-node-02.origin-trail.network',
           port: 443,
           blockchain: {
             name: 'otp:20430',  // NeuroWeb Testnet blockchain ID
