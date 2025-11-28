@@ -16,12 +16,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Helper to call onRequest functions acting as callables
+// Helper to call local backend functions
 const callFunction = async (name, data) => {
-  const projectId = firebaseConfig.projectId;
-  // Construct the URL dynamically based on the Project ID.
-  // Matches: https://us-central1-community-lens-dd945.cloudfunctions.net/<functionName>
-  const url = `https://us-central1-${projectId}.cloudfunctions.net/${name}`;
+  // Get the backend domain from environment or use default
+  const domain = process.env.REACT_APP_API_URL || `http://${window.location.hostname}:3000`;
+  const url = `${domain}/${name}`;
 
   const response = await fetch(url, {
     method: 'POST',
