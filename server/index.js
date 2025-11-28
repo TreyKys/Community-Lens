@@ -9,6 +9,18 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
+// DKG Integration - Real OriginTrail Publishing
+let DKG = null;
+try {
+  const dkgModule = await import('dkg.js').catch(() => null);
+  if (dkgModule) {
+    DKG = dkgModule.default || dkgModule;
+    console.log('DKG SDK loaded successfully');
+  }
+} catch (e) {
+  console.log('DKG SDK not available, using fallback mode:', e.message);
+}
+
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -332,7 +344,7 @@ Text B (Consensus): ${consensusText}`;
   }
 });
 
-// 5. mintCommunityNote
+// 5. mintCommunityNote - Real DKG Publishing
 app.post('/api/mintCommunityNote', async (req, res) => {
   const data = req.body.data || req.body;
   const { topic, claim, analysis, bountyId, userId, stake, reward } = data;
@@ -345,30 +357,62 @@ app.post('/api/mintCommunityNote', async (req, res) => {
     "@context": "https://schema.org",
     "@type": "ClaimReview",
     "claimReviewed": topic,
-    "itemReviewed": {
-      "@type": "CreativeWork",
-      "text": claim
-    },
-    "author": {
-      "@type": "Person",
-      "identifier": userId || "Anonymous_Expert"
-    },
     "reviewRating": {
       "@type": "Rating",
-      "ratingValue": analysis.score,
+      "ratingValue": analysis.score || 0,
       "bestRating": "100",
-      "worstRating": "0",
-      "alternateName": "Alignment Score"
+      "worstRating": "0"
+    },
+    "author": {
+      "@type": "Organization",
+      "name": "Community Lens Verifier"
     },
     "interpretationOfClaim": analysis.analysis || "Discrepancy Analysis",
-    "resultComment": JSON.stringify(analysis.discrepancies),
+    "resultComment": JSON.stringify(analysis.discrepancies || []),
     "reputationPledge": stake
   };
 
   try {
-    const hash = crypto.createHash('sha256').update(JSON.stringify(jsonLd)).digest('hex');
-    const assetId = `0x${hash}`;
+    let assetId = null;
+    let ualFromDkg = null;
 
+    // ATTEMPT 1: Try real DKG publishing
+    if (DKG && process.env.DKG_PUBLIC_KEY && process.env.DKG_PRIVATE_KEY) {
+      try {
+        console.log("Attempting real DKG publishing...");
+        const dkgClient = new DKG({
+          environment: 'testnet',
+          endpoint: 'https://testnet.origintrail.io',
+          port: 443,
+          blockchain: {
+            name: 'neuroweb:testnet',
+            publicKey: process.env.DKG_PUBLIC_KEY,
+            privateKey: process.env.DKG_PRIVATE_KEY
+          }
+        });
+
+        const createResult = await dkgClient.asset.create(jsonLd, { 
+          epochsNum: 5,
+          immutable: false 
+        });
+
+        ualFromDkg = createResult.UAL;
+        assetId = ualFromDkg;
+        console.log(`✅ DKG Publishing Success! UAL: ${assetId}`);
+      } catch (dkgError) {
+        console.error("DKG Publishing Error:", dkgError.message);
+        console.log("Falling back to hash-based simulation...");
+      }
+    }
+
+    // FALLBACK: If DKG fails, use deterministic hash
+    if (!assetId) {
+      const hash = crypto.createHash('sha256').update(JSON.stringify(jsonLd)).digest('hex');
+      assetId = `did:dkg:testnet:${hash}`;
+      console.log(`⚠️ Using simulated DKG ID (hash-based): ${assetId}`);
+    }
+
+    // Step C: Write poison pill to database
     const db = getDb();
     if (db) {
       const batch = db.batch();
@@ -379,7 +423,8 @@ app.post('/api/mintCommunityNote', async (req, res) => {
         assetId,
         status: "BLOCKED",
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        jsonLd
+        jsonLd,
+        dkgPublished: !!ualFromDkg
       });
 
       if (bountyId) {
@@ -398,13 +443,14 @@ app.post('/api/mintCommunityNote', async (req, res) => {
 
       await batch.commit();
     } else {
-      mockPoisonPills.push({ topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd });
+      mockPoisonPills.push({ topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd, dkgPublished: !!ualFromDkg });
     }
 
-    res.status(200).send({ data: { success: true, assetId } });
+    console.log(`Poison Pill Activated: Topic "${topic}" now BLOCKED with Asset ID: ${assetId}`);
+    res.status(200).send({ data: { success: true, assetId, dkgPublished: !!ualFromDkg } });
   } catch (error) {
     console.error("Minting Error:", error);
-    res.status(500).send({ error: "Failed to complete minting process." });
+    res.status(500).send({ error: "Failed to complete minting process.", details: error.message });
   }
 });
 
