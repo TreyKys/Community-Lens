@@ -19,7 +19,7 @@ const db = getFirestore(app);
 // Helper to call local backend functions
 const callFunction = async (name, data) => {
   // Get the backend domain from environment or use default
-  const domain = process.env.REACT_APP_API_URL || `http://${window.location.hostname}:3000`;
+  const domain = process.env.REACT_APP_API_URL || `${window.location.protocol}//${window.location.hostname}:3000`;
   const url = `${domain}/${name}`;
 
   const response = await fetch(url, {
@@ -39,11 +39,11 @@ const callFunction = async (name, data) => {
 };
 
 // Export wrappers that match the httpsCallable signature (returning a Promise that resolves to { data: ... })
-export const createBounty = (data) => callFunction('createBounty', data);
-export const fetchGrokSource = (data) => callFunction('fetchGrokSource', data);
-export const fetchConsensus = (data) => callFunction('fetchConsensus', data);
-export const analyzeDiscrepancy = (data) => callFunction('analyzeDiscrepancy', data);
-export const mintCommunityNote = (data) => callFunction('mintCommunityNote', data);
-export const agentGuard = (data) => callFunction('agentGuard', data);
+export const createBounty = (data) => callFunction('api/createBounty', data);
+export const fetchGrokSource = (data) => callFunction('api/fetchGrokSource', data);
+export const fetchConsensus = (data) => callFunction('api/fetchConsensus', data);
+export const analyzeDiscrepancy = (data) => callFunction('api/analyzeDiscrepancy', data);
+export const mintCommunityNote = (data) => callFunction('api/mintCommunityNote', data);
+export const agentGuard = (data) => callFunction('api/agentGuard', data);
 
 export { db };
