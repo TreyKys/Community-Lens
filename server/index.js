@@ -71,7 +71,7 @@ app.post('/api/createBounty', async (req, res) => {
       model: 'gemini-2.5-flash',
       contents: prompt
     });
-    const text = result.content.parts[0].text;
+    const text = result.response.text();
     const cleanedJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const extractedData = JSON.parse(cleanedJson);
 
@@ -132,7 +132,7 @@ Return JSON { text: "..." }`;
       model: 'gemini-2.5-flash',
       contents: prompt
     });
-    const text = result.content.parts[0].text;
+    const text = result.response.text();
     const cleanedJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const output = JSON.parse(cleanedJson);
 
@@ -182,7 +182,7 @@ Constraint: Ignore general web results. Focus on efficacy percentages, safety da
         model: 'gemini-2.5-flash',
         contents: prompt
       });
-      return result.content.parts[0].text;
+      return result.response.text();
     } catch (error) {
       console.error("PubMed Fetch Error details:", error);
       throw new Error(`Failed to fetch PubMed consensus: ${error.message}`);
@@ -227,7 +227,7 @@ Text B (Consensus): ${consensusText}`;
       model: 'gemini-2.5-flash',
       contents: prompt
     });
-    const cleanedJson = result.content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const cleanedJson = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
     res.status(200).send({ data: JSON.parse(cleanedJson) });
   } catch (error) {
     console.error("Analysis Error:", error);
