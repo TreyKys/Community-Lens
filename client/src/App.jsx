@@ -92,7 +92,10 @@ function BountyBoardView({ onViewBounty }) {
             bountiesData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setBounties(bountiesData);
         }, (error) => {
-            console.warn("Firestore read error (expected in demo mode):", error.message);
+            // Suppress expected permission errors in demo mode
+            if (!error.message.includes("Missing or insufficient permissions")) {
+                console.warn("Firestore read error:", error.message);
+            }
             // In demo mode, continue without firestore data
         });
         return () => unsubscribe();

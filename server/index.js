@@ -78,12 +78,17 @@ app.post('/api/createBounty', async (req, res) => {
     const db = getDb();
     let bountyId;
     
+    // Normalize extracted data with defaults
+    const topic = extractedData.Topic || extractedData.topic || "Unknown Topic";
+    const context = extractedData.Category || extractedData.category || "General";
+    const claim = extractedData.Claim || extractedData.claim || userQuery;
+    
     if (db) {
       const bountyRef = db.collection("bounties").doc();
       await bountyRef.set({
-        topic: extractedData.Topic || extractedData.topic,
-        context: extractedData.Category || extractedData.category,
-        claim: extractedData.Claim || extractedData.claim,
+        topic,
+        context,
+        claim,
         reward: parseInt(rewardAmount),
         status: "OPEN",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -94,9 +99,9 @@ app.post('/api/createBounty', async (req, res) => {
       bountyId = 'mock_' + Date.now();
       mockBounties.push({
         id: bountyId,
-        topic: extractedData.Topic || extractedData.topic,
-        context: extractedData.Category || extractedData.category,
-        claim: extractedData.Claim || extractedData.claim,
+        topic,
+        context,
+        claim,
         reward: parseInt(rewardAmount),
         status: "OPEN",
         createdAt: new Date(),
