@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import crypto from 'crypto';
-import genai from '@google/genai';
+import { Client } from '@google/genai';
 import admin from 'firebase-admin';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -28,7 +28,7 @@ try {
 }
 
 // Initialize Gemini
-const client = genai({ apiKey: process.env.GEMINI_API_KEY || '' });
+const client = new Client({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // Mock data for demo mode
 let mockBounties = [];
@@ -60,7 +60,7 @@ app.post('/createBounty', async (req, res) => {
     const prompt = `Analyze this user query: '${userQuery}'. Extract the core 'Topic' (string), 'Category' (Medical/Infrastructure/Political), and a standardized 'Claim'. Return JSON.`;
 
     const result = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-pro',
       contents: prompt
     });
     const text = result.content.parts[0].text;
@@ -121,7 +121,7 @@ Goal: This text will be used to test a Fact-Checking engine, so ensure it reflec
 Return JSON { text: "..." }`;
 
     const result = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-pro',
       contents: prompt
     });
     const text = result.content.parts[0].text;
@@ -216,7 +216,7 @@ Text B (Consensus): ${consensusText}`;
 
   try {
     const result = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-pro',
       contents: prompt
     });
     const cleanedJson = result.content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
