@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import crypto from 'crypto';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { genai } from '@google/genai';
 import admin from 'firebase-admin';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -28,7 +28,7 @@ try {
 }
 
 // Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const client = new genai.Client({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // Mock data for demo mode
 let mockBounties = [];

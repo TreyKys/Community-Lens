@@ -1,0 +1,48 @@
+Get an API Key 
+First, generate an API key specifically for Google AI services. 
+Go to the Google AI Studio website (aistudio.google.com).
+Make sure to log into your Google account.
+Click Create API key and select an existing or new Google Cloud project.
+The key will be generated and displayed. Copy it immediately, as it may not be viewable again. 
+2. Secure the Key
+For security, do not embed the raw API key directly into the application's source code. This exposes it to users and version control systems. 
+Server-Side Apps: Store the key as an environment variable on the server and access it programmatically.
+Client-Side (Web/Mobile) Apps: Use a backend proxy server to make calls to the Gemini API, keeping the key hidden on the server, or use an authentication method like Firebase Authentication with a backend.
+API Restrictions: Add restrictions to the API key in the Google Cloud Console to limit which IP addresses or apps can use it, which reduces unauthorized use. 
+3. Choose a Client Library
+Google provides official client libraries for interacting with the Gemini API. Choose the library that matches your development environment: 
+Python: google-genai
+Node.js: @google/genai
+Java: google-genai
+Go: google-genai
+Android: google-genai
+Dart/Flutter: google-genai 
+Install the appropriate SDK using your project's package manager (e.g., pip install google-genai for Python or npm install @google/genai for Node.js). 
+4. Implement the Integration
+The core integration involves initializing the client library with the API key and making requests. 
+A. Initialize the Client
+Access your API key securely (e.g., from an environment variable) and initialize the client: 
+python
+# Python example accessing the key from environment variables
+import os
+from google import genai
+
+# The library automatically looks for a GEMINI_API_KEY environment variable
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+Use code with caution.
+
+B. Generate Content
+Use the client object to send prompts to the Gemini model and process the response: 
+python
+# Python example of generating text
+prompt = "Explain how black holes work."
+response = client.models.generate_content(
+    model='gemini-2.5-flash',
+    contents=prompt
+)
+
+print(response.text)
+Use code with caution.
+
+For more detailed code examples and integration guides tailored to your specific language, refer to the official Google AI documentation. 
+
