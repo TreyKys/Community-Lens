@@ -420,20 +420,22 @@ app.post('/api/mintCommunityNote', async (req, res) => {
           endpoint: 'https://testnet-node.origintrail.io',
           port: 443,
           blockchain: {
-            name: 'neuroweb:testnet',
+            name: 'otp:20430',  // NeuroWeb Testnet blockchain ID
             publicKey: process.env.DKG_PUBLIC_KEY,
-            privateKey: process.env.DKG_PRIVATE_KEY,
-            // HARD FIX: Explicitly specify Hub Contract for NeuroWeb Testnet
-            hubContract: '0x5f27327D6c8C5eD1Eb18E64588E83020692dE82d',
-            // RPC endpoint for NeuroWeb Testnet blockchain interaction
-            rpc: 'https://neuroweb-testnet.arcana.network/rpc'
+            privateKey: process.env.DKG_PRIVATE_KEY
           },
           maxNumberOfRetries: 30,
           frequency: 2,
           contentType: 'all'
         });
 
-        console.log("⏳ Publishing to DKG with explicit hub contract...");
+        console.log("⏳ Publishing ClaimReview Knowledge Asset to DKG...");
+        
+        // Increase allowance for faster publishing (optional but recommended)
+        await dkgClient.asset.increaseAllowance('1569429592284014000');
+        console.log("💰 Allowance increased for publishing");
+        
+        // Create the Knowledge Asset
         const createResult = await dkgClient.asset.create(jsonLd, { 
           epochsNum: 5,
           immutable: false 
@@ -441,8 +443,9 @@ app.post('/api/mintCommunityNote', async (req, res) => {
 
         ualFromDkg = createResult.UAL;
         assetId = ualFromDkg;
-        console.log(`✅ DKG Testnet Publishing Success! UAL: ${assetId}`);
-        console.log(`📌 Knowledge Asset published to OriginTrail DKG: ${assetId}`);
+        console.log(`✅ DKG Testnet Publishing Success!`);
+        console.log(`📌 Knowledge Asset UAL: ${assetId}`);
+        console.log(`🔗 Published to OriginTrail DKG at NeuroWeb Testnet`);
       } catch (dkgError) {
         console.error("❌ DKG Testnet Publishing Error:", dkgError.message);
         console.log("⚠️ Falling back to hash-based simulation...");
