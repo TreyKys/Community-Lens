@@ -422,10 +422,16 @@ app.post('/api/mintCommunityNote', async (req, res) => {
           blockchain: {
             name: 'neuroweb:testnet',
             publicKey: process.env.DKG_PUBLIC_KEY,
-            privateKey: process.env.DKG_PRIVATE_KEY
-          }
+            privateKey: process.env.DKG_PRIVATE_KEY,
+            // HARD FIX: Explicitly specify Hub Contract for NeuroWeb Testnet
+            hubContract: '0x5f27327D6c8C5eD1Eb18E64588E83020692dE82d'
+          },
+          maxNumberOfRetries: 30,
+          frequency: 2,
+          contentType: 'all'
         });
 
+        console.log("⏳ Publishing to DKG with explicit hub contract...");
         const createResult = await dkgClient.asset.create(jsonLd, { 
           epochsNum: 5,
           immutable: false 
@@ -434,7 +440,7 @@ app.post('/api/mintCommunityNote', async (req, res) => {
         ualFromDkg = createResult.UAL;
         assetId = ualFromDkg;
         console.log(`✅ DKG Testnet Publishing Success! UAL: ${assetId}`);
-        console.log(`📌 Knowledge Asset ID: ${assetId}`);
+        console.log(`📌 Knowledge Asset published to OriginTrail DKG: ${assetId}`);
       } catch (dkgError) {
         console.error("❌ DKG Testnet Publishing Error:", dkgError.message);
         console.log("⚠️ Falling back to hash-based simulation...");
