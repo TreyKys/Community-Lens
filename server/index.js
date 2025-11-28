@@ -68,7 +68,7 @@ app.post('/api/createBounty', async (req, res) => {
     const prompt = `Analyze this user query: '${userQuery}'. Extract the core 'Topic' (string), 'Category' (Medical/Infrastructure/Political), and a standardized 'Claim'. Return JSON.`;
 
     const result = await client.models.generateContent({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-flash',
       contents: prompt
     });
     const text = result.content.parts[0].text;
@@ -129,7 +129,7 @@ Goal: This text will be used to test a Fact-Checking engine, so ensure it reflec
 Return JSON { text: "..." }`;
 
     const result = await client.models.generateContent({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-flash',
       contents: prompt
     });
     const text = result.content.parts[0].text;
@@ -224,7 +224,7 @@ Text B (Consensus): ${consensusText}`;
 
   try {
     const result = await client.models.generateContent({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-flash',
       contents: prompt
     });
     const cleanedJson = result.content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
