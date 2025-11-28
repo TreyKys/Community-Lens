@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, MessageSquare, Zap } from 'lucide-react';
+import { Shield, MessageSquare, Zap, Plus, X } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db, fetchGrokSource, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { db, createBounty, fetchGrokSource, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 function App() {
   const [activeTab, setActiveTab] = useState('bounty'); // 'bounty' | 'verifier' | 'agent'
@@ -75,22 +75,109 @@ function App() {
 
 function BountyBoardView({ onViewBounty }) {
     const [bounties, setBounties] = useState([]);
+    const [isCreating, setIsCreating] = useState(false);
+    const [newBountyQuery, setNewBountyQuery] = useState('');
+    const [newBountyReward, setNewBountyReward] = useState(100);
+    const [creatingStatus, setCreatingStatus] = useState(''); // 'loading' | 'success' | 'error'
 
     useEffect(() => {
-        const q = query(collection(db, "bounties"));
+        // Simple query, in a real app might want to order by createdAt
+        const q = query(collection(db, "bounties")); // Firestore indexes might be needed for orderBy('createdAt', 'desc')
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const bountiesData = [];
             querySnapshot.forEach((doc) => {
                 bountiesData.push({ id: doc.id, ...doc.data() });
             });
+            // Client-side sort if index missing
+            bountiesData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
             setBounties(bountiesData);
         });
         return () => unsubscribe();
     }, []);
 
+    const handleCreateBounty = async () => {
+        if (!newBountyQuery) return;
+        setCreatingStatus('loading');
+        try {
+            await createBounty({ userQuery: newBountyQuery, rewardAmount: newBountyReward });
+            setCreatingStatus('success');
+            setNewBountyQuery('');
+            setTimeout(() => {
+                setIsCreating(false);
+                setCreatingStatus('');
+            }, 1000);
+        } catch (error) {
+            console.error(error);
+            setCreatingStatus('error');
+        }
+    }
+
     return (
         <div className="space-y-6">
-            <h2 className="text-3xl font-bold text-white">Bounty Board</h2>
+            <div className="flex justify-between items-center">
+                <h2 className="text-3xl font-bold text-white">Bounty Board</h2>
+                <button
+                    onClick={() => setIsCreating(true)}
+                    className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                    <Plus size={18} />
+                    Request Verification
+                </button>
+            </div>
+
+            {/* Create Modal Overlay */}
+            <AnimatePresence>
+                {isCreating && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95 }}
+                            animate={{ scale: 1 }}
+                            exit={{ scale: 0.95 }}
+                            className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-lg shadow-2xl"
+                        >
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold text-white">Create New Bounty</h3>
+                                <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-white"><X size={24} /></button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">Claim or Question</label>
+                                    <textarea
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-slate-200 focus:border-cyan-500 outline-none h-32 resize-none"
+                                        placeholder="e.g. Is it true that solar panels consume more energy to build than they produce?"
+                                        value={newBountyQuery}
+                                        onChange={(e) => setNewBountyQuery(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm text-slate-400 mb-1">Reward (TRAC)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-slate-200 focus:border-cyan-500 outline-none"
+                                        value={newBountyReward}
+                                        onChange={(e) => setNewBountyReward(e.target.value)}
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleCreateBounty}
+                                    disabled={creatingStatus === 'loading' || !newBountyQuery}
+                                    className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors"
+                                >
+                                    {creatingStatus === 'loading' ? 'Analyzing & Creating...' : creatingStatus === 'success' ? 'Bounty Created!' : 'Post Bounty'}
+                                </button>
+                                {creatingStatus === 'error' && <p className="text-red-400 text-center text-sm">Failed to create bounty.</p>}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {bounties.map(bounty => (
                     <motion.div
@@ -103,14 +190,24 @@ function BountyBoardView({ onViewBounty }) {
                         <div className="flex justify-between items-start">
                              <span className={clsx(
                                 "px-2 py-1 text-xs font-bold uppercase rounded-full",
-                                bounty.context.toLowerCase().includes('medical') || bounty.topic.toLowerCase().includes('vaccine') ? "bg-blue-500/20 text-blue-300" : "bg-purple-500/20 text-purple-300"
+                                (bounty.context || '').toLowerCase().includes('medical') || (bounty.topic || '').toLowerCase().includes('vaccine') ? "bg-blue-500/20 text-blue-300" : "bg-purple-500/20 text-purple-300"
                             )}>
-                                {bounty.context.toLowerCase().includes('medical') || bounty.topic.toLowerCase().includes('vaccine') ? 'Medical' : 'General'}
+                                {(bounty.context || '').toLowerCase().includes('medical') || (bounty.topic || '').toLowerCase().includes('vaccine') ? 'Medical' : 'General'}
                             </span>
                              <span className="text-lg font-bold text-cyan-400">{bounty.reward} TRAC</span>
                         </div>
                         <h3 className="text-xl font-semibold mt-4">{bounty.topic}</h3>
-                        <p className="text-slate-400 text-sm mt-2 flex-grow">{bounty.context}</p>
+                        <p className="text-slate-400 text-sm mt-2 flex-grow line-clamp-3">{bounty.claim || bounty.originalQuery}</p>
+
+                        <div className="mt-4 flex items-center justify-between">
+                            <span className={clsx(
+                                "text-xs font-bold px-2 py-1 rounded",
+                                bounty.status === 'VERIFIED & COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-300'
+                            )}>
+                                {bounty.status}
+                            </span>
+                        </div>
+
                         <button
                             onClick={() => onViewBounty(bounty)}
                             className="mt-6 w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-2 rounded-lg transition-colors"
@@ -141,8 +238,11 @@ function VerifierView({ bounty }) {
     if (bounty) {
       setTopicInput(bounty.topic);
       setSuspectText(bounty.grokText || '');
-      if (bounty.context.toLowerCase().includes('medical') || bounty.topic.toLowerCase().includes('vaccine')) {
+      // Auto-detect medical context
+      if ((bounty.context && bounty.context.toLowerCase().includes('medical')) || (bounty.topic && bounty.topic.toLowerCase().includes('vaccine'))) {
         setConsensusMode('medical');
+      } else {
+        setConsensusMode('general');
       }
     }
   }, [bounty]);
@@ -158,20 +258,18 @@ function VerifierView({ bounty }) {
     if (!topicInput) return;
     setLoading('grok');
     try {
-      // Simulate url construction for the scraper
+      // Simulate url construction for the scraper (legacy param, but kept for consistency)
       const url = `https://grokipedia.x.ai/topic/${encodeURIComponent(topicInput)}`;
-      const result = await fetchGrokSource({ url });
+      const result = await fetchGrokSource({ topic: topicInput, url }); // Pass topic for Gemini mode
 
       if (result.data.manual_required) {
          setToast({ type: 'warning', message: "⚠️ Grok Shield Detected. Switching to Manual Mode." });
-         // Logic to 'unlock' or focus could go here, but since it's already editable, the toast is the key feedback.
       } else if (result.data.text) {
          setSuspectText(result.data.text);
          setToast({ type: 'success', message: "Source fetched successfully." });
       }
     } catch (err) {
        console.error(err);
-       // Fallback for unexpected errors
        setToast({ type: 'warning', message: "⚠️ Connection Failed. Switching to Manual Mode." });
     } finally {
       setLoading('');
@@ -215,7 +313,10 @@ function VerifierView({ bounty }) {
             topic: topicInput,
             claim: suspectText,
             analysis,
-            stake: stakeAmount
+            stake: stakeAmount,
+            bountyId: bounty ? bounty.id : null,
+            userId: "Current_User_Did", // Placeholder for auth
+            reward: bounty ? bounty.reward : 0
         });
         setPublishStatus('success');
         setPublishedUAL(result.data.assetId);
@@ -371,7 +472,17 @@ function AgentView() {
 
     try {
         const result = await agentGuard({ question: userMsg.text });
-        const assistantMsg = { id: Date.now() + 1, role: result.data.blocked ? 'system' : 'assistant', text: result.data.message };
+
+        // Handle blocked response specifically
+        const isBlocked = result.data.blocked;
+        const responseText = result.data.message;
+
+        const assistantMsg = {
+            id: Date.now() + 1,
+            role: isBlocked ? 'system' : 'assistant',
+            text: responseText,
+            isBlocked
+        };
         setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
         setMessages(prev => [...prev, { id: Date.now() + 1, role: 'system', text: "Error contacting agent." }]);
@@ -385,7 +496,11 @@ function AgentView() {
         <div className="flex-1 p-4 overflow-y-auto space-y-4">
             {messages.map(msg => (
                 <div key={msg.id} className={clsx("flex", msg.role === 'user' ? "justify-end" : "justify-start")}>
-                    <div className={clsx("max-w-[80%] rounded-lg p-3", msg.role === 'user' ? "bg-blue-600" : msg.role === 'system' ? "bg-red-800" : "bg-slate-700")}>
+                    <div className={clsx(
+                        "max-w-[80%] rounded-lg p-3",
+                        msg.role === 'user' ? "bg-blue-600" : msg.isBlocked ? "bg-red-900/50 border border-red-500/50 text-red-200" : "bg-slate-700"
+                    )}>
+                        {msg.isBlocked && <div className="flex items-center gap-2 mb-1 font-bold text-red-400"><Shield size={16}/> Security Alert</div>}
                         {msg.text}
                     </div>
                 </div>
