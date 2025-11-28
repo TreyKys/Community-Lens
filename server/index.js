@@ -53,7 +53,7 @@ const getDb = () => {
 };
 
 // 1. createBounty
-app.post('/createBounty', async (req, res) => {
+app.post('/api/createBounty', async (req, res) => {
   const data = req.body.data || req.body;
   const { userQuery, rewardAmount } = data;
 
@@ -113,7 +113,7 @@ app.post('/createBounty', async (req, res) => {
 });
 
 // 2. fetchGrokSource
-app.post('/fetchGrokSource', async (req, res) => {
+app.post('/api/fetchGrokSource', async (req, res) => {
   const data = req.body.data || req.body;
   const { topic } = data;
 
@@ -145,7 +145,7 @@ Return JSON { text: "..." }`;
 });
 
 // 3. fetchConsensus
-app.post('/fetchConsensus', async (req, res) => {
+app.post('/api/fetchConsensus', async (req, res) => {
   const data = req.body.data || req.body;
   const { topic, mode } = data;
 
@@ -204,7 +204,7 @@ Constraint: Ignore general web results. Focus on efficacy percentages, safety da
 });
 
 // 4. analyzeDiscrepancy
-app.post('/analyzeDiscrepancy', async (req, res) => {
+app.post('/api/analyzeDiscrepancy', async (req, res) => {
   const data = req.body.data || req.body;
   const { suspectText, consensusText } = data;
 
@@ -236,7 +236,7 @@ Text B (Consensus): ${consensusText}`;
 });
 
 // 5. mintCommunityNote
-app.post('/mintCommunityNote', async (req, res) => {
+app.post('/api/mintCommunityNote', async (req, res) => {
   const data = req.body.data || req.body;
   const { topic, claim, analysis, bountyId, userId, stake, reward } = data;
 
@@ -312,7 +312,7 @@ app.post('/mintCommunityNote', async (req, res) => {
 });
 
 // 6. agentGuard
-app.post('/agentGuard', async (req, res) => {
+app.post('/api/agentGuard', async (req, res) => {
   const data = req.body.data || req.body;
   const { question } = data;
 
@@ -367,7 +367,7 @@ app.post('/agentGuard', async (req, res) => {
 });
 
 // 7. forceSeed
-app.post('/forceSeed', async (req, res) => {
+app.post('/api/forceSeed', async (req, res) => {
   const db = getDb();
 
   const bounties = [
