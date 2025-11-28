@@ -40,6 +40,7 @@ const callFunction = async (name, data) => {
 };
 
 // Export wrappers that match the httpsCallable signature (returning a Promise that resolves to { data: ... })
+export const createBounty = (data) => callFunction('createBounty', data);
 export const fetchGrokSource = (data) => callFunction('fetchGrokSource', data);
 export const fetchConsensus = (data) => callFunction('fetchConsensus', data);
 export const analyzeDiscrepancy = (data) => callFunction('analyzeDiscrepancy', data);
