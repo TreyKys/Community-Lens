@@ -239,10 +239,27 @@ app.post('/api/fetchConsensus', async (req, res) => {
       const response = await axios.get(url, { headers: { 'User-Agent': 'CommunityLens/1.0' } });
       const pages = response.data.query.pages;
       const pageId = Object.keys(pages)[0];
-      if (pageId === "-1") {
-        return "Wikipedia entry not found.";
+      
+      // Direct match found
+      if (pageId !== "-1" && pages[pageId].extract) {
+        return pages[pageId].extract;
       }
-      return pages[pageId].extract;
+      
+      // Wikipedia API returned no direct match - fallback to Gemini synthesis
+      console.log(`Wikipedia entry not found for "${topic}", using Gemini fallback...`);
+      const synthesisPrompt = `Act as a strict Wikipedia Archivist. The user is searching for "${topic}", but no direct page title exists in the Wikipedia API.
+Task: Access your internal Wikipedia training data to synthesize a summary of what Wikipedia says about this specific concept.
+Constraints: Do NOT use general web sources. Do NOT hallucinate. If the topic is a known hoax or misinformation (e.g., Lagos-Abuja Hyperloop, Lagos Tunnel), report Wikipedia's stance on it (e.g., 'Wikipedia has no record of this project', 'Listed as unverified', or 'No credible sources support this claim').
+Output: A concise, encyclopedic summary (2-3 sentences max).`;
+
+      const synthesisResult = await client.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: synthesisPrompt
+      });
+      
+      const synthesizedText = synthesisResult.response.text();
+      return `[Synthesized from Wikipedia Archives]: ${synthesizedText}`;
+      
     } catch (error) {
       console.error("Wikipedia Fetch Error:", error);
       throw new Error("Failed to fetch from Wikipedia.");
@@ -421,7 +438,7 @@ app.post('/api/agentGuard', async (req, res) => {
       model: 'gemini-2.5-flash',
       contents: checkPrompt
     });
-    const checkText = checkResult.content.parts[0].text.trim().toUpperCase();
+    const checkText = checkResult.response.text().trim().toUpperCase();
 
     if (checkText.includes("YES")) {
       return res.status(200).send({
@@ -438,7 +455,7 @@ app.post('/api/agentGuard', async (req, res) => {
       contents: answerPrompt
     });
 
-    res.status(200).send({ data: { blocked: false, message: answerResult.content.parts[0].text } });
+    res.status(200).send({ data: { blocked: false, message: answerResult.response.text() } });
 
   } catch (error) {
     console.error("Agent Guard Error:", error);
