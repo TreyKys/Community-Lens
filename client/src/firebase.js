@@ -19,7 +19,7 @@ const db = getFirestore(app);
 // Helper to call local backend functions
 const callFunction = async (name, data) => {
   // Get the backend domain from environment or use default
-  const domain = process.env.REACT_APP_API_URL || `${window.location.protocol}//${window.location.hostname}:3000`;
+  const domain = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:3000`;
   const url = `${domain}/${name}`;
 
   console.log('API Call:', { url, data });
