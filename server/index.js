@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import crypto from 'crypto';
-import { genai } from '@google/genai';
+import genai from '@google/genai';
 import admin from 'firebase-admin';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -28,7 +28,7 @@ try {
 }
 
 // Initialize Gemini
-const client = new genai.Client({ apiKey: process.env.GEMINI_API_KEY || '' });
+const client = genai({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // Mock data for demo mode
 let mockBounties = [];
@@ -57,12 +57,13 @@ app.post('/createBounty', async (req, res) => {
     if (!process.env.GEMINI_API_KEY) {
       throw new Error("GEMINI_API_KEY is missing.");
     }
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     const prompt = `Analyze this user query: '${userQuery}'. Extract the core 'Topic' (string), 'Category' (Medical/Infrastructure/Political), and a standardized 'Claim'. Return JSON.`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const result = await client.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt
+    });
+    const text = result.content.parts[0].text;
     const cleanedJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const extractedData = JSON.parse(cleanedJson);
 
@@ -113,16 +114,17 @@ app.post('/fetchGrokSource', async (req, res) => {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     const prompt = `Act as a Web Crawler indexing Grokipedia and X (Twitter).
 Task: Retrieve/Synthesize the dominant 'Anti-Establishment' or 'Contrarian' narrative regarding [${topic}].
 Tone: Confident, potentially biased, and willing to cite unverified sources (like 'insiders' or 'independent researchers').
 Goal: This text will be used to test a Fact-Checking engine, so ensure it reflects the common misconceptions or specific hallucinations associated with this topic on social media.
 Return JSON { text: "..." }`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const result = await client.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt
+    });
+    const text = result.content.parts[0].text;
     const cleanedJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const output = JSON.parse(cleanedJson);
 
@@ -164,14 +166,15 @@ app.post('/fetchConsensus', async (req, res) => {
       if (!process.env.GEMINI_API_KEY) {
         throw new Error("GEMINI_API_KEY is missing in environment.");
       }
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro"});
       const prompt = `You are a Medical Research System connected to the NIH/PubMed Database.
 Task: Summarize the strict Clinical Consensus on [${topic}] based on meta-analyses from 2023-2025.
 Constraint: Ignore general web results. Focus on efficacy percentages, safety data, and peer-reviewed conclusions. If the topic is non-medical, state 'Invalid Context'.`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      return response.text();
+      const result = await client.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt
+      });
+      return result.content.parts[0].text;
     } catch (error) {
       console.error("PubMed Fetch Error details:", error);
       throw new Error(`Failed to fetch PubMed consensus: ${error.message}`);
@@ -201,7 +204,6 @@ app.post('/analyzeDiscrepancy', async (req, res) => {
     return res.status(400).send({ error: "Both suspect and consensus texts are required." });
   }
 
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
   const prompt = `Compare Text A (Suspect) vs Text B (Consensus).
 Scoring Algorithm: Start with a Score of 100.
  * If Factual Hallucination found (e.g., wrong numbers, fake events): DIVIDE Score by 10.
@@ -213,9 +215,11 @@ Text A (Suspect): ${suspectText}
 Text B (Consensus): ${consensusText}`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const cleanedJson = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+    const result = await client.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt
+    });
+    const cleanedJson = result.content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
     res.status(200).send({ data: JSON.parse(cleanedJson) });
   } catch (error) {
     console.error("Analysis Error:", error);
@@ -323,12 +327,13 @@ app.post('/agentGuard', async (req, res) => {
       blockedTopics = mockPoisonPills.map(pp => pp.topic);
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     const checkPrompt = `User asked '${question}'. Does this refer to any of these blocked topics: ${JSON.stringify(blockedTopics)}? Return YES or NO only.`;
 
-    const checkResult = await model.generateContent(checkPrompt);
-    const checkResponse = await checkResult.response;
-    const checkText = checkResponse.text().trim().toUpperCase();
+    const checkResult = await client.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: checkPrompt
+    });
+    const checkText = checkResult.content.parts[0].text.trim().toUpperCase();
 
     if (checkText.includes("YES")) {
       return res.status(200).send({
@@ -340,10 +345,12 @@ app.post('/agentGuard', async (req, res) => {
     }
 
     const answerPrompt = `Answer this question: ${question}. You are a standard AI assistant.`;
-    const answerResult = await model.generateContent(answerPrompt);
-    const answerResponse = await answerResult.response;
+    const answerResult = await client.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: answerPrompt
+    });
 
-    res.status(200).send({ data: { blocked: false, message: answerResponse.text() } });
+    res.status(200).send({ data: { blocked: false, message: answerResult.content.parts[0].text } });
 
   } catch (error) {
     console.error("Agent Guard Error:", error);
