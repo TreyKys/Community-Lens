@@ -79,9 +79,50 @@ const getDb = () => {
   }
 };
 
-// 0. getBounties
+// 0. getBounties - return persisted bounties
 app.get('/api/getBounties', (req, res) => {
+  console.log('Fetching bounties:', mockBounties.length);
   res.status(200).send({ data: mockBounties });
+});
+
+// Seed demo data endpoint
+app.get('/api/seed', (req, res) => {
+  const demoData = [
+    {
+      id: 'demo_1',
+      topic: "Malaria Vaccine R21",
+      claim: "The R21 malaria vaccine has been approved by WHO",
+      context: "Medical",
+      reward: 500,
+      status: "OPEN",
+      createdAt: new Date(),
+      originalQuery: "Malaria Vaccine R21"
+    },
+    {
+      id: 'demo_2',
+      topic: "Lagos-Abuja Hyperloop",
+      claim: "A hyperloop system is being built between Lagos and Abuja",
+      context: "Infrastructure",
+      reward: 100,
+      status: "OPEN",
+      createdAt: new Date(),
+      originalQuery: "Lagos Hyperloop"
+    },
+    {
+      id: 'demo_3',
+      topic: "Vegetable Oil Composition",
+      claim: "Lemon juice can cure malaria",
+      context: "Medical",
+      reward: 500,
+      status: "OPEN",
+      createdAt: new Date(),
+      originalQuery: "Lemon juice malaria"
+    }
+  ];
+  
+  mockBounties = demoData;
+  saveBounties();
+  res.status(200).send({ success: true, data: mockBounties });
 });
 
 // 1. createBounty
