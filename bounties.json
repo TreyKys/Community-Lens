@@ -1,0 +1,32 @@
+[
+  {
+    "id": "demo_1",
+    "topic": "Malaria Vaccine R21",
+    "claim": "The R21 malaria vaccine has been approved by WHO",
+    "context": "Medical",
+    "reward": 500,
+    "status": "OPEN",
+    "createdAt": "2025-11-28T14:57:08.023Z",
+    "originalQuery": "Malaria Vaccine R21"
+  },
+  {
+    "id": "demo_2",
+    "topic": "Lagos-Abuja Hyperloop",
+    "claim": "A hyperloop system is being built between Lagos and Abuja",
+    "context": "Infrastructure",
+    "reward": 100,
+    "status": "OPEN",
+    "createdAt": "2025-11-28T14:57:08.023Z",
+    "originalQuery": "Lagos Hyperloop"
+  },
+  {
+    "id": "demo_3",
+    "topic": "Vegetable Oil Composition",
+    "claim": "Lemon juice can cure malaria",
+    "context": "Medical",
+    "reward": 500,
+    "status": "OPEN",
+    "createdAt": "2025-11-28T14:57:08.023Z",
+    "originalQuery": "Lemon juice malaria"
+  }
+]
