@@ -424,7 +424,9 @@ app.post('/api/mintCommunityNote', async (req, res) => {
             publicKey: process.env.DKG_PUBLIC_KEY,
             privateKey: process.env.DKG_PRIVATE_KEY,
             // HARD FIX: Explicitly specify Hub Contract for NeuroWeb Testnet
-            hubContract: '0x5f27327D6c8C5eD1Eb18E64588E83020692dE82d'
+            hubContract: '0x5f27327D6c8C5eD1Eb18E64588E83020692dE82d',
+            // RPC endpoint for NeuroWeb Testnet blockchain interaction
+            rpc: 'https://neuroweb-testnet.arcana.network/rpc'
           },
           maxNumberOfRetries: 30,
           frequency: 2,
