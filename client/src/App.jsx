@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield, MessageSquare, Zap, Plus, X } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db, createBounty, fetchGrokSource, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard } from './firebase';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db, createBounty, fetchGrokSource, fetchConsensus, analyzeDiscrepancy, mintCommunityNote, agentGuard, getBounties } from './firebase';
 
 function App() {
   const [activeTab, setActiveTab] = useState('bounty'); // 'bounty' | 'verifier' | 'agent'
@@ -81,24 +80,23 @@ function BountyBoardView({ onViewBounty }) {
     const [creatingStatus, setCreatingStatus] = useState(''); // 'loading' | 'success' | 'error'
 
     useEffect(() => {
-        // Simple query, in a real app might want to order by createdAt
-        const q = query(collection(db, "bounties")); // Firestore indexes might be needed for orderBy('createdAt', 'desc')
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const bountiesData = [];
-            querySnapshot.forEach((doc) => {
-                bountiesData.push({ id: doc.id, ...doc.data() });
-            });
-            // Client-side sort if index missing
-            bountiesData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-            setBounties(bountiesData);
-        }, (error) => {
-            // Suppress expected permission errors in demo mode
-            if (!error.message.includes("Missing or insufficient permissions")) {
-                console.warn("Firestore read error:", error.message);
+        const loadBounties = async () => {
+            try {
+                const result = await getBounties();
+                if (result.data && Array.isArray(result.data)) {
+                    result.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                    setBounties(result.data);
+                }
+            } catch (error) {
+                console.error("Error loading bounties:", error);
             }
-            // In demo mode, continue without firestore data
-        });
-        return () => unsubscribe();
+        };
+        
+        // Load bounties on mount and poll for updates
+        loadBounties();
+        const interval = setInterval(loadBounties, 2000);
+        
+        return () => clearInterval(interval);
     }, []);
 
     const handleCreateBounty = async () => {

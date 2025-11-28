@@ -38,10 +38,37 @@ const client = {
   }
 };
 
+// File-based persistence
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const bountiesFile = path.join(__dirname, '..', 'bounties.json');
+const poisonPillsFile = path.join(__dirname, '..', 'poison_pills.json');
+
+// Load persisted data
+const loadPersistedData = () => {
+  try {
+    if (fs.existsSync(bountiesFile)) {
+      const data = JSON.parse(fs.readFileSync(bountiesFile, 'utf8'));
+      return data;
+    }
+  } catch (e) {
+    console.log('Could not load persisted bounties:', e.message);
+  }
+  return [];
+};
+
 // Mock data for demo mode
-let mockBounties = [];
+let mockBounties = loadPersistedData();
 let mockPoisonPills = [];
 let mockLeaderboard = [];
+
+// Save bounties to file
+const saveBounties = () => {
+  try {
+    fs.writeFileSync(bountiesFile, JSON.stringify(mockBounties, null, 2));
+  } catch (e) {
+    console.error('Error saving bounties:', e.message);
+  }
+};
 
 // Helper to get firestore or use mock
 const getDb = () => {
@@ -51,6 +78,11 @@ const getDb = () => {
     return null;
   }
 };
+
+// 0. getBounties
+app.get('/api/getBounties', (req, res) => {
+  res.status(200).send({ data: mockBounties });
+});
 
 // 1. createBounty
 app.post('/api/createBounty', async (req, res) => {
@@ -107,9 +139,10 @@ app.post('/api/createBounty', async (req, res) => {
         createdAt: new Date(),
         originalQuery: userQuery
       });
+      saveBounties();
     }
 
-    console.log("Bounty created successfully:", { bountyId, topic: extractedData.Topic });
+    console.log("Bounty created successfully:", { bountyId, topic });
     res.status(200).send({ data: { success: true, bountyId, ...extractedData } });
 
   } catch (error) {
