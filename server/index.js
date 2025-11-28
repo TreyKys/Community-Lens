@@ -5,20 +5,26 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import admin from 'firebase-admin';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 // Initialize Firebase Admin
-const serviceAccountPath = process.env.FIREBASE_ADMIN_SDK || './serviceAccount.json';
 try {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const serviceAccountPath = path.join(__dirname, '..', 'serviceAccount.json');
+  const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
+    credential: admin.credential.cert(serviceAccount),
     projectId: 'community-lens-dd945'
   });
+  console.log('Firebase Admin initialized with Firestore');
 } catch (e) {
-  console.log('Firebase Admin not configured, running in demo mode');
+  console.log('Firebase Admin not configured, running in demo mode:', e.message);
 }
 
 // Initialize Gemini
