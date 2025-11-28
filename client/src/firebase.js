@@ -57,4 +57,20 @@ export const analyzeDiscrepancy = (data) => callFunction('api/analyzeDiscrepancy
 export const mintCommunityNote = (data) => callFunction('api/mintCommunityNote', data);
 export const agentGuard = (data) => callFunction('api/agentGuard', data);
 
+// Get bounties from backend
+export const getBounties = async () => {
+  const url = `/api/getBounties`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Error ${response.status}`);
+    }
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error('Error fetching bounties:', error);
+    return { data: [] };
+  }
+};
+
 export { db };
