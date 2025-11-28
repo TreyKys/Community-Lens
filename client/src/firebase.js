@@ -22,20 +22,32 @@ const callFunction = async (name, data) => {
   const domain = process.env.REACT_APP_API_URL || `${window.location.protocol}//${window.location.hostname}:3000`;
   const url = `${domain}/${name}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data }), // Wrap data to match httpsCallable expectations or backend logic
-  });
+  console.log('API Call:', { url, data });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Error ${response.status}: ${errorText}`);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data }), // Wrap data to match httpsCallable expectations or backend logic
+    });
+
+    console.log('API Response Status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API Error Response:', errorText);
+      throw new Error(`Error ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('API Success:', result);
+    return result; // Backend returns { data: ... }
+  } catch (error) {
+    console.error('API Fetch Error:', error.message);
+    throw error;
   }
-
-  return response.json(); // Backend returns { data: ... }
 };
 
 // Export wrappers that match the httpsCallable signature (returning a Promise that resolves to { data: ... })

@@ -104,11 +104,12 @@ app.post('/api/createBounty', async (req, res) => {
       });
     }
 
+    console.log("Bounty created successfully:", { bountyId, topic: extractedData.Topic });
     res.status(200).send({ data: { success: true, bountyId, ...extractedData } });
 
   } catch (error) {
-    console.error("Create Bounty Error:", error);
-    res.status(500).send({ error: "Failed to create bounty." });
+    console.error("Create Bounty Error:", error.message, error.stack);
+    res.status(500).send({ error: "Failed to create bounty.", details: error.message });
   }
 });
 
