@@ -344,7 +344,7 @@ Text B (Consensus): ${consensusText}`;
   }
 });
 
-// 5. mintCommunityNote - Real DKG Publishing
+// 5. mintCommunityNote - Real DKG Publishing with Schema.org ClaimReview
 app.post('/api/mintCommunityNote', async (req, res) => {
   const data = req.body.data || req.body;
   const { topic, claim, analysis, bountyId, userId, stake, reward } = data;
@@ -353,23 +353,56 @@ app.post('/api/mintCommunityNote', async (req, res) => {
     return res.status(400).send({ error: "Missing required data for minting." });
   }
 
+  // Convert score (0-100) to rating scale (1-5 for ClaimReview)
+  // Score < 30 = False (1), 30-50 = Mostly False (2), 50-70 = Mixed (3), 70-85 = Mostly True (4), >85 = True (5)
+  let ratingValue = 1;
+  if (analysis.score >= 85) ratingValue = 5;
+  else if (analysis.score >= 70) ratingValue = 4;
+  else if (analysis.score >= 50) ratingValue = 3;
+  else if (analysis.score >= 30) ratingValue = 2;
+  
+  // Determine verdict label
+  const verdictMap = {
+    1: "False",
+    2: "Mostly False",
+    3: "Mixed",
+    4: "Mostly True",
+    5: "True"
+  };
+  const verdict = verdictMap[ratingValue];
+
+  // Knowledge Asset in Schema.org ClaimReview format (compatible with Google Fact Check)
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "ClaimReview",
-    "claimReviewed": topic,
+    "claimReviewed": claim,
     "reviewRating": {
       "@type": "Rating",
-      "ratingValue": analysis.score || 0,
-      "bestRating": "100",
-      "worstRating": "0"
+      "ratingValue": ratingValue.toString(),
+      "bestRating": "5",
+      "worstRating": "1",
+      "alternateName": verdict
+    },
+    "itemReviewed": {
+      "@type": "CreativeWork",
+      "author": {
+        "@type": "Organization",
+        "name": "Grokipedia / X (Twitter)"
+      },
+      "datePublished": new Date().toISOString().split('T')[0],
+      "name": `Claim: ${topic}`
     },
     "author": {
       "@type": "Organization",
-      "name": "Community Lens Verifier"
+      "name": "Community Lens Verifier",
+      "url": "https://community-lens.web.app"
     },
-    "interpretationOfClaim": analysis.analysis || "Discrepancy Analysis",
-    "resultComment": JSON.stringify(analysis.discrepancies || []),
-    "reputationPledge": stake
+    "reviewLocation": {
+      "@type": "Place",
+      "name": "Global"
+    },
+    "datePublished": new Date().toISOString().split('T')[0],
+    "url": "https://community-lens.web.app"
   };
 
   try {
@@ -379,7 +412,9 @@ app.post('/api/mintCommunityNote', async (req, res) => {
     // ATTEMPT 1: Try real DKG testnet publishing
     if (DKG && process.env.DKG_PUBLIC_KEY && process.env.DKG_PRIVATE_KEY) {
       try {
-        console.log("Attempting real DKG testnet publishing...");
+        console.log("🔗 Attempting real DKG testnet publishing...");
+        console.log("📝 Knowledge Asset (ClaimReview Schema):", JSON.stringify(jsonLd, null, 2));
+        
         const dkgClient = new DKG({
           environment: 'testnet',
           endpoint: 'https://testnet-node.origintrail.io',
@@ -399,9 +434,10 @@ app.post('/api/mintCommunityNote', async (req, res) => {
         ualFromDkg = createResult.UAL;
         assetId = ualFromDkg;
         console.log(`✅ DKG Testnet Publishing Success! UAL: ${assetId}`);
+        console.log(`📌 Knowledge Asset ID: ${assetId}`);
       } catch (dkgError) {
-        console.error("DKG Testnet Publishing Error:", dkgError.message);
-        console.log("Falling back to hash-based simulation...");
+        console.error("❌ DKG Testnet Publishing Error:", dkgError.message);
+        console.log("⚠️ Falling back to hash-based simulation...");
       }
     }
 
