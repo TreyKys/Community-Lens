@@ -428,22 +428,44 @@ app.post('/api/mintCommunityNote', async (req, res) => {
       });
 
       if (bountyId) {
-        const bountyRef = db.collection('bounties').doc(bountyId);
-        batch.update(bountyRef, { status: 'VERIFIED & COMPLETED' });
-      }
-
-      if (userId && reward) {
-        const leaderboardQuery = db.collection('leaderboard').where('user', '==', userId);
-        const querySnapshot = await leaderboardQuery.get();
-        if (!querySnapshot.empty) {
-          const userDocRef = querySnapshot.docs[0].ref;
-          batch.update(userDocRef, { points: admin.firestore.FieldValue.increment(reward) });
+        try {
+          const bountyRef = db.collection('bounties').doc(bountyId);
+          batch.update(bountyRef, { status: 'VERIFIED & COMPLETED' });
+        } catch (e) {
+          console.log("Firestore bounty update skipped (demo mode):", e.message);
         }
       }
 
-      await batch.commit();
+      if (userId && reward) {
+        try {
+          const leaderboardQuery = db.collection('leaderboard').where('user', '==', userId);
+          const querySnapshot = await leaderboardQuery.get();
+          if (!querySnapshot.empty) {
+            const userDocRef = querySnapshot.docs[0].ref;
+            batch.update(userDocRef, { points: admin.firestore.FieldValue.increment(reward) });
+          }
+        } catch (e) {
+          console.log("Firestore leaderboard update skipped (demo mode):", e.message);
+        }
+      }
+
+      try {
+        await batch.commit();
+      } catch (e) {
+        console.log("Firestore batch commit failed, continuing with mock storage:", e.message);
+        mockPoisonPills.push({ topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd, dkgPublished: !!ualFromDkg });
+      }
     } else {
       mockPoisonPills.push({ topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd, dkgPublished: !!ualFromDkg });
+    }
+    
+    // Also update bounty status in file-based storage
+    if (bountyId && mockBounties) {
+      const bounty = mockBounties.find(b => b.id === bountyId);
+      if (bounty) {
+        bounty.status = 'VERIFIED & COMPLETED';
+        saveBounties();
+      }
     }
 
     console.log(`Poison Pill Activated: Topic "${topic}" now BLOCKED with Asset ID: ${assetId}`);
