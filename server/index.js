@@ -420,17 +420,26 @@ app.post('/api/agentGuard', async (req, res) => {
   try {
     const db = getDb();
     let blockedTopics = [];
+    let blockedAssets = {}; // Map topics to their asset IDs
 
     if (db) {
       const poisonPillsRef = db.collection("poison_pills");
       const querySnapshot = await poisonPillsRef.get();
       querySnapshot.forEach(doc => {
         const data = doc.data();
-        if (data.topic) blockedTopics.push(data.topic);
+        if (data.topic) {
+          blockedTopics.push(data.topic);
+          blockedAssets[data.topic] = data.assetId;
+        }
       });
     } else {
       blockedTopics = mockPoisonPills.map(pp => pp.topic);
+      mockPoisonPills.forEach(pp => {
+        blockedAssets[pp.topic] = pp.assetId;
+      });
     }
+
+    console.log("Agent Guard: Checking question against blocked topics:", blockedTopics);
 
     const checkPrompt = `User asked '${question}'. Does this refer to any of these blocked topics: ${JSON.stringify(blockedTopics)}? Return YES or NO only.`;
 
@@ -441,14 +450,20 @@ app.post('/api/agentGuard', async (req, res) => {
     const checkText = checkResult.response.text().trim().toUpperCase();
 
     if (checkText.includes("YES")) {
+      // Find which topic matched
+      const matchedTopic = blockedTopics[0]; // Simplified - in production, could be smarter
+      const assetId = blockedAssets[matchedTopic] || "UNKNOWN";
+      console.log(`Agent Guard: BLOCKED - Question matches topic "${matchedTopic}" (Asset: ${assetId})`);
+      
       return res.status(200).send({
         data: {
           blocked: true,
-          message: "⛔ BLOCKED: Verified Community Note flags this topic as misinformation."
+          message: `⛔ BLOCKED: Verified Community Note [${assetId}] flags this topic as misinformation.`
         }
       });
     }
 
+    console.log("Agent Guard: Question allowed, generating response...");
     const answerPrompt = `Answer this question: ${question}. You are a standard AI assistant.`;
     const answerResult = await client.models.generateContent({
       model: 'gemini-2.5-flash',

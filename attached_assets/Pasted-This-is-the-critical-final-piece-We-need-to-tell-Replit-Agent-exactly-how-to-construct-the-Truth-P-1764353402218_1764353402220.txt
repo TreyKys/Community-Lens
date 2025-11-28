@@ -1,0 +1,51 @@
+This is the critical final piece. We need to tell Replit Agent exactly how to construct the "Truth Patch" (JSON-LD) and how to activate the "Poison Pill" (Firewall).
+Here is the Master Prompt to finish the job. It connects the "Mint" button to the "Agent Block" logic using the specific DKG SDK commands.
+Copy and paste this entire block into Replit Agent:
+TASK: Implement "Minting" and "Poison Pill" Logic
+CONTEXT:
+We need to connect the "Verification Terminal" to the "Agent Guard". When a user mints a note, it must publish to the OriginTrail DKG and simultaneously update our Firestore database to block that topic in the Agent's chat.
+REQUIRED CODE UPDATES:
+1. Update api/mint (Backend Route)
+ * Input: { topic, claim, analysis, stakeAmount }
+ * Step A: Construct JSON-LD (ClaimReview Schema):
+   * Create a valid JSON object following schema.org/ClaimReview:
+     <!-- end list -->
+   {
+  "@context": "https://schema.org",
+  "@type": "ClaimReview",
+  "claimReviewed": "[The Suspect Claim]",
+  "reviewRating": {
+    "@type": "Rating",
+    "ratingValue": "[Score from Gemini]",
+    "bestRating": "100",
+    "worstRating": "0"
+  },
+  "author": {
+    "@type": "Organization",
+    "name": "Community Lens Verifier"
+  }
+}
+
+ * Step B: DKG Publishing:
+   * Import dkg.js.
+   * Initialize: const DkgClient = new DKG({ environment: 'testnet', endpoint: 'http://localhost:8900', port: 8900, blockchain: { name: 'neuroweb:testnet', publicKey: ..., privateKey: ... } });
+   * Try: await DkgClient.asset.create(jsonLdObject, { epochsNum: 5 }).
+   * Catch (Simulation Fallback): If the DKG node is unreachable or gas fails (common in hackathon environments), catch the error and generate a deterministic SHA-256 hash of the content. Return this hash as a simulated "UAL" (Universal Asset Locator) so the flow doesn't break.
+ * Step C: The Poison Pill (Crucial):
+   * Write to Firestore collection poison_pills:
+   * { topic: "[Topic Name]", assetId: "[UAL]", status: "BLOCKED", timestamp: Date.now() }
+   * Return success to frontend.
+2. Update api/agent-guard (The Firewall)
+ * Input: { question }
+ * Logic:
+   * Check 1 (The Firewall): Query Firestore poison_pills.
+   * Use Gemini to check semantic relevance: "User asked '${question}'. Does this relate to any blocked topic in this list: ${blockedTopics}? Return YES/NO."
+   * If YES: Return { blocked: true, message: "⛔ BLOCKED: A Verified Community Note [Asset ID] flags this topic as misinformation." }
+   * If NO: Call Gemini to generate a standard answer.
+GOAL:
+Ensure that immediately after I click "Mint" on a topic, the Agent tab refuses to answer questions about that same topic.
+🧱 What this does
+ * The "Mint": Creates the official record (or a mathematically valid simulation if the testnet is flaky).
+ * The "Poison": Saves the block rule to your database.
+ * The "Guard": Reads that rule instantly.
+This closes the loop. Once Replit finishes this, your demo is ready to record.
