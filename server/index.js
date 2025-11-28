@@ -412,7 +412,12 @@ app.post('/api/mintCommunityNote', async (req, res) => {
       console.log(`⚠️ Using simulated DKG ID (hash-based): ${assetId}`);
     }
 
-    // Step C: Write poison pill to database
+    // Step C: Always add poison pill to in-memory list (agents read this immediately)
+    const poisonPill = { topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd, dkgPublished: !!ualFromDkg };
+    mockPoisonPills.push(poisonPill);
+    console.log(`Poison Pill Activated: Topic "${topic}" now BLOCKED with Asset ID: ${assetId}`);
+
+    // Also try to persist to Firestore if available
     const db = getDb();
     if (db) {
       const batch = db.batch();
@@ -451,12 +456,10 @@ app.post('/api/mintCommunityNote', async (req, res) => {
 
       try {
         await batch.commit();
+        console.log("Firestore write completed");
       } catch (e) {
-        console.log("Firestore batch commit failed, continuing with mock storage:", e.message);
-        mockPoisonPills.push({ topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd, dkgPublished: !!ualFromDkg });
+        console.log("Firestore batch commit skipped (demo mode):", e.message);
       }
-    } else {
-      mockPoisonPills.push({ topic, assetId, status: "BLOCKED", timestamp: new Date(), jsonLd, dkgPublished: !!ualFromDkg });
     }
     
     // Also update bounty status in file-based storage
@@ -468,7 +471,6 @@ app.post('/api/mintCommunityNote', async (req, res) => {
       }
     }
 
-    console.log(`Poison Pill Activated: Topic "${topic}" now BLOCKED with Asset ID: ${assetId}`);
     res.status(200).send({ data: { success: true, assetId, dkgPublished: !!ualFromDkg } });
   } catch (error) {
     console.error("Minting Error:", error);
@@ -486,40 +488,58 @@ app.post('/api/agentGuard', async (req, res) => {
   }
 
   try {
-    const db = getDb();
     let blockedTopics = [];
     let blockedAssets = {}; // Map topics to their asset IDs
 
+    // Always check in-memory poison pills first (fastest, always current)
+    blockedTopics = mockPoisonPills.map(pp => pp.topic);
+    mockPoisonPills.forEach(pp => {
+      blockedAssets[pp.topic] = pp.assetId;
+    });
+
+    // Also try to get from Firestore if available
+    const db = getDb();
     if (db) {
-      const poisonPillsRef = db.collection("poison_pills");
-      const querySnapshot = await poisonPillsRef.get();
-      querySnapshot.forEach(doc => {
-        const data = doc.data();
-        if (data.topic) {
-          blockedTopics.push(data.topic);
-          blockedAssets[data.topic] = data.assetId;
-        }
-      });
-    } else {
-      blockedTopics = mockPoisonPills.map(pp => pp.topic);
-      mockPoisonPills.forEach(pp => {
-        blockedAssets[pp.topic] = pp.assetId;
-      });
+      try {
+        const poisonPillsRef = db.collection("poison_pills");
+        const querySnapshot = await poisonPillsRef.get();
+        querySnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.topic && !blockedTopics.includes(data.topic)) {
+            blockedTopics.push(data.topic);
+            blockedAssets[data.topic] = data.assetId;
+          }
+        });
+      } catch (e) {
+        console.log("Firestore poison pill query skipped:", e.message);
+      }
     }
 
-    console.log("Agent Guard: Checking question against blocked topics:", blockedTopics);
+    console.log(`Agent Guard: Checking question against ${blockedTopics.length} blocked topics:`, blockedTopics);
 
-    const checkPrompt = `User asked '${question}'. Does this refer to any of these blocked topics: ${JSON.stringify(blockedTopics)}? Return YES or NO only.`;
+    if (blockedTopics.length === 0) {
+      console.log("Agent Guard: No blocked topics found, allowing question");
+      const answerPrompt = `Answer this question: ${question}. You are a standard AI assistant.`;
+      const answerResult = await client.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: answerPrompt
+      });
+      return res.status(200).send({ data: { blocked: false, message: answerResult.response.text() } });
+    }
+
+    const checkPrompt = `User asked: "${question}"\n\nBlocked topics: ${JSON.stringify(blockedTopics)}\n\nDoes the user's question refer to any of these blocked topics? Answer with YES or NO only.`;
 
     const checkResult = await client.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: checkPrompt
     });
     const checkText = checkResult.response.text().trim().toUpperCase();
+    
+    console.log(`Agent Guard: Gemini response: "${checkText}"`);
 
     if (checkText.includes("YES")) {
       // Find which topic matched
-      const matchedTopic = blockedTopics[0]; // Simplified - in production, could be smarter
+      const matchedTopic = blockedTopics[0];
       const assetId = blockedAssets[matchedTopic] || "UNKNOWN";
       console.log(`Agent Guard: BLOCKED - Question matches topic "${matchedTopic}" (Asset: ${assetId})`);
       
