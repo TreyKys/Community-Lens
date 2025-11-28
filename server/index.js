@@ -57,7 +57,7 @@ app.post('/createBounty', async (req, res) => {
     if (!process.env.GEMINI_API_KEY) {
       throw new Error("GEMINI_API_KEY is missing.");
     }
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     const prompt = `Analyze this user query: '${userQuery}'. Extract the core 'Topic' (string), 'Category' (Medical/Infrastructure/Political), and a standardized 'Claim'. Return JSON.`;
 
     const result = await model.generateContent(prompt);
@@ -113,7 +113,7 @@ app.post('/fetchGrokSource', async (req, res) => {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     const prompt = `Act as a Web Crawler indexing Grokipedia and X (Twitter).
 Task: Retrieve/Synthesize the dominant 'Anti-Establishment' or 'Contrarian' narrative regarding [${topic}].
 Tone: Confident, potentially biased, and willing to cite unverified sources (like 'insiders' or 'independent researchers').
@@ -323,7 +323,7 @@ app.post('/agentGuard', async (req, res) => {
       blockedTopics = mockPoisonPills.map(pp => pp.topic);
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
     const checkPrompt = `User asked '${question}'. Does this refer to any of these blocked topics: ${JSON.stringify(blockedTopics)}? Return YES or NO only.`;
 
     const checkResult = await model.generateContent(checkPrompt);
