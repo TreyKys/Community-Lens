@@ -18,9 +18,12 @@ const db = getFirestore(app);
 
 // Helper to call backend functions
 const callFunction = async (name, data) => {
-  // Use public Replit backend domain for production (Netlify) and development
-  const backendDomain = 'https://2192a4ea-d452-48bf-b57d-69c6eafeba86-00-1cm2falbtp98y.kirk.replit.dev';
-  const url = `${backendDomain}/${name}`;
+  // Use public domain for production, relative path for dev (proxy handles it)
+  const isProduction = import.meta.env.PROD;
+  const baseUrl = isProduction 
+    ? 'https://2192a4ea-d452-48bf-b57d-69c6eafeba86-00-1cm2falbtp98y.kirk.replit.dev'
+    : '';
+  const url = `${baseUrl}/${name}`;
 
   console.log('API Call:', { url, data });
 
@@ -60,8 +63,11 @@ export const agentGuard = (data) => callFunction('api/agentGuard', data);
 
 // Get bounties from backend
 export const getBounties = async () => {
-  const backendDomain = 'https://2192a4ea-d452-48bf-b57d-69c6eafeba86-00-1cm2falbtp98y.kirk.replit.dev';
-  const url = `${backendDomain}/api/getBounties`;
+  const isProduction = import.meta.env.PROD;
+  const baseUrl = isProduction
+    ? 'https://2192a4ea-d452-48bf-b57d-69c6eafeba86-00-1cm2falbtp98y.kirk.replit.dev'
+    : '';
+  const url = `${baseUrl}/api/getBounties`;
   try {
     const response = await fetch(url);
     if (!response.ok) {
