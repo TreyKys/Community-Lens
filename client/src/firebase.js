@@ -18,9 +18,10 @@ const db = getFirestore(app);
 
 // Helper to call backend functions
 const callFunction = async (name, data) => {
-  // Use relative URLs (proxy routes to localhost:3000 in dev)
-  // For production (Netlify), environment should be configured separately
-  const url = `/${name}`;
+  // In development: use relative URLs (Vite proxy routes to localhost:3000)
+  // In production (Netlify): use VITE_BACKEND_URL env variable
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+  const url = backendUrl ? `${backendUrl}/${name}` : `/${name}`;
 
   console.log('API Call:', { url, data });
 
@@ -60,7 +61,8 @@ export const agentGuard = (data) => callFunction('api/agentGuard', data);
 
 // Get bounties from backend
 export const getBounties = async () => {
-  const url = `/api/getBounties`;
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+  const url = backendUrl ? `${backendUrl}/api/getBounties` : `/api/getBounties`;
   try {
     const response = await fetch(url);
     if (!response.ok) {
