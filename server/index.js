@@ -32,6 +32,14 @@ app.use(cors({
   credentials: false
 }));
 
+// Explicit OPTIONS handler for preflight requests
+app.options('*', cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
+}));
+
 // Initialize Firebase Admin
 try {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
