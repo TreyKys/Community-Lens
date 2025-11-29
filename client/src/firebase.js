@@ -16,10 +16,11 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Helper to call local backend functions
+// Helper to call backend functions
 const callFunction = async (name, data) => {
-  // Use relative path - Vite proxy will forward to backend on port 3000
-  const url = `/${name}`;
+  // Use public Replit backend domain for production (Netlify) and development
+  const backendDomain = 'https://2192a4ea-d452-48bf-b57d-69c6eafeba86-00-1cm2falbtp98y.kirk.replit.dev';
+  const url = `${backendDomain}/${name}`;
 
   console.log('API Call:', { url, data });
 
@@ -59,7 +60,8 @@ export const agentGuard = (data) => callFunction('api/agentGuard', data);
 
 // Get bounties from backend
 export const getBounties = async () => {
-  const url = `/api/getBounties`;
+  const backendDomain = 'https://2192a4ea-d452-48bf-b57d-69c6eafeba86-00-1cm2falbtp98y.kirk.replit.dev';
+  const url = `${backendDomain}/api/getBounties`;
   try {
     const response = await fetch(url);
     if (!response.ok) {
