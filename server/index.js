@@ -23,7 +23,14 @@ try {
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+// Enable CORS for all origins (needed for Netlify frontend)
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
+}));
 
 // Initialize Firebase Admin
 try {
