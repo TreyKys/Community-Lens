@@ -1,8 +1,0 @@
-{
-  "projects": {
-    "default": "community-lens-dd945",
-    "Production": "community-lens-dd945"
-  },
-  "targets": {},
-  "etags": {}
-}
