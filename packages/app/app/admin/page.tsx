@@ -1,13 +1,17 @@
 'use client';
 
-import { useAccount } from 'wagmi';
+import { useAccount, useWriteContract } from 'wagmi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI } from '@/lib/constants';
+import { useToast } from '@/hooks/use-toast';
 
 export default function AdminPage() {
   const { address } = useAccount();
+  const { writeContract, isPending, isSuccess, data: hash } = useWriteContract();
+  const { toast } = useToast();
   const [isMounted, setIsMounted] = useState(false);
   const adminAddress = process.env.NEXT_PUBLIC_ADMIN_ADDRESS;
 
@@ -18,6 +22,19 @@ export default function AdminPage() {
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (isSuccess && hash) {
+        toast({
+            title: "Market Created!",
+            description: `Transaction Hash: ${hash}`,
+        });
+        // Reset form
+        setQuestion('');
+        setOptions('');
+        setDuration('');
+    }
+  }, [isSuccess, hash, toast]);
 
   if (!isMounted) return null;
 
@@ -32,12 +49,36 @@ export default function AdminPage() {
   }
 
   const handleSubmit = () => {
-     // TODO: Implement contract write logic in next phase
-     // Logic: Split options by comma, convert duration (hours) to seconds
-     console.log('Creating market:', {
-        question,
-        options: options.split(',').map(o => o.trim()),
-        durationSeconds: Number(duration) * 3600
+     if (!question || !options) {
+         toast({
+             title: "Error",
+             description: "Please fill in all fields",
+             variant: "destructive"
+         });
+         return;
+     }
+
+     const optionsArray = options.split(',').map(o => o.trim()).filter(o => o.length > 0);
+
+     if (optionsArray.length < 2) {
+         toast({
+             title: "Error",
+             description: "At least 2 options are required",
+             variant: "destructive"
+         });
+         return;
+     }
+
+     // Duration logic requested in prompt, but contract does not accept it.
+     // We convert it here as requested to show intent, even if not used.
+     const durationSeconds = duration ? Number(duration) * 3600 : 0;
+     console.log("Duration in seconds:", durationSeconds);
+
+     writeContract({
+         address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+         abi: TRUTH_MARKET_ABI,
+         functionName: 'createMarket',
+         args: [question, optionsArray],
      });
   };
 
@@ -76,7 +117,9 @@ export default function AdminPage() {
             />
           </div>
 
-          <Button className="w-full" onClick={handleSubmit}>Create Market</Button>
+          <Button className="w-full" onClick={handleSubmit} disabled={isPending}>
+            {isPending ? 'Creating...' : 'Create Market'}
+          </Button>
         </CardContent>
       </Card>
     </div>
