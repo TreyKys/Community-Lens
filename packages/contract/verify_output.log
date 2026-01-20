@@ -1,0 +1,24 @@
+[dotenv@17.2.3] injecting env (3) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 👥 sync secrets across teammates & machines: https://dotenvx.com/ops
+Verifying with account: 0xA1622ad08E558AE506b18d4028A6F613fd90F916
+Account balance: 0.208335296
+Using Nonce: 2
+Creating verification market (overwriting pending txs if any)...
+Transaction sent: 0x67f3a25ba2ab0666493bdb777f46ba8c18443be8b54998cbf19d75e8c5212974
+Waiting for confirmation...
+Transaction mined!
+Error: could not decode result data (value="0x", info={ "method": "nextMarketId", "signature": "nextMarketId()" }, code=BAD_DATA, version=6.16.0)
+    at makeError (/app/node_modules/ethers/src.ts/utils/errors.ts:698:21)
+    at assert (/app/node_modules/ethers/src.ts/utils/errors.ts:719:25)
+    at Interface.decodeFunctionResult (/app/node_modules/ethers/src.ts/abi/interface.ts:916:15)
+    at staticCallResult (/app/node_modules/ethers/src.ts/contract/contract.ts:346:35)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async staticCall (/app/node_modules/ethers/src.ts/contract/contract.ts:303:24)
+    at async Proxy.nextMarketId (/app/node_modules/ethers/src.ts/contract/contract.ts:351:41)
+    at async main (/app/packages/contract/scripts/verify_online.ts:52:18) {
+  code: 'BAD_DATA',
+  value: '0x',
+  info: { method: 'nextMarketId', signature: 'nextMarketId()' },
+  shortMessage: 'could not decode result data'
+}
