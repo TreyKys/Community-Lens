@@ -418,3 +418,26 @@ export const TRUTH_MARKET_ABI = [
       "type": "function"
     }
   ];
+
+export const MOCK_USDC_ADDRESS = "0xF6529aac808c3CA667117CA191da709695462764";
+
+export const MOCK_USDC_ABI = [
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "mint",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+];
