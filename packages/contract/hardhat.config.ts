@@ -10,7 +10,10 @@ const config: HardhatUserConfig = {
     hardhat: {
       // Hardhat Network configuration
     },
-    // Add other networks here
+    polygonAmoy: {
+      url: `https://polygon-amoy.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+    },
   },
 };
 
