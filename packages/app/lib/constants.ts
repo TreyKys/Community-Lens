@@ -1,4 +1,4 @@
-export const TRUTH_MARKET_ADDRESS = "0xB8Ef3d6E0bE1d051700021a5fc5c998aD476Ec31";
+export const TRUTH_MARKET_ADDRESS = "0x5Cf381C69e2148Af9a2AA6C5ef1Cd85445fAd80D";
 
 export const TRUTH_MARKET_ABI = [
     {
@@ -90,6 +90,12 @@ export const TRUTH_MARKET_ABI = [
           "internalType": "string[]",
           "name": "options",
           "type": "string[]"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "bettingEndsAt",
+          "type": "uint256"
         }
       ],
       "name": "MarketCreated",
@@ -207,6 +213,11 @@ export const TRUTH_MARKET_ABI = [
           "internalType": "string[]",
           "name": "options",
           "type": "string[]"
+        },
+        {
+          "internalType": "uint256",
+          "name": "duration",
+          "type": "uint256"
         }
       ],
       "name": "createMarket",
@@ -295,6 +306,11 @@ export const TRUTH_MARKET_ABI = [
         {
           "internalType": "uint256",
           "name": "totalPool",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "bettingEndsAt",
           "type": "uint256"
         }
       ],
@@ -419,7 +435,7 @@ export const TRUTH_MARKET_ABI = [
     }
   ];
 
-export const MOCK_USDC_ADDRESS = "0xF6529aac808c3CA667117CA191da709695462764";
+export const MOCK_USDC_ADDRESS = "0x98a0c5ECAdAB5351fD6c9B7D1D66D6359F0D3d58";
 
 export const MOCK_USDC_ABI = [
   {
