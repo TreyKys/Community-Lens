@@ -31,7 +31,7 @@ describe("TruthMarket", function () {
     it("Should deduct 5% fee on standard wins", async function () {
       const { truthMarket, mockUSDC, user1, user2 } = await loadFixture(deployFixture);
 
-      await truthMarket.createMarket("Will it rain?", ["Yes", "No"]);
+      await truthMarket.createMarket("Will it rain?", ["Yes", "No"], 3600);
       const marketId = 0;
 
       // User1 bets 100 on Yes
@@ -63,7 +63,7 @@ describe("TruthMarket", function () {
     it("Should WAIVE fee if Principal is at risk (No-Loss Guarantee)", async function () {
       const { truthMarket, mockUSDC, user1, user2 } = await loadFixture(deployFixture);
 
-      await truthMarket.createMarket("Will it rain?", ["Yes", "No"]);
+      await truthMarket.createMarket("Will it rain?", ["Yes", "No"], 3600);
       const marketId = 0;
 
       // User1 bets 1000 on Yes (Huge stake)
@@ -100,7 +100,7 @@ describe("TruthMarket", function () {
     it("Should refund 100% if losing side has 0 liquidity", async function () {
       const { truthMarket, mockUSDC, user1, user2 } = await loadFixture(deployFixture);
 
-      await truthMarket.createMarket("Will it rain?", ["Yes", "No"]);
+      await truthMarket.createMarket("Will it rain?", ["Yes", "No"], 3600);
       const marketId = 0;
 
       // Both bet on Yes
@@ -124,7 +124,7 @@ describe("TruthMarket", function () {
     it("Should refund 100% if winning side has 0 liquidity (No winners)", async function () {
       const { truthMarket, mockUSDC, user1 } = await loadFixture(deployFixture);
 
-      await truthMarket.createMarket("Will it rain?", ["Yes", "No"]);
+      await truthMarket.createMarket("Will it rain?", ["Yes", "No"], 3600);
       const marketId = 0;
 
       // User bets on No
@@ -139,6 +139,38 @@ describe("TruthMarket", function () {
       const balanceAfter = await mockUSDC.balanceOf(user1.address);
 
       expect(balanceAfter - balanceBefore).to.equal(betAmount);
+    });
+  });
+
+  describe("Batch Creation", function () {
+    it("Should create multiple markets in batch", async function () {
+      const { truthMarket } = await loadFixture(deployFixture);
+
+      const questions = ["Q1", "Q2", "Q3"];
+      const options = [["A", "B"], ["C", "D"], ["E", "F"]];
+      const durations = [3600, 7200, 10800];
+
+      await truthMarket.createMarketBatch(questions, options, durations);
+
+      const m1 = await truthMarket.markets(0);
+      const m2 = await truthMarket.markets(1);
+      const m3 = await truthMarket.markets(2);
+
+      expect(m1.question).to.equal("Q1");
+      expect(m2.question).to.equal("Q2");
+      expect(m3.question).to.equal("Q3");
+    });
+
+    it("Should revert if array lengths mismatch", async function () {
+      const { truthMarket } = await loadFixture(deployFixture);
+
+      const questions = ["Q1", "Q2"];
+      const options = [["A", "B"]]; // Length 1
+      const durations = [3600, 7200];
+
+      await expect(
+        truthMarket.createMarketBatch(questions, options, durations)
+      ).to.be.revertedWith("Mismatched arrays");
     });
   });
 });
