@@ -456,7 +456,7 @@ export const TRUTH_MARKET_ABI = [
       "stateMutability": "view",
       "type": "function"
     }
-  ];
+  ] as const;
 
 export const MOCK_USDC_ADDRESS = "0x98a0c5ECAdAB5351fD6c9B7D1D66D6359F0D3d58";
 
