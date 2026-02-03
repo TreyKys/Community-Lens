@@ -30,7 +30,8 @@ async function fetchFixtures(): Promise<Fixture[]> {
     }
 
     const today = new Date();
-    const future = new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000);
+    // Extend window to 10 days (max allowed by API)
+    const future = new Date(today.getTime() + 10 * 24 * 60 * 60 * 1000);
 
     const dateFrom = getDateString(today);
     const dateTo = getDateString(future);
