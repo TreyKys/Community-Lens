@@ -1,4 +1,4 @@
-export const TRUTH_MARKET_ADDRESS = "0x5Cf381C69e2148Af9a2AA6C5ef1Cd85445fAd80D";
+export const TRUTH_MARKET_ADDRESS = "0x0Cd7009a055c00a4C4eBF6C1f1Db386ECFA30266";
 
 export const TRUTH_MARKET_ABI = [
     {
@@ -228,6 +228,29 @@ export const TRUTH_MARKET_ABI = [
     {
       "inputs": [
         {
+          "internalType": "string[]",
+          "name": "questions",
+          "type": "string[]"
+        },
+        {
+          "internalType": "string[][]",
+          "name": "options",
+          "type": "string[][]"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "durations",
+          "type": "uint256[]"
+        }
+      ],
+      "name": "createMarketBatch",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "",
           "type": "uint256"
@@ -433,7 +456,7 @@ export const TRUTH_MARKET_ABI = [
       "stateMutability": "view",
       "type": "function"
     }
-  ];
+  ] as const;
 
 export const MOCK_USDC_ADDRESS = "0x98a0c5ECAdAB5351fD6c9B7D1D66D6359F0D3d58";
 

@@ -37,6 +37,23 @@ contract TruthMarket is Ownable, ReentrancyGuard {
     }
 
     function createMarket(string memory question, string[] memory options, uint256 duration) external onlyOwner {
+        _createMarket(question, options, duration);
+    }
+
+    function createMarketBatch(
+        string[] memory questions,
+        string[][] memory options,
+        uint256[] memory durations
+    ) external onlyOwner {
+        require(questions.length == options.length, "Mismatched arrays");
+        require(questions.length == durations.length, "Mismatched arrays");
+
+        for (uint256 i = 0; i < questions.length; i++) {
+            _createMarket(questions[i], options[i], durations[i]);
+        }
+    }
+
+    function _createMarket(string memory question, string[] memory options, uint256 duration) internal {
         require(options.length > 1, "At least 2 options required");
         uint256 marketId = nextMarketId++;
         Market storage m = markets[marketId];
