@@ -16,6 +16,7 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         uint256 winningOptionIndex;
         bool voided;
         uint256 totalPool;
+        uint256 bettingEndsAt;
     }
 
     mapping(uint256 => Market) public markets;
@@ -26,7 +27,7 @@ contract TruthMarket is Ownable, ReentrancyGuard {
     // marketId -> user -> claimed
     mapping(uint256 => mapping(address => bool)) public hasClaimed;
 
-    event MarketCreated(uint256 indexed marketId, string question, string[] options);
+    event MarketCreated(uint256 indexed marketId, string question, string[] options, uint256 bettingEndsAt);
     event BetPlaced(uint256 indexed marketId, address indexed user, uint256 optionIndex, uint256 amount);
     event MarketResolved(uint256 indexed marketId, uint256 winningOptionIndex, bool voided, bool feeWaived);
     event WinningsClaimed(uint256 indexed marketId, address indexed user, uint256 amount);
@@ -35,19 +36,38 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         bettingToken = IERC20(_bettingToken);
     }
 
-    function createMarket(string memory question, string[] memory options) external onlyOwner {
+    function createMarket(string memory question, string[] memory options, uint256 duration) external onlyOwner {
+        _createMarket(question, options, duration);
+    }
+
+    function createMarketBatch(
+        string[] memory questions,
+        string[][] memory options,
+        uint256[] memory durations
+    ) external onlyOwner {
+        require(questions.length == options.length, "Mismatched arrays");
+        require(questions.length == durations.length, "Mismatched arrays");
+
+        for (uint256 i = 0; i < questions.length; i++) {
+            _createMarket(questions[i], options[i], durations[i]);
+        }
+    }
+
+    function _createMarket(string memory question, string[] memory options, uint256 duration) internal {
         require(options.length > 1, "At least 2 options required");
         uint256 marketId = nextMarketId++;
         Market storage m = markets[marketId];
         m.question = question;
         m.options = options;
-        emit MarketCreated(marketId, question, options);
+        m.bettingEndsAt = block.timestamp + duration;
+        emit MarketCreated(marketId, question, options, m.bettingEndsAt);
     }
 
     function placeBet(uint256 marketId, uint256 optionIndex, uint256 amount) external nonReentrant {
         require(marketId < nextMarketId, "Market does not exist");
         Market storage m = markets[marketId];
         require(!m.resolved, "Market resolved");
+        require(block.timestamp < m.bettingEndsAt, "Betting closed");
         require(optionIndex < m.options.length, "Invalid option");
         require(amount > 0, "Amount must be > 0");
 
