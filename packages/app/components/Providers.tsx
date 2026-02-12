@@ -12,10 +12,10 @@ import { WagmiProvider, http } from 'wagmi';
 
 const config = getDefaultConfig({
   appName: 'TruthMarket',
-  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || '',
+  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || '8b5f5a8b24622cd4bcdbe2a1f50b8d8a',
   chains: [polygonAmoy],
   transports: {
-    [polygonAmoy.id]: http(`https://polygon-amoy.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`),
+    [polygonAmoy.id]: http(`https://polygon-amoy.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY || 'acKkFgzIHOQy_OK7cDR60'}`),
   },
   ssr: true,
 });
