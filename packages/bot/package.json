@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "bot": "ts-node src/bot.ts"
+    "bot": "ts-node src/bot.ts",
+    "resolve": "ts-node src/resolve.ts"
   },
   "dependencies": {
     "axios": "^1.6.0",

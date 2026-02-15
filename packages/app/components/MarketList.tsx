@@ -105,7 +105,9 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
             abi: TRUTH_MARKET_ABI,
             functionName: 'placeBet',
-            args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)]
+            args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
+            maxFeePerGas: parseUnits('50', 9),
+            maxPriorityFeePerGas: parseUnits('30', 9),
         });
     };
 
@@ -158,7 +160,9 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             address: MOCK_USDC_ADDRESS as `0x${string}`,
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
-            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, parseUnits(amount, 18)]
+            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, parseUnits(amount, 18)],
+            maxFeePerGas: parseUnits('50', 9),
+            maxPriorityFeePerGas: parseUnits('30', 9),
         });
     };
 
