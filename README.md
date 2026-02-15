@@ -1,81 +1,52 @@
-# Community Lens (Firebase Edition)
+# TruthMarket
 
-This project is a serverless DApp that uses Firebase Functions, Firestore, and React to create a decentralized discrepancy engine.
+Decentralized Prediction Market on Polygon Amoy.
 
-## Core Stack
+## Monorepo Structure
 
-- **Frontend:** React (Vite) hosted on Firebase Hosting.
-- **Backend:** Firebase Cloud Functions (Node.js).
-- **Database:** Cloud Firestore.
-- **AI Engine:** Google Generative AI SDK (@google/generative-ai) using model `gemini-1.5-pro`.
-- **Web3:** `dkg.js` (OriginTrail SDK).
+*   `packages/contract`: Hardhat project for Smart Contracts.
+*   `packages/app`: Next.js 14 Frontend.
+*   `packages/bot`: Automation script for fetching fixtures and creating markets.
 
-## Setup and Deployment
+## Bot Automation & Deployment
 
-### 1. Prerequisites
+The market creation process is automated using a daily job on GitHub Actions.
 
-- Node.js (v18 or higher)
-- Firebase CLI: `npm install -g firebase-tools`
-- A Firebase project.
+### 1. GitHub Secrets Configuration
 
-### 2. Configuration
+For the automation to work, you **MUST** add the following secrets in your GitHub Repository under **Settings > Secrets and variables > Actions > New repository secret**:
 
-1.  **Firebase Project:**
-    - Create a new project in the [Firebase Console](https://console.firebase.google.com/).
-    - In your local project, update the `.firebaserc` file with your Firebase Project ID.
-    - In `client/src/firebase.js`, replace the placeholder `firebaseConfig` object with your actual web app's Firebase configuration. You can find this in your Firebase project settings.
+| Secret Name | Description | Value (Example) |
+| :--- | :--- | :--- |
+| `PRIVATE_KEY` | The private key of the Bot Wallet (Burner) | `fb4b...` |
+| `FOOTBALL_DATA_KEY` | API Key from football-data.org | `0c2a...` |
+| `RPC_URL` | Polygon Amoy RPC URL (Alchemy/Infura) | `https://polygon-amoy.g.alchemy.com...` |
 
-2.  **Environment Variables (Cloud Functions):**
-    You need to set the following secrets for the Cloud Functions. You can do this by running the following commands:
+### 2. Manual Execution
 
+To run the bot locally:
+
+1.  Navigate to `packages/bot`.
+2.  Ensure `.env` is set up (see `.env.example`).
+3.  Run:
     ```bash
-    firebase functions:config:set keys.gemini_api_key="YOUR_GEMINI_API_KEY"
-    firebase functions:config:set keys.private_key="YOUR_DKG_PRIVATE_KEY"
-    firebase functions:config:set keys.dkg_public_key="YOUR_DKG_PUBLIC_KEY"
+    npm run bot
     ```
 
-### 3. Seeding the Database
+### 3. Frontend Deployment (Netlify)
 
-Before you can use the application, you need to seed the Firestore database with the initial bounty data.
+Ensure the following Environment Variables are set in Netlify:
 
-1.  **Set up Application Default Credentials:**
-    You need to authenticate with Google Cloud. The easiest way is to use the gcloud CLI:
+*   `NEXT_PUBLIC_WALLET_CONNECT_ID`: `8b5f5a8b24622cd4bcdbe2a1f50b8d8a`
+*   `NEXT_PUBLIC_ALCHEMY_KEY`: `acKkFgzIHOQy_OK7cDR60`
+
+## Development
+
+1.  Install dependencies:
     ```bash
-    gcloud auth application-default login
+    npm install
     ```
-
-2.  **Run the Seed Script:**
-    From the root of the project, run the following command:
+2.  Start local frontend:
     ```bash
-    node functions/seedDatabase.js
+    npm run dev -w packages/app
     ```
-
-### 4. Deployment
-
-To deploy the entire application (both hosting and functions), run the following command from the root of the project:
-
-```bash
-# Install dependencies for both client and functions
-npm install --prefix client
-npm install --prefix functions
-
-# Build the client
-npm run build --prefix client
-
-# Deploy to Firebase
-firebase deploy
-```
-
-## How It Works
-
-### Firestore Collections
-
--   `bounties`: Stores the bounty information, including the topic, reward, and the "Grok" text to be verified.
--   `community_notes`: Stores the results of the discrepancy analysis, including the DKG asset ID.
-
-### Firebase Cloud Functions
-
--   `fetchConsensus`: Fetches consensus information from Wikipedia and (for medical topics) from a Gemini-powered PubMed summarization.
--   `analyzeDiscrepancy`: Uses the Gemini 1.5 Pro model to compare the "suspect" text with the consensus text and identify discrepancies.
--   `mintCommunityNote`: Mints a "Community Note" to the OriginTrail DKG and saves the result to the `community_notes` collection.
--   `agentGuard`: A "firewall" that checks if a given question or topic is flagged by a Community Note.

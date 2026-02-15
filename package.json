@@ -1,19 +1,11 @@
 {
-  "name": "community-lens-root",
-  "version": "2.0.0",
+  "name": "truth-market-monorepo",
+  "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && npm run dev",
-    "client": "cd client && npm run dev",
-    "start": "concurrently \"npm run server\" \"npm run client\""
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
-  },
-  "dependencies": {
-    "@google/generative-ai": "^0.18.0",
-    "dkg.js": "^8.2.0"
+    "test": "npm run test --workspaces"
   }
 }
