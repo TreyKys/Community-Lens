@@ -9,16 +9,24 @@ function getDateString(date: Date): string {
     return date.toISOString().split('T')[0];
 }
 
-async function resolveMarkets() {
+export async function resolveMarkets(mockDeps?: any) {
     console.log("Starting resolution bot...");
 
-    if (!process.env.PRIVATE_KEY) throw new Error("Missing PRIVATE_KEY");
-    if (!process.env.RPC_URL) throw new Error("Missing RPC_URL");
-    if (!process.env.FOOTBALL_DATA_KEY) throw new Error("Missing FOOTBALL_DATA_KEY");
+    if (!mockDeps && !process.env.PRIVATE_KEY) throw new Error("Missing PRIVATE_KEY");
+    if (!mockDeps && !process.env.RPC_URL) throw new Error("Missing RPC_URL");
+    if (!mockDeps && !process.env.FOOTBALL_DATA_KEY) throw new Error("Missing FOOTBALL_DATA_KEY");
 
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-    const contract = new ethers.Contract(TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, wallet);
+    let contract: any;
+    let axiosInstance: any = axios;
+
+    if (mockDeps) {
+        contract = mockDeps.contract;
+        axiosInstance = mockDeps.axios;
+    } else {
+        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+        const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+        contract = new ethers.Contract(TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, wallet);
+    }
 
     // 1. Get total markets
     const nextId = await contract.nextMarketId();
@@ -64,7 +72,7 @@ async function resolveMarkets() {
             const dateFrom = getDateString(new Date(endDate.getTime() - 24 * 60 * 60 * 1000));
             const dateTo = getDateString(new Date(endDate.getTime() + 24 * 60 * 60 * 1000));
 
-            const response = await axios.get("https://api.football-data.org/v4/matches", {
+            const response = await axiosInstance.get("https://api.football-data.org/v4/matches", {
                 headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_KEY },
                 params: {
                     competitions: "PL",
@@ -115,7 +123,9 @@ async function resolveMarkets() {
     console.log("Resolution check complete.");
 }
 
-resolveMarkets().catch((error) => {
-    console.error(error);
-    process.exit(1);
-});
+if (require.main === module) {
+    resolveMarkets().catch((error) => {
+        console.error(error);
+        process.exit(1);
+    });
+}
