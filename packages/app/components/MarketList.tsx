@@ -41,6 +41,13 @@ export function MarketList() {
 
         const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint];
 
+        const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
+        if (isExpired24h && !resolved) return null; // Hide if expired > 24h and not resolved (orphaned)
+        // Or if the user meant "Resolved markets should disappear", we can add && resolved.
+        // "Closed markets should be deleted" usually implies "Expired".
+        // Let's hide anything older than 24h past deadline, regardless of resolution, to keep the dashboard fresh.
+        if (isExpired24h) return null;
+
         return (
           <MarketCard
             key={marketId.toString()}
