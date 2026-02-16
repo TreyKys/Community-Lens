@@ -5,6 +5,9 @@ import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI } from "./constants";
 
 dotenv.config();
 
+// Supported leagues for resolution
+const LEAGUES_LIST = 'PL,PD,SA,BL1,FL1,CL,WC,EC,DED,BSA,PPL,ELC';
+
 function getDateString(date: Date): string {
     return date.toISOString().split('T')[0];
 }
@@ -54,8 +57,10 @@ export async function resolveMarkets(mockDeps?: any) {
             console.log(`Checking Market #${i}: "${question}" (Expired)`);
 
             // Parse teams
-            // Question format: "Result: HomeTeam vs AwayTeam?"
-            const matchRegex = /Result: (.+) vs (.+)\?/;
+            // Old format: "Result: HomeTeam vs AwayTeam?"
+            // New format: "[TAG] HomeTeam vs AwayTeam"
+            // Flexible regex:
+            const matchRegex = /(?:Result: |\[.+\] )?(.+) vs (.+?)(?:\?)?$/;
             const match = question.match(matchRegex);
 
             if (!match) {
@@ -63,8 +68,10 @@ export async function resolveMarkets(mockDeps?: any) {
                 continue;
             }
 
-            const homeTeamName = match[1];
-            const awayTeamName = match[2];
+            const homeTeamName = match[1].trim();
+            const awayTeamName = match[2].trim();
+
+            console.log(`Parsed teams: ${homeTeamName} vs ${awayTeamName}`);
 
             // Fetch match status
             // We search for matches on the day of bettingEndsAt (or slightly wider to be safe)
@@ -75,7 +82,7 @@ export async function resolveMarkets(mockDeps?: any) {
             const response = await axiosInstance.get("https://api.football-data.org/v4/matches", {
                 headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_KEY },
                 params: {
-                    competitions: "PL",
+                    competitions: LEAGUES_LIST,
                     dateFrom,
                     dateTo
                 }

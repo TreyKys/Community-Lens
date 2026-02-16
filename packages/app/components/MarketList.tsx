@@ -1,6 +1,6 @@
 'use client';
 
-import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
 import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,8 +11,48 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { useSearchParams } from 'next/navigation';
+
+const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
+
+interface Market {
+    marketId: bigint;
+    question: string;
+    resolved: boolean;
+    voided: boolean;
+    totalPool: bigint;
+    bettingEndsAt: bigint;
+}
+
+const ERC20_APPROVE_ABI = [{
+    inputs: [
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" }
+    ],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function"
+}] as const;
+
+const ERC20_BALANCE_ABI = [{
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+}] as const;
+
+// Aggressive Gas Configuration for Amoy
+const GAS_OVERRIDES = {
+    maxFeePerGas: parseUnits('100', 9), // 100 Gwei
+    maxPriorityFeePerGas: parseUnits('50', 9), // 50 Gwei
+};
 
 export function MarketList() {
+  const searchParams = useSearchParams();
+  const category = searchParams.get('category') || 'all';
+
   const { data: nextId } = useReadContract({
     address: TRUTH_MARKET_ADDRESS as `0x${string}`,
     abi: TRUTH_MARKET_ABI,
@@ -33,36 +73,47 @@ export function MarketList() {
 
   if (!markets) return <div className="p-8 text-center">Loading markets...</div>;
 
-  return (
-    <div className="space-y-4 w-full max-w-2xl">
-      {markets.map((result, index) => {
+  const filteredMarkets = markets.map((result, index) => {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
         const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint];
 
+        // 1. Expiry Check
         const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
-        if (isExpired24h && !resolved) return null; // Hide if expired > 24h and not resolved (orphaned)
-        // Or if the user meant "Resolved markets should disappear", we can add && resolved.
-        // "Closed markets should be deleted" usually implies "Expired".
-        // Let's hide anything older than 24h past deadline, regardless of resolution, to keep the dashboard fresh.
+        if (isExpired24h && !resolved) return null;
         if (isExpired24h) return null;
 
-        return (
-          <MarketCard
-            key={marketId.toString()}
-            marketId={marketId}
-            question={question}
-            resolved={resolved}
-            voided={voided}
-            totalPool={totalPool}
-            bettingEndsAt={bettingEndsAt}
-          />
-        );
-      })}
-      {count === 0 && (
+        // 2. Category Filter
+        if (category === 'politics') {
+             if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
+        } else if (category === 'crypto') {
+             if (!question.includes('[CRYPTO]')) return null;
+        } else if (category === 'sports') {
+             const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+             if (!isSports) return null;
+        }
+
+        return { marketId, question, resolved, voided, totalPool, bettingEndsAt } as Market;
+  }).filter((m): m is Market => m !== null);
+
+  return (
+    <div className="space-y-4 w-full max-w-2xl">
+      {filteredMarkets.length > 0 ? (
+          filteredMarkets.map((m) => (
+            <MarketCard
+                key={m.marketId.toString()}
+                marketId={m.marketId}
+                question={m.question}
+                resolved={m.resolved}
+                voided={m.voided}
+                totalPool={m.totalPool}
+                bettingEndsAt={m.bettingEndsAt}
+            />
+          ))
+      ) : (
         <div className="text-center text-muted-foreground p-8">
-          No markets available yet. Check back soon!
+          No markets found for this category.
         </div>
       )}
     </div>
@@ -77,19 +128,31 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     totalPool: bigint;
     bettingEndsAt: bigint;
 }) {
+    const { address } = useAccount();
     const { toast } = useToast();
     const [selectedOption, setSelectedOption] = useState<string>('0');
     const [amount, setAmount] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
 
     // Hardcoded options as per bot logic (Home, Away, Draw)
-    // In a full implementation, we'd fetch options from the contract too if the getter supported it
-    // But since the standard getter doesn't return the array, and we know the bot format:
     const options = ["Home Win", "Away Win", "Draw"];
 
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
     const endDate = new Date(Number(bettingEndsAt) * 1000);
     const isLive = !resolved && !voided && !isExpired;
+
+    // Check Balance
+    const { data: balanceData } = useReadContract({
+        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        abi: ERC20_BALANCE_ABI,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+        query: {
+            enabled: !!address,
+        }
+    });
+
+    const balance = balanceData ? balanceData : BigInt(0);
 
     // Approve
     const { writeContract: approve, data: approveHash, isPending: isApprovePending } = useWriteContract();
@@ -106,8 +169,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             abi: TRUTH_MARKET_ABI,
             functionName: 'placeBet',
             args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
-            maxFeePerGas: parseUnits('50', 9),
-            maxPriorityFeePerGas: parseUnits('30', 9),
+            ...GAS_OVERRIDES,
         });
     };
 
@@ -133,36 +195,28 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         }
     }, [betError, toast]);
 
-    const ERC20_APPROVE_ABI = [{
-        inputs: [
-            { name: "spender", type: "address" },
-            { name: "value", type: "uint256" }
-        ],
-        name: "approve",
-        outputs: [{ name: "", type: "bool" }],
-        stateMutability: "nonpayable",
-        type: "function"
-    }] as const;
-
     const handleAction = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
         }
 
-        // For UX simplicity in this task, I'll do a two-step process:
-        // 1. User clicks "Approve" (if needed) - Hard to know without reading allowance.
-        // 2. User clicks "Bet".
-        // To keep it simple: I will just try to Approve every time before betting, or just Bet.
-        // Let's do Approve then Bet in the effect.
+        const betAmount = parseUnits(amount, 18);
+        if (betAmount > balance) {
+            toast({
+                title: "Insufficient Balance",
+                description: `You have ${formatUnits(balance, 18)} USDC. Use the Wallet to mint Demo tokens.`,
+                variant: "destructive"
+            });
+            return;
+        }
 
         approve({
             address: MOCK_USDC_ADDRESS as `0x${string}`,
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
-            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, parseUnits(amount, 18)],
-            maxFeePerGas: parseUnits('50', 9),
-            maxPriorityFeePerGas: parseUnits('30', 9),
+            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
+            ...GAS_OVERRIDES,
         });
     };
 
@@ -214,6 +268,11 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                                isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
                           </Button>
                       </div>
+                      {address && (
+                          <div className="text-xs text-right text-muted-foreground">
+                              Balance: {formatUnits(balance, 18)} USDC
+                          </div>
+                      )}
                   </div>
               )}
             </CardContent>
