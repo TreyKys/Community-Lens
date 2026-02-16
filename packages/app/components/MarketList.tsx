@@ -1,6 +1,6 @@
 'use client';
 
-import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
 import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,25 @@ interface Market {
     totalPool: bigint;
     bettingEndsAt: bigint;
 }
+
+const ERC20_APPROVE_ABI = [{
+    inputs: [
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" }
+    ],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function"
+}] as const;
+
+const ERC20_BALANCE_ABI = [{
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+}] as const;
 
 export function MarketList() {
   const searchParams = useSearchParams();
@@ -103,6 +122,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     totalPool: bigint;
     bettingEndsAt: bigint;
 }) {
+    const { address } = useAccount();
     const { toast } = useToast();
     const [selectedOption, setSelectedOption] = useState<string>('0');
     const [amount, setAmount] = useState('');
@@ -114,6 +134,19 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
     const endDate = new Date(Number(bettingEndsAt) * 1000);
     const isLive = !resolved && !voided && !isExpired;
+
+    // Check Balance
+    const { data: balanceData } = useReadContract({
+        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        abi: ERC20_BALANCE_ABI,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+        query: {
+            enabled: !!address,
+        }
+    });
+
+    const balance = balanceData ? balanceData : BigInt(0);
 
     // Approve
     const { writeContract: approve, data: approveHash, isPending: isApprovePending } = useWriteContract();
@@ -157,20 +190,19 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         }
     }, [betError, toast]);
 
-    const ERC20_APPROVE_ABI = [{
-        inputs: [
-            { name: "spender", type: "address" },
-            { name: "value", type: "uint256" }
-        ],
-        name: "approve",
-        outputs: [{ name: "", type: "bool" }],
-        stateMutability: "nonpayable",
-        type: "function"
-    }] as const;
-
     const handleAction = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
+            return;
+        }
+
+        const betAmount = parseUnits(amount, 18);
+        if (betAmount > balance) {
+            toast({
+                title: "Insufficient Balance",
+                description: `You have ${formatUnits(balance, 18)} USDC. Use the Wallet to mint Demo tokens.`,
+                variant: "destructive"
+            });
             return;
         }
 
@@ -178,7 +210,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             address: MOCK_USDC_ADDRESS as `0x${string}`,
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
-            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, parseUnits(amount, 18)],
+            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
             maxFeePerGas: parseUnits('50', 9),
             maxPriorityFeePerGas: parseUnits('30', 9),
         });
@@ -232,6 +264,11 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                                isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
                           </Button>
                       </div>
+                      {address && (
+                          <div className="text-xs text-right text-muted-foreground">
+                              Balance: {formatUnits(balance, 18)} USDC
+                          </div>
+                      )}
                   </div>
               )}
             </CardContent>
