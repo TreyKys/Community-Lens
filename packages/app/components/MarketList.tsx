@@ -11,8 +11,23 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { useSearchParams } from 'next/navigation';
+
+const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
+
+interface Market {
+    marketId: bigint;
+    question: string;
+    resolved: boolean;
+    voided: boolean;
+    totalPool: bigint;
+    bettingEndsAt: bigint;
+}
 
 export function MarketList() {
+  const searchParams = useSearchParams();
+  const category = searchParams.get('category') || 'all';
+
   const { data: nextId } = useReadContract({
     address: TRUTH_MARKET_ADDRESS as `0x${string}`,
     abi: TRUTH_MARKET_ABI,
@@ -33,36 +48,47 @@ export function MarketList() {
 
   if (!markets) return <div className="p-8 text-center">Loading markets...</div>;
 
-  return (
-    <div className="space-y-4 w-full max-w-2xl">
-      {markets.map((result, index) => {
+  const filteredMarkets = markets.map((result, index) => {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
         const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint];
 
+        // 1. Expiry Check
         const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
-        if (isExpired24h && !resolved) return null; // Hide if expired > 24h and not resolved (orphaned)
-        // Or if the user meant "Resolved markets should disappear", we can add && resolved.
-        // "Closed markets should be deleted" usually implies "Expired".
-        // Let's hide anything older than 24h past deadline, regardless of resolution, to keep the dashboard fresh.
+        if (isExpired24h && !resolved) return null;
         if (isExpired24h) return null;
 
-        return (
-          <MarketCard
-            key={marketId.toString()}
-            marketId={marketId}
-            question={question}
-            resolved={resolved}
-            voided={voided}
-            totalPool={totalPool}
-            bettingEndsAt={bettingEndsAt}
-          />
-        );
-      })}
-      {count === 0 && (
+        // 2. Category Filter
+        if (category === 'politics') {
+             if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
+        } else if (category === 'crypto') {
+             if (!question.includes('[CRYPTO]')) return null;
+        } else if (category === 'sports') {
+             const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+             if (!isSports) return null;
+        }
+
+        return { marketId, question, resolved, voided, totalPool, bettingEndsAt } as Market;
+  }).filter((m): m is Market => m !== null);
+
+  return (
+    <div className="space-y-4 w-full max-w-2xl">
+      {filteredMarkets.length > 0 ? (
+          filteredMarkets.map((m) => (
+            <MarketCard
+                key={m.marketId.toString()}
+                marketId={m.marketId}
+                question={m.question}
+                resolved={m.resolved}
+                voided={m.voided}
+                totalPool={m.totalPool}
+                bettingEndsAt={m.bettingEndsAt}
+            />
+          ))
+      ) : (
         <div className="text-center text-muted-foreground p-8">
-          No markets available yet. Check back soon!
+          No markets found for this category.
         </div>
       )}
     </div>
@@ -83,8 +109,6 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const [isExpanded, setIsExpanded] = useState(false);
 
     // Hardcoded options as per bot logic (Home, Away, Draw)
-    // In a full implementation, we'd fetch options from the contract too if the getter supported it
-    // But since the standard getter doesn't return the array, and we know the bot format:
     const options = ["Home Win", "Away Win", "Draw"];
 
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
@@ -149,12 +173,6 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
         }
-
-        // For UX simplicity in this task, I'll do a two-step process:
-        // 1. User clicks "Approve" (if needed) - Hard to know without reading allowance.
-        // 2. User clicks "Bet".
-        // To keep it simple: I will just try to Approve every time before betting, or just Bet.
-        // Let's do Approve then Bet in the effect.
 
         approve({
             address: MOCK_USDC_ADDRESS as `0x${string}`,
