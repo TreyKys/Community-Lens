@@ -11,13 +11,19 @@ import { useToast } from '@/hooks/use-toast';
 import { MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
 import { Wallet } from 'lucide-react';
 
+// Aggressive Gas Configuration for Amoy
+const GAS_OVERRIDES = {
+    maxFeePerGas: parseUnits('100', 9), // 100 Gwei
+    maxPriorityFeePerGas: parseUnits('50', 9), // 50 Gwei
+};
+
 export function WalletModal() {
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
 
   // Faucet Logic
-  const { data: hash, writeContract, isPending } = useWriteContract();
+  const { data: hash, writeContract, isPending, error } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
   useEffect(() => {
@@ -30,13 +36,28 @@ export function WalletModal() {
     }
   }, [isSuccess, toast]);
 
+  useEffect(() => {
+    if (error) {
+        toast({
+            title: "Mint Failed",
+            description: error.message || "Something went wrong.",
+            variant: "destructive"
+        });
+    }
+  }, [error, toast]);
+
   const handleMint = () => {
-    if (!address) return;
+    if (!address || !isConnected) {
+        toast({ title: "Wallet not connected", description: "Please connect your wallet first." });
+        return;
+    }
+
     writeContract({
       address: MOCK_USDC_ADDRESS as `0x${string}`,
       abi: MOCK_USDC_ABI,
       functionName: 'mint',
       args: [address, parseUnits('1000', 18)],
+      ...GAS_OVERRIDES,
     });
   };
 
