@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI } from '@/lib/constants';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 
 export default function AdminPage() {
@@ -122,6 +122,7 @@ export default function AdminPage() {
          abi: TRUTH_MARKET_ABI,
          functionName: 'createMarket',
          args: [question, optionsArray, BigInt(durationSeconds)],
+         ...SAFE_AMOY_GAS,
      });
   };
 
@@ -140,6 +141,7 @@ export default function AdminPage() {
           abi: TRUTH_MARKET_ABI,
           functionName: 'resolveMarket',
           args: [BigInt(resolveMarketId), BigInt(winningOptionIndex)],
+          ...SAFE_AMOY_GAS,
       });
   };
 

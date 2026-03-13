@@ -1,3 +1,5 @@
+import { parseGwei } from 'viem';
+
 export const TRUTH_MARKET_ADDRESS = "0x0Cd7009a055c00a4C4eBF6C1f1Db386ECFA30266";
 
 export const TRUTH_MARKET_ABI = [
@@ -459,6 +461,12 @@ export const TRUTH_MARKET_ABI = [
   ] as const;
 
 export const MOCK_USDC_ADDRESS = "0x98a0c5ECAdAB5351fD6c9B7D1D66D6359F0D3d58";
+
+export const SAFE_AMOY_GAS = {
+    maxFeePerGas: parseGwei('35'),
+    maxPriorityFeePerGas: parseGwei('35'),
+    gas: BigInt(3000000),
+};
 
 export const MOCK_USDC_ABI = [
   {

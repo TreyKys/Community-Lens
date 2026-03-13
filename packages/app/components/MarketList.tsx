@@ -1,7 +1,7 @@
 'use client';
 
 import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS } from '@/lib/constants';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, SAFE_AMOY_GAS } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -163,6 +163,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             abi: TRUTH_MARKET_ABI,
             functionName: 'placeBet',
             args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
+            ...SAFE_AMOY_GAS,
         });
     };
 
@@ -209,6 +210,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
             args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
+            ...SAFE_AMOY_GAS,
         });
     };
 
