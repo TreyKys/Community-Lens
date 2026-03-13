@@ -7,6 +7,7 @@ dotenv.config();
 
 // Types
 interface Fixture {
+    league: string;
     homeTeam: string;
     awayTeam: string;
     timestamp: number; // Unix timestamp in seconds
@@ -18,12 +19,18 @@ interface BatchData {
     durations: number[];
 }
 
+const LEAGUES = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'CL', 'WC', 'EC', 'DED', 'BSA', 'PPL', 'ELC'];
+
 function getDateString(date: Date): string {
     return date.toISOString().split('T')[0];
 }
 
-async function fetchFixtures(): Promise<Fixture[]> {
-    console.log("Fetching fixtures from football-data.org...");
+async function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchFixturesForLeague(leagueCode: string): Promise<Fixture[]> {
+    console.log(`Fetching ${leagueCode}...`);
 
     if (!process.env.FOOTBALL_DATA_KEY) {
         throw new Error("Missing FOOTBALL_DATA_KEY");
@@ -36,15 +43,13 @@ async function fetchFixtures(): Promise<Fixture[]> {
     const dateFrom = getDateString(today);
     const dateTo = getDateString(future);
 
-    console.log(`Querying matches from ${dateFrom} to ${dateTo}...`);
-
     try {
         const response = await axios.get("https://api.football-data.org/v4/matches", {
             headers: {
                 "X-Auth-Token": process.env.FOOTBALL_DATA_KEY
             },
             params: {
-                competitions: "PL", // Premier League
+                competitions: leagueCode,
                 status: "SCHEDULED",
                 dateFrom,
                 dateTo
@@ -52,20 +57,22 @@ async function fetchFixtures(): Promise<Fixture[]> {
         });
 
         const matches = response.data.matches;
-        console.log(`Found ${matches.length} matches.`);
+        console.log(`Fetching ${leagueCode}... Found ${matches.length} matches.`);
 
-        // Limit to 2 matches to avoid running out of gas on testnet
+        // Limit to 2 matches per league to manage gas and not spam testnet
         const limitedMatches = matches.slice(0, 2);
-        console.log(`Processing first ${limitedMatches.length} matches...`);
 
         return limitedMatches.map((match: any) => ({
+            league: leagueCode,
             homeTeam: match.homeTeam.name,
             awayTeam: match.awayTeam.name,
             timestamp: Math.floor(new Date(match.utcDate).getTime() / 1000)
         }));
     } catch (error) {
         if (axios.isAxiosError(error)) {
-            console.error("API Error:", error.response?.data || error.message);
+            // Log error but return empty array to continue
+            console.error(`Error fetching ${leagueCode}:`, error.response?.data?.message || error.message);
+            return [];
         }
         throw error;
     }
@@ -80,7 +87,8 @@ function formatMarkets(fixtures: Fixture[]): BatchData {
     const now = Math.floor(Date.now() / 1000);
 
     for (const fixture of fixtures) {
-        const question = `Result: ${fixture.homeTeam} vs ${fixture.awayTeam}?`;
+        // Tag format: "[TAG] Home vs Away"
+        const question = `[${fixture.league}] ${fixture.homeTeam} vs ${fixture.awayTeam}`;
         // Standardize options for football matches
         const marketOptions = ["Home Win", "Draw", "Away Win"];
 
@@ -101,7 +109,7 @@ async function pushToChain(batchData: BatchData) {
         return;
     }
 
-    console.log("Pushing to chain...");
+    console.log(`Pushing ${batchData.questions.length} markets to chain...`);
 
     if (!process.env.PRIVATE_KEY) throw new Error("Missing PRIVATE_KEY");
     if (!process.env.RPC_URL) throw new Error("Missing RPC_URL");
@@ -111,11 +119,12 @@ async function pushToChain(batchData: BatchData) {
 
     const contract = new ethers.Contract(TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, wallet);
 
-    console.log(`Sending transaction to create ${batchData.questions.length} markets...`);
-
     // Manual gas overrides often needed for Amoy
     // Estimate roughly 500k gas per market, adjust limit accordingly
-    const gasLimit = 500000 + (batchData.questions.length * 400000);
+    // With 12 leagues * 2 matches = 24 matches, gas limit could be around 10-12M?
+    // Block gas limit is usually 30M. 12M is high but possible.
+    // Let's optimize: 300k per market might be enough for batch.
+    const gasLimit = 1000000 + (batchData.questions.length * 300000);
 
     const tx = await contract.createMarketBatch(
         batchData.questions,
@@ -137,9 +146,21 @@ async function pushToChain(batchData: BatchData) {
 
 async function main() {
     try {
-        const fixtures = await fetchFixtures();
-        const batchData = formatMarkets(fixtures);
+        const allFixtures: Fixture[] = [];
+
+        for (const league of LEAGUES) {
+            const fixtures = await fetchFixturesForLeague(league);
+            allFixtures.push(...fixtures);
+
+            // Rate limiting
+            await sleep(7000);
+        }
+
+        console.log(`Total Batch Size: ${allFixtures.length} markets.`);
+
+        const batchData = formatMarkets(allFixtures);
         await pushToChain(batchData);
+
         console.log("Bot finished successfully.");
     } catch (error) {
         console.error("Bot failed:", error);
