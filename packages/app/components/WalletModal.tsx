@@ -11,12 +11,6 @@ import { useToast } from '@/hooks/use-toast';
 import { MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
 import { Wallet } from 'lucide-react';
 
-// Aggressive Gas Configuration for Amoy
-const GAS_OVERRIDES = {
-    maxFeePerGas: parseUnits('100', 9), // 100 Gwei
-    maxPriorityFeePerGas: parseUnits('50', 9), // 50 Gwei
-};
-
 export function WalletModal() {
   const { address, isConnected } = useAccount();
   const { toast } = useToast();
@@ -57,7 +51,6 @@ export function WalletModal() {
       abi: MOCK_USDC_ABI,
       functionName: 'mint',
       args: [address, parseUnits('1000', 18)],
-      ...GAS_OVERRIDES,
     });
   };
 

@@ -43,12 +43,6 @@ const ERC20_BALANCE_ABI = [{
     type: "function"
 }] as const;
 
-// Aggressive Gas Configuration for Amoy
-const GAS_OVERRIDES = {
-    maxFeePerGas: parseUnits('100', 9), // 100 Gwei
-    maxPriorityFeePerGas: parseUnits('50', 9), // 50 Gwei
-};
-
 export function MarketList() {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'all';
@@ -169,7 +163,6 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             abi: TRUTH_MARKET_ABI,
             functionName: 'placeBet',
             args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
-            ...GAS_OVERRIDES,
         });
     };
 
@@ -216,7 +209,6 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
             args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
-            ...GAS_OVERRIDES,
         });
     };
 
