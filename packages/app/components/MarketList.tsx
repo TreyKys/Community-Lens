@@ -128,8 +128,9 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const [amount, setAmount] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
 
-    // Hardcoded options as per bot logic (Home, Away, Draw)
-    const options = ["Home Win", "Away Win", "Draw"];
+    // Dynamic Options based on Tags
+    const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+    const options = isSports ? ["Home Win", "Away Win", "Draw"] : ["Yes", "No"];
 
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
     const endDate = new Date(Number(bettingEndsAt) * 1000);

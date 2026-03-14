@@ -460,7 +460,7 @@ export const TRUTH_MARKET_ABI = [
     }
   ] as const;
 
-export const MOCK_USDC_ADDRESS = "0x98a0c5ECAdAB5351fD6c9B7D1D66D6359F0D3d58";
+export const MOCK_USDC_ADDRESS = "0x4C233ee4b7c388e86df375673bA785274C5Db874";
 
 export const SAFE_AMOY_GAS = {
     maxFeePerGas: parseGwei('35'),

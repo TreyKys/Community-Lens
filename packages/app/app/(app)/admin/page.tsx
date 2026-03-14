@@ -4,6 +4,7 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagm
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useState, useEffect } from 'react';
 import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
@@ -15,6 +16,7 @@ export default function AdminPage() {
   // const adminAddress = process.env.NEXT_PUBLIC_ADMIN_ADDRESS; // Auth check disabled for debugging
 
   // Create Market State
+  const [category, setCategory] = useState('');
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -117,11 +119,20 @@ export default function AdminPage() {
          return;
      }
 
+     // Format question with category tag if not sports
+     let formattedQuestion = question;
+     if (category && category !== 'Sports') {
+        const tag = `[${category.toUpperCase()}]`;
+        if (!formattedQuestion.includes(tag)) {
+            formattedQuestion = `${tag} ${formattedQuestion}`;
+        }
+     }
+
      createMarket({
          address: TRUTH_MARKET_ADDRESS as `0x${string}`,
          abi: TRUTH_MARKET_ABI,
          functionName: 'createMarket',
-         args: [question, optionsArray, BigInt(durationSeconds)],
+         args: [formattedQuestion, optionsArray, BigInt(durationSeconds)],
          ...SAFE_AMOY_GAS,
      });
   };
@@ -160,6 +171,21 @@ export default function AdminPage() {
           <CardTitle>Create New Market</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Category</label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Sports">Sports</SelectItem>
+                <SelectItem value="Politics">Politics</SelectItem>
+                <SelectItem value="Crypto">Crypto</SelectItem>
+                <SelectItem value="Custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-medium">Question</label>
             <Input
