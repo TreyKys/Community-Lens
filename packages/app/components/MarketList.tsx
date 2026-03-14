@@ -1,7 +1,7 @@
 'use client';
 
 import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, SAFE_AMOY_GAS } from '@/lib/constants';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, MOCK_USDC_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -149,6 +149,19 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     const balance = balanceData ? balanceData : BigInt(0);
 
+    // Check Allowance
+    const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
+        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        abi: MOCK_USDC_ABI,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
+        query: {
+            enabled: !!address,
+        }
+    });
+
+    const allowance = allowanceData ? allowanceData : BigInt(0);
+
     // Approve
     const { writeContract: approve, data: approveHash, isPending: isApprovePending } = useWriteContract();
     const { isSuccess: isApproveSuccess, isLoading: isApproveConfirming } = useWaitForTransactionReceipt({ hash: approveHash });
@@ -157,21 +170,29 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const { writeContract: placeBet, data: betHash, isPending: isBetPending, error: betError } = useWriteContract();
     const { isSuccess: isBetSuccess, isLoading: isBetConfirming } = useWaitForTransactionReceipt({ hash: betHash });
 
+    const getParsedAmount = (val: string) => {
+        try {
+            return parseUnits(val, 18);
+        } catch {
+            return BigInt(0);
+        }
+    };
+
     const handlePlaceBet = () => {
         if (!amount || Number(amount) <= 0) return;
         placeBet({
             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
             abi: TRUTH_MARKET_ABI,
             functionName: 'placeBet',
-            args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
+            args: [marketId, BigInt(selectedOption), getParsedAmount(amount)],
             ...SAFE_AMOY_GAS,
         });
     };
 
     useEffect(() => {
         if (isApproveSuccess) {
-            toast({ title: "Approved!", description: "Placing bet now..." });
-            handlePlaceBet();
+            toast({ title: "Approved!", description: "You can now place your bet." });
+            refetchAllowance();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isApproveSuccess]);
@@ -190,13 +211,13 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         }
     }, [betError, toast]);
 
-    const handleAction = () => {
+    const handleApprove = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
         }
 
-        const betAmount = parseUnits(amount, 18);
+        const betAmount = getParsedAmount(amount);
         if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
@@ -255,13 +276,21 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                             value={amount}
                             onChange={(e) => setAmount(e.target.value)}
                           />
-                          <Button
-                            onClick={handleAction}
-                            disabled={isApprovePending || isApproveConfirming || isBetPending || isBetConfirming}
-                          >
-                              {isApprovePending || isApproveConfirming ? "Approving..." :
-                               isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
-                          </Button>
+                          {allowance >= (amount ? getParsedAmount(amount) : BigInt(0)) ? (
+                              <Button
+                                onClick={handlePlaceBet}
+                                disabled={isBetPending || isBetConfirming}
+                              >
+                                  {isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
+                              </Button>
+                          ) : (
+                              <Button
+                                onClick={handleApprove}
+                                disabled={isApprovePending || isApproveConfirming}
+                              >
+                                  {isApprovePending || isApproveConfirming ? "Approving..." : "Approve"}
+                              </Button>
+                          )}
                       </div>
                       {address && (
                           <div className="text-xs text-right text-muted-foreground">
