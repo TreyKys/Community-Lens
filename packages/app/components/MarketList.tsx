@@ -238,7 +238,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     return (
         <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => isLive && setIsExpanded(!isExpanded)}>
+            <CardHeader className="pb-2 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
               <div className="flex justify-between items-start">
                 <CardTitle className="text-lg font-medium">{question}</CardTitle>
                 <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : "default"}>
@@ -275,8 +275,11 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                             placeholder="Amount (USDC)"
                             value={amount}
                             onChange={(e) => setAmount(e.target.value)}
+                            disabled={!isLive}
                           />
-                          {allowance >= (amount ? getParsedAmount(amount) : BigInt(0)) ? (
+                          {!isLive ? (
+                              <Button disabled>Market Closed</Button>
+                          ) : allowance >= (amount ? getParsedAmount(amount) : BigInt(0)) ? (
                               <Button
                                 onClick={handlePlaceBet}
                                 disabled={isBetPending || isBetConfirming}
@@ -300,10 +303,10 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                   </div>
               )}
             </CardContent>
-            {!isExpanded && isLive && (
+            {!isExpanded && (
                 <CardFooter className="pt-0">
                     <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setIsExpanded(true)}>
-                        Tap to Bet
+                        {isLive ? "Tap to Bet" : "View Options"}
                     </Button>
                 </CardFooter>
             )}

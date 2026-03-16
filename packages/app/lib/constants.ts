@@ -1,6 +1,6 @@
 import { parseGwei } from 'viem';
 
-export const TRUTH_MARKET_ADDRESS = "0x0Cd7009a055c00a4C4eBF6C1f1Db386ECFA30266";
+export const TRUTH_MARKET_ADDRESS = "0xeCFE36E1b5DfB72a69e17254eb259Ddb17739427";
 
 export const TRUTH_MARKET_ABI = [
     {
