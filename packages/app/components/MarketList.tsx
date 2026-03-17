@@ -56,7 +56,7 @@ export function MarketList() {
   const count = nextId ? Number(nextId) : 0;
   const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
 
-  const { data: markets } = useReadContracts({
+  const { data: markets, isLoading: isMarketsLoading } = useReadContracts({
     contracts: marketIds.map((id) => ({
       address: TRUTH_MARKET_ADDRESS as `0x${string}`,
       abi: TRUTH_MARKET_ABI,
@@ -65,9 +65,11 @@ export function MarketList() {
     })),
   });
 
-  if (!markets) return <div className="p-8 text-center">Loading markets...</div>;
+  if (nextId === undefined || (count > 0 && isMarketsLoading)) {
+      return <div className="p-8 text-center">Loading markets...</div>;
+  }
 
-  const filteredMarkets = markets.map((result, index) => {
+  const filteredMarkets = (markets || []).map((result, index) => {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
