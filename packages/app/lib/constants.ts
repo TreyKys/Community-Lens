@@ -463,14 +463,14 @@ export const TRUTH_MARKET_ABI = [
 export const MOCK_USDC_ADDRESS = "0x4C233ee4b7c388e86df375673bA785274C5Db874";
 
 export const SAFE_AMOY_GAS = {
-    maxFeePerGas: parseGwei('35'),
-    maxPriorityFeePerGas: parseGwei('35'),
+    maxFeePerGas: parseGwei('50'),
+    maxPriorityFeePerGas: parseGwei('50'),
     gas: BigInt(3000000),
 };
 
 export const SAFE_AMOY_GAS_NO_LIMIT = {
-    maxFeePerGas: parseGwei('35'),
-    maxPriorityFeePerGas: parseGwei('35'),
+    maxFeePerGas: parseGwei('50'),
+    maxPriorityFeePerGas: parseGwei('50'),
 };
 
 export const MOCK_USDC_ABI = [
