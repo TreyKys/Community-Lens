@@ -468,6 +468,11 @@ export const SAFE_AMOY_GAS = {
     gas: BigInt(3000000),
 };
 
+export const SAFE_AMOY_GAS_NO_LIMIT = {
+    maxFeePerGas: parseGwei('35'),
+    maxPriorityFeePerGas: parseGwei('35'),
+};
+
 export const MOCK_USDC_ABI = [
   {
     "inputs": [
