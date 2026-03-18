@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MOCK_USDC_ADDRESS, MOCK_USDC_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
+import { MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
 import { Wallet } from 'lucide-react';
 
 export function WalletModal() {
@@ -51,7 +51,6 @@ export function WalletModal() {
       abi: MOCK_USDC_ABI,
       functionName: 'mint',
       args: [address, parseUnits('1000', 18)],
-      ...SAFE_AMOY_GAS,
     });
   };
 

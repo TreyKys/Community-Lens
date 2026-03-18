@@ -1,6 +1,6 @@
 import { parseGwei } from 'viem';
 
-export const TRUTH_MARKET_ADDRESS = "0x0Cd7009a055c00a4C4eBF6C1f1Db386ECFA30266";
+export const TRUTH_MARKET_ADDRESS = "0xeCFE36E1b5DfB72a69e17254eb259Ddb17739427";
 
 export const TRUTH_MARKET_ABI = [
     {
@@ -463,9 +463,14 @@ export const TRUTH_MARKET_ABI = [
 export const MOCK_USDC_ADDRESS = "0x4C233ee4b7c388e86df375673bA785274C5Db874";
 
 export const SAFE_AMOY_GAS = {
-    maxFeePerGas: parseGwei('35'),
-    maxPriorityFeePerGas: parseGwei('35'),
+    maxFeePerGas: parseGwei('50'),
+    maxPriorityFeePerGas: parseGwei('50'),
     gas: BigInt(3000000),
+};
+
+export const SAFE_AMOY_GAS_NO_LIMIT = {
+    maxFeePerGas: parseGwei('50'),
+    maxPriorityFeePerGas: parseGwei('50'),
 };
 
 export const MOCK_USDC_ABI = [
@@ -486,5 +491,15 @@ export const MOCK_USDC_ABI = [
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "owner", "type": "address" },
+      { "internalType": "address", "name": "spender", "type": "address" }
+    ],
+    "name": "allowance",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
   }
-];
+] as const;

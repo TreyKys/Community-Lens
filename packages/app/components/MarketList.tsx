@@ -1,7 +1,7 @@
 'use client';
 
 import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, SAFE_AMOY_GAS } from '@/lib/constants';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,7 +56,7 @@ export function MarketList() {
   const count = nextId ? Number(nextId) : 0;
   const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
 
-  const { data: markets } = useReadContracts({
+  const { data: markets, isLoading: isMarketsLoading } = useReadContracts({
     contracts: marketIds.map((id) => ({
       address: TRUTH_MARKET_ADDRESS as `0x${string}`,
       abi: TRUTH_MARKET_ABI,
@@ -65,9 +65,11 @@ export function MarketList() {
     })),
   });
 
-  if (!markets) return <div className="p-8 text-center">Loading markets...</div>;
+  if (nextId === undefined || (count > 0 && isMarketsLoading)) {
+      return <div className="p-8 text-center">Loading markets...</div>;
+  }
 
-  const filteredMarkets = markets.map((result, index) => {
+  const filteredMarkets = (markets || []).map((result, index) => {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
@@ -149,6 +151,19 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     const balance = balanceData ? balanceData : BigInt(0);
 
+    // Check Allowance
+    const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
+        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        abi: MOCK_USDC_ABI,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
+        query: {
+            enabled: !!address,
+        }
+    });
+
+    const allowance = allowanceData ? allowanceData : BigInt(0);
+
     // Approve
     const { writeContract: approve, data: approveHash, isPending: isApprovePending } = useWriteContract();
     const { isSuccess: isApproveSuccess, isLoading: isApproveConfirming } = useWaitForTransactionReceipt({ hash: approveHash });
@@ -157,21 +172,28 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const { writeContract: placeBet, data: betHash, isPending: isBetPending, error: betError } = useWriteContract();
     const { isSuccess: isBetSuccess, isLoading: isBetConfirming } = useWaitForTransactionReceipt({ hash: betHash });
 
+    const getParsedAmount = (val: string) => {
+        try {
+            return parseUnits(val, 18);
+        } catch {
+            return BigInt(0);
+        }
+    };
+
     const handlePlaceBet = () => {
         if (!amount || Number(amount) <= 0) return;
         placeBet({
             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
             abi: TRUTH_MARKET_ABI,
             functionName: 'placeBet',
-            args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
-            ...SAFE_AMOY_GAS,
+            args: [marketId, BigInt(selectedOption), getParsedAmount(amount)],
         });
     };
 
     useEffect(() => {
         if (isApproveSuccess) {
-            toast({ title: "Approved!", description: "Placing bet now..." });
-            handlePlaceBet();
+            toast({ title: "Approved!", description: "You can now place your bet." });
+            refetchAllowance();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isApproveSuccess]);
@@ -190,13 +212,13 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         }
     }, [betError, toast]);
 
-    const handleAction = () => {
+    const handleApprove = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
         }
 
-        const betAmount = parseUnits(amount, 18);
+        const betAmount = getParsedAmount(amount);
         if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
@@ -211,13 +233,12 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
             args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
-            ...SAFE_AMOY_GAS,
         });
     };
 
     return (
         <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => isLive && setIsExpanded(!isExpanded)}>
+            <CardHeader className="pb-2 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
               <div className="flex justify-between items-start">
                 <CardTitle className="text-lg font-medium">{question}</CardTitle>
                 <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : "default"}>
@@ -254,14 +275,25 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                             placeholder="Amount (USDC)"
                             value={amount}
                             onChange={(e) => setAmount(e.target.value)}
+                            disabled={!isLive}
                           />
-                          <Button
-                            onClick={handleAction}
-                            disabled={isApprovePending || isApproveConfirming || isBetPending || isBetConfirming}
-                          >
-                              {isApprovePending || isApproveConfirming ? "Approving..." :
-                               isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
-                          </Button>
+                          {!isLive ? (
+                              <Button disabled>Market Closed</Button>
+                          ) : allowance >= (amount ? getParsedAmount(amount) : BigInt(0)) ? (
+                              <Button
+                                onClick={handlePlaceBet}
+                                disabled={isBetPending || isBetConfirming}
+                              >
+                                  {isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
+                              </Button>
+                          ) : (
+                              <Button
+                                onClick={handleApprove}
+                                disabled={isApprovePending || isApproveConfirming}
+                              >
+                                  {isApprovePending || isApproveConfirming ? "Approving..." : "Approve"}
+                              </Button>
+                          )}
                       </div>
                       {address && (
                           <div className="text-xs text-right text-muted-foreground">
@@ -271,10 +303,10 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                   </div>
               )}
             </CardContent>
-            {!isExpanded && isLive && (
+            {!isExpanded && (
                 <CardFooter className="pt-0">
                     <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setIsExpanded(true)}>
-                        Tap to Bet
+                        {isLive ? "Tap to Bet" : "View Options"}
                     </Button>
                 </CardFooter>
             )}
