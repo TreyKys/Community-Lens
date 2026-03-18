@@ -16,14 +16,21 @@ const config = getDefaultConfig({
   chains: [polygonAmoy],
   transports: {
     [polygonAmoy.id]: fallback([
-      http(`https://polygon-amoy.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY || 'acKkFgzIHOQy_OK7cDR60'}`),
-      http('https://rpc-amoy.polygon.technology')
+      http('https://rpc-amoy.polygon.technology', { batch: true }),
+      http(`https://polygon-amoy.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY || 'acKkFgzIHOQy_OK7cDR60'}`, { batch: true })
     ]),
   },
   ssr: true,
 });
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
