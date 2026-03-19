@@ -73,7 +73,7 @@ export function MarketList() {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
-        const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint];
+        const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string];
 
         // 1. Expiry Check
         const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
@@ -130,9 +130,14 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const [amount, setAmount] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
 
-    // Dynamic Options based on Tags
-    const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
-    const options = isSports ? ["Home Win", "Away Win", "Draw"] : ["Yes", "No"];
+    const { data: optionsData } = useReadContract({
+        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+        abi: TRUTH_MARKET_ABI,
+        functionName: 'getMarketOptions',
+        args: [marketId],
+    });
+
+    const options = optionsData ? (optionsData as string[]) : [];
 
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
     const endDate = new Date(Number(bettingEndsAt) * 1000);
@@ -165,7 +170,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
     const allowance = allowanceData ? allowanceData : BigInt(0);
 
     // Approve
-    const { writeContract: approve, data: approveHash, isPending: isApprovePending } = useWriteContract();
+    const { writeContract: approve, data: approveHash, isPending: isApprovePending, error: approveError } = useWriteContract();
     const { isSuccess: isApproveSuccess, isLoading: isApproveConfirming } = useWaitForTransactionReceipt({ hash: approveHash });
 
     // Bet
@@ -197,6 +202,12 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isApproveSuccess]);
+
+    useEffect(() => {
+        if (approveError) {
+             toast({ title: "Approval Failed", description: approveError.message || "The transaction failed or was dropped. Please try again.", variant: "destructive" });
+        }
+    }, [approveError, toast]);
 
     useEffect(() => {
         if (isBetSuccess) {
@@ -291,7 +302,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                                 onClick={handleApprove}
                                 disabled={isApprovePending || isApproveConfirming}
                               >
-                                  {isApprovePending || isApproveConfirming ? "Approving..." : "Approve"}
+                                  {isApprovePending ? "Pending Signature..." : isApproveConfirming ? "Confirming on-chain..." : "Approve"}
                               </Button>
                           )}
                       </div>
