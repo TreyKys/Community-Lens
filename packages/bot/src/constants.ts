@@ -1,6 +1,25 @@
-export const TRUTH_MARKET_ADDRESS = "0xeCFE36E1b5DfB72a69e17254eb259Ddb17739427";
+export const TRUTH_MARKET_ADDRESS = "0x437B9aAE270029f0cBa93f60D6Ca2A77D4668D9c";
 
 export const TRUTH_MARKET_ABI = [
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "marketId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getMarketOptions",
+    "outputs": [
+      {
+        "internalType": "string[]",
+        "name": "",
+        "type": "string[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
   {
     "inputs": [
       {
@@ -291,6 +310,11 @@ export const TRUTH_MARKET_ABI = [
         "internalType": "uint256",
         "name": "bettingEndsAt",
         "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "creator",
+        "type": "address"
       }
     ],
     "stateMutability": "view",

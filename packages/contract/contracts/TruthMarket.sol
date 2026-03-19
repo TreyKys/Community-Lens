@@ -17,6 +17,7 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         bool voided;
         uint256 totalPool;
         uint256 bettingEndsAt;
+        address creator;
     }
 
     mapping(uint256 => Market) public markets;
@@ -60,7 +61,13 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         m.question = question;
         m.options = options;
         m.bettingEndsAt = block.timestamp + duration;
+        m.creator = msg.sender;
         emit MarketCreated(marketId, question, options, m.bettingEndsAt);
+    }
+
+    function getMarketOptions(uint256 marketId) external view returns (string[] memory) {
+        require(marketId < nextMarketId, "Market does not exist");
+        return markets[marketId].options;
     }
 
     function placeBet(uint256 marketId, uint256 optionIndex, uint256 amount) external nonReentrant {
