@@ -1,7 +1,7 @@
 'use client';
 
 import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -145,7 +145,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     // Check Balance
     const { data: balanceData } = useReadContract({
-        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        address: TNGN_ADDRESS as `0x${string}`,
         abi: ERC20_BALANCE_ABI,
         functionName: 'balanceOf',
         args: [address as `0x${string}`],
@@ -158,8 +158,8 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     // Check Allowance
     const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
-        address: MOCK_USDC_ADDRESS as `0x${string}`,
-        abi: MOCK_USDC_ABI,
+        address: TNGN_ADDRESS as `0x${string}`,
+        abi: TNGN_ABI,
         functionName: 'allowance',
         args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
         query: {
@@ -240,10 +240,11 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         }
 
         approve({
-            address: MOCK_USDC_ADDRESS as `0x${string}`,
+            address: TNGN_ADDRESS as `0x${string}`,
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
             args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
+            gas: BigInt(100000),
         });
     };
 

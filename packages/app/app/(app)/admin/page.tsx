@@ -192,11 +192,13 @@ export default function AdminPage() {
              durations.push(BigInt(durationSeconds));
          }
 
+         const parentIds = Array(questions.length).fill(BigInt(0));
+
          createMarketBatch({
              address: TRUTH_MARKET_ADDRESS as `0x${string}`,
              abi: TRUTH_MARKET_ABI,
              functionName: 'createMarketBatch',
-             args: [questions, optionsArr, durations],
+             args: [questions, optionsArr, durations, parentIds],
              ...SAFE_AMOY_GAS,
          });
      } else {
@@ -214,7 +216,7 @@ export default function AdminPage() {
              address: TRUTH_MARKET_ADDRESS as `0x${string}`,
              abi: TRUTH_MARKET_ABI,
              functionName: 'createMarket',
-             args: [formattedQuestion, optionsArray, BigInt(durationSeconds)],
+             args: [formattedQuestion, optionsArray, BigInt(durationSeconds), BigInt(0)],
              ...SAFE_AMOY_GAS,
          });
      }

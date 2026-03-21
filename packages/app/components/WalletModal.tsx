@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
+import { TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Wallet } from 'lucide-react';
 
 export function WalletModal() {
@@ -24,7 +24,7 @@ export function WalletModal() {
     if (isSuccess) {
       toast({
         title: "Success",
-        description: "Minted 1,000 USDC (Demo)",
+        description: "Minted 1,000 tNGN (Demo)",
       });
       setIsOpen(false);
     }
@@ -47,8 +47,8 @@ export function WalletModal() {
     }
 
     writeContract({
-      address: MOCK_USDC_ADDRESS as `0x${string}`,
-      abi: MOCK_USDC_ABI,
+      address: TNGN_ADDRESS as `0x${string}`,
+      abi: TNGN_ABI,
       functionName: 'mint',
       args: [address, parseUnits('1000', 18)],
     });
@@ -92,20 +92,20 @@ export function WalletModal() {
 
           <TabsContent value="demo" className="space-y-4 py-4">
             <div className="text-sm text-muted-foreground">
-              Get free MockUSDC to test the platform on Polygon Amoy.
+              Get free tNGN to test the platform on Polygon Amoy.
             </div>
             <Button
                 onClick={handleMint}
                 disabled={isPending || isConfirming}
                 className="w-full"
             >
-                {isPending || isConfirming ? 'Minting...' : 'Get 1,000 Demo USDC'}
+                {isPending || isConfirming ? 'Minting...' : 'Get 1,000 Demo tNGN'}
             </Button>
           </TabsContent>
 
           <TabsContent value="real" className="space-y-4 py-4">
             <div className="text-sm text-muted-foreground">
-              Deposit Nigerian Naira (NGN) via Paystack to receive USDC.
+              Deposit Nigerian Naira (NGN) via Paystack to receive tNGN automatically!
             </div>
             <div className="space-y-2">
                 <Input

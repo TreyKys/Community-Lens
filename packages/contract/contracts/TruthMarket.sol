@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract TruthMarket is Ownable, ReentrancyGuard {
     IERC20 public immutable bettingToken;
+    address public feeTreasury;
     uint256 public nextMarketId;
 
     struct Market {
@@ -18,6 +19,7 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         uint256 totalPool;
         uint256 bettingEndsAt;
         address creator;
+        uint256 parentMarketId;
     }
 
     mapping(uint256 => Market) public markets;
@@ -27,34 +29,46 @@ contract TruthMarket is Ownable, ReentrancyGuard {
     mapping(uint256 => mapping(address => mapping(uint256 => uint256))) public userStakes;
     // marketId -> user -> claimed
     mapping(uint256 => mapping(address => bool)) public hasClaimed;
+    // marketId -> payoutPool
+    mapping(uint256 => uint256) public marketPayoutPools;
 
-    event MarketCreated(uint256 indexed marketId, string question, string[] options, uint256 bettingEndsAt);
-    event BetPlaced(uint256 indexed marketId, address indexed user, uint256 optionIndex, uint256 amount);
-    event MarketResolved(uint256 indexed marketId, uint256 winningOptionIndex, bool voided, bool feeWaived);
+    event MarketCreated(uint256 indexed marketId, string question, string[] options, uint256 bettingEndsAt, uint256 parentMarketId);
+    event BetPlaced(uint256 indexed marketId, address indexed user, uint256 optionIndex, uint256 wager, uint256 netStake);
+    event MarketResolved(uint256 indexed marketId, uint256 winningOptionIndex, bool voided);
     event WinningsClaimed(uint256 indexed marketId, address indexed user, uint256 amount);
+    event FeeTreasuryUpdated(address oldTreasury, address newTreasury);
 
-    constructor(address _bettingToken) Ownable(msg.sender) {
+    constructor(address _bettingToken, address _feeTreasury) Ownable(msg.sender) {
         bettingToken = IERC20(_bettingToken);
+        feeTreasury = _feeTreasury;
     }
 
-    function createMarket(string memory question, string[] memory options, uint256 duration) external onlyOwner {
-        _createMarket(question, options, duration);
+    function setFeeTreasury(address newTreasury) external onlyOwner {
+        require(newTreasury != address(0), "Invalid address");
+        emit FeeTreasuryUpdated(feeTreasury, newTreasury);
+        feeTreasury = newTreasury;
+    }
+
+    function createMarket(string memory question, string[] memory options, uint256 duration, uint256 parentMarketId) external onlyOwner {
+        _createMarket(question, options, duration, parentMarketId);
     }
 
     function createMarketBatch(
         string[] memory questions,
         string[][] memory options,
-        uint256[] memory durations
+        uint256[] memory durations,
+        uint256[] memory parentMarketIds
     ) external onlyOwner {
         require(questions.length == options.length, "Mismatched arrays");
         require(questions.length == durations.length, "Mismatched arrays");
+        require(questions.length == parentMarketIds.length, "Mismatched arrays");
 
         for (uint256 i = 0; i < questions.length; i++) {
-            _createMarket(questions[i], options[i], durations[i]);
+            _createMarket(questions[i], options[i], durations[i], parentMarketIds[i]);
         }
     }
 
-    function _createMarket(string memory question, string[] memory options, uint256 duration) internal {
+    function _createMarket(string memory question, string[] memory options, uint256 duration, uint256 parentMarketId) internal {
         require(options.length > 1, "At least 2 options required");
         uint256 marketId = nextMarketId++;
         Market storage m = markets[marketId];
@@ -62,7 +76,8 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         m.options = options;
         m.bettingEndsAt = block.timestamp + duration;
         m.creator = msg.sender;
-        emit MarketCreated(marketId, question, options, m.bettingEndsAt);
+        m.parentMarketId = parentMarketId;
+        emit MarketCreated(marketId, question, options, m.bettingEndsAt, parentMarketId);
     }
 
     function getMarketOptions(uint256 marketId) external view returns (string[] memory) {
@@ -80,11 +95,19 @@ contract TruthMarket is Ownable, ReentrancyGuard {
 
         bettingToken.transferFrom(msg.sender, address(this), amount);
 
-        m.totalPool += amount;
-        marketOptionPools[marketId][optionIndex] += amount;
-        userStakes[marketId][msg.sender][optionIndex] += amount;
+        // 1.5% Entry Rake
+        uint256 entryRake = (amount * 15) / 1000;
+        uint256 netStake = amount - entryRake;
 
-        emit BetPlaced(marketId, msg.sender, optionIndex, amount);
+        if (entryRake > 0) {
+            bettingToken.transfer(feeTreasury, entryRake);
+        }
+
+        m.totalPool += netStake;
+        marketOptionPools[marketId][optionIndex] += netStake;
+        userStakes[marketId][msg.sender][optionIndex] += netStake;
+
+        emit BetPlaced(marketId, msg.sender, optionIndex, amount, netStake);
     }
 
     function resolveMarket(uint256 marketId, uint256 winningOptionIndex) external onlyOwner {
@@ -99,24 +122,21 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         uint256 winningPool = marketOptionPools[marketId][winningOptionIndex];
         uint256 losingPool = totalPool - winningPool;
 
-        // Void Rule: 0 liquidity on losing side -> Refund
-        // Or 0 liquidity on winning side (no winners) -> Refund
         bool voided = (losingPool == 0) || (winningPool == 0);
         m.voided = voided;
 
-        bool feeWaived = false;
-
         if (!voided) {
-             uint256 fee = (totalPool * 5) / 100;
-             uint256 netPot = totalPool - fee;
+            // 5% Resolution Rake on Profit (Losing Pool)
+            uint256 resolutionRake = (losingPool * 5) / 100;
+            if (resolutionRake > 0) {
+                bettingToken.transfer(feeTreasury, resolutionRake);
+            }
 
-             // No-Loss Guarantee: If NetPot < Principal (WinningPool), waive fee
-             if (netPot < winningPool) {
-                 feeWaived = true;
-             }
+            // The payout pool is the total pool minus the resolution rake
+            marketPayoutPools[marketId] = totalPool - resolutionRake;
         }
 
-        emit MarketResolved(marketId, winningOptionIndex, voided, feeWaived);
+        emit MarketResolved(marketId, winningOptionIndex, voided);
     }
 
     function claim(uint256 marketId) external nonReentrant {
@@ -127,7 +147,7 @@ contract TruthMarket is Ownable, ReentrancyGuard {
         uint256 payout = 0;
 
         if (m.voided) {
-            // Refund all stakes for this user in this market
+            // Refund all net stakes for this user in this market
             for (uint256 i = 0; i < m.options.length; i++) {
                 payout += userStakes[marketId][msg.sender][i];
             }
@@ -135,19 +155,11 @@ contract TruthMarket is Ownable, ReentrancyGuard {
             // Standard Payout (Only for winning option)
             uint256 userStake = userStakes[marketId][msg.sender][m.winningOptionIndex];
             if (userStake > 0) {
-                 uint256 totalPool = m.totalPool;
                  uint256 winningPool = marketOptionPools[marketId][m.winningOptionIndex];
+                 uint256 payoutPool = marketPayoutPools[marketId];
 
-                 uint256 fee = (totalPool * 5) / 100;
-                 uint256 netPot = totalPool - fee;
-
-                 // No-Loss Guarantee Check
-                 if (netPot < winningPool) {
-                     netPot = totalPool; // Fee waived
-                 }
-
-                 // Payout = userStake * (netPot / winningPool)
-                 payout = (userStake * netPot) / winningPool;
+                 // Payout = userStake * (payoutPool / winningPool)
+                 payout = (userStake * payoutPool) / winningPool;
             }
         }
 
