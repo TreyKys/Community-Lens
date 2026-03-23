@@ -235,8 +235,6 @@ export default function AdminPage() {
              durations.push(BigInt(durationSeconds));
          }
 
-         const parentIds = Array(questions.length).fill(BigInt(0));
-
          // For general creation, parentId is 0
          const parentIds = Array(questions.length).fill(BigInt(0));
 
