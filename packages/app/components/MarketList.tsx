@@ -44,7 +44,7 @@ const ERC20_BALANCE_ABI = [{
     type: "function"
 }] as const;
 
-export function MarketList({ filterParentId }: { filterParentId?: bigint }) {
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: { filterExactMarketId?: bigint, filterChildrenOfParentId?: bigint }) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'all';
 
@@ -82,9 +82,12 @@ export function MarketList({ filterParentId }: { filterParentId?: bigint }) {
         if (isExpired24h && !resolved) return null;
         if (isExpired24h) return null;
 
-        if (filterParentId !== undefined) {
-             // Specific view: Only show the parent and its children
-             if (marketId !== filterParentId && parentMarketId !== filterParentId) return null;
+        if (filterExactMarketId !== undefined) {
+             // Specific view: Only show this exact market (used for pinning parent)
+             if (marketId !== filterExactMarketId) return null;
+        } else if (filterChildrenOfParentId !== undefined) {
+             // Specific view: Only show children of this parent
+             if (parentMarketId !== filterChildrenOfParentId) return null;
         } else {
              // General view: Only show Parent Markets (parentMarketId == 0)
              if (Number(parentMarketId) !== 0) return null;
@@ -116,12 +119,12 @@ export function MarketList({ filterParentId }: { filterParentId?: bigint }) {
                 totalPool={m.totalPool}
                 bettingEndsAt={m.bettingEndsAt}
                 parentMarketId={m.parentMarketId}
-                hideViewMore={filterParentId !== undefined}
+                hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             />
           ))
       ) : (
         <div className="text-center text-muted-foreground p-8">
-          No markets found for this category.
+          No markets found.
         </div>
       )}
     </div>
@@ -248,7 +251,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
         if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
-                description: `You have ${formatUnits(balance, 18)} USDC. Use the Wallet to mint Demo tokens.`,
+                description: `You have ${formatUnits(balance, 18)} tNGN. Use the Wallet to mint Demo tokens.`,
                 variant: "destructive"
             });
             return;
@@ -275,7 +278,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
             </CardHeader>
             <CardContent>
               <div className="flex justify-between text-sm text-muted-foreground mt-2">
-                <span>Pool: {formatUnits(totalPool, 18)} USDC</span>
+                <span>Pool: {formatUnits(totalPool, 18)} tNGN</span>
                 <span>Ends: {endDate.toLocaleString()}</span>
               </div>
               {voided && <div className="text-red-500 text-xs mt-1">Market Voided</div>}
@@ -299,7 +302,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                       <div className="flex gap-2">
                           <Input
                             type="number"
-                            placeholder="Amount (USDC)"
+                            placeholder="Amount (tNGN)"
                             value={amount}
                             onChange={(e) => setAmount(e.target.value)}
                             disabled={!isLive}
@@ -324,7 +327,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                       </div>
                       {address && (
                           <div className="text-xs text-right text-muted-foreground">
-                              Balance: {formatUnits(balance, 18)} USDC
+                              Balance: {formatUnits(balance, 18)} tNGN
                           </div>
                       )}
                   </div>

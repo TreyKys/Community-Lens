@@ -84,3 +84,73 @@ Import trace for requested module:
 ../../node_modules/wagmi/dist/esm/exports/connectors.js
 ../../node_modules/@rainbow-me/rainbowkit/dist/index.js
 ./components/Providers.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx

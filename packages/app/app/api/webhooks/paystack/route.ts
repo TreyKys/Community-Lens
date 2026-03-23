@@ -4,9 +4,7 @@ import { createPublicClient, createWalletClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygonAmoy } from 'viem/chains';
 import { TNGN_ADDRESS, TNGN_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
-
-// Simulated DB for Idempotency (In production, use Redis/Postgres)
-const processedReferences = new Set<string>();
+import { db } from '@/lib/firebaseAdmin';
 
 export async function POST(req: Request) {
   try {
@@ -42,12 +40,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing wallet metadata' }, { status: 400 });
     }
 
-    // 2. Idempotency Check (Replay Attack Protection)
-    if (processedReferences.has(reference)) {
+    // 2. Idempotency Check (Replay Attack Protection via Firestore)
+    const txRef = db.collection('paystack_transactions').doc(reference);
+    const doc = await txRef.get();
+
+    if (doc.exists) {
       console.log(`Reference ${reference} already processed. Skipping.`);
       return NextResponse.json({ status: 'already processed' }, { status: 200 });
     }
-    processedReferences.add(reference);
+
+    // Mark as processed immediately to prevent race conditions
+    await txRef.set({
+        processedAt: new Date().toISOString(),
+        amount: amount,
+        walletAddress: userWalletAddress,
+        status: 'pending_mint'
+    });
 
     // 3. Server-Side Mint Execution
     // Convert kobo to standard NGN
@@ -95,6 +103,12 @@ export async function POST(req: Request) {
     });
 
     console.log(`Mint successful! Tx Hash: ${txHash}`);
+
+    // Update status
+    await txRef.update({
+        status: 'completed',
+        txHash: txHash
+    });
 
     return NextResponse.json({ status: 'success', txHash }, { status: 200 });
 
