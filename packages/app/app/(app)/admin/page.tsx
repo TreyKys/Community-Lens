@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { formatUnits } from 'viem';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useReadContract, useReadContracts } from 'wagmi';
 import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
@@ -34,10 +34,31 @@ export default function AdminPage() {
       overUnder25: false,
   });
 
-  // Resolve Market State
-  const [resolveMarketId, setResolveMarketId] = useState('');
+  // Resolve Market State (Inline)
+  const [resolvingMarketId, setResolvingMarketId] = useState<string | null>(null);
   const [winningOptionIndex, setWinningOptionIndex] = useState('');
-  const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
+
+  // Add Sub-Markets State
+  const [isAddSubMarketsModalOpen, setIsAddSubMarketsModalOpen] = useState(false);
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
+  const [selectedParentQuestion, setSelectedParentQuestion] = useState<string>('');
+  const [selectedParentDeadline, setSelectedParentDeadline] = useState<bigint | null>(null);
+  const [subMarketPresets, setSubMarketPresets] = useState({
+      btts: false,
+      ou05: false,
+      ou15: false,
+      ou25: false,
+      ou35: false,
+      ou45: false,
+      doubleChance: false,
+      drawNoBet: false,
+      exactGoals: false,
+      halftimeResult: false,
+      bttsFirstHalf: false,
+      firstTeamToScore: false,
+  });
+  const [customSubMarketName, setCustomSubMarketName] = useState('');
+  const [customSubMarketOptions, setCustomSubMarketOptions] = useState('');
 
   // Read Markets State
   const { data: nextId } = useReadContract({
@@ -121,13 +142,35 @@ export default function AdminPage() {
     if (isResolveSuccess) {
         toast({
             title: "Market Resolved!",
-            description: `Market ${resolveMarketId} has been resolved.`,
+            description: `Market ${resolvingMarketId} has been resolved.`,
         });
-        setResolveMarketId('');
+        setResolvingMarketId(null);
         setWinningOptionIndex('');
-        setIsResolveModalOpen(false);
     }
-  }, [isResolveSuccess, resolveMarketId, toast]);
+  }, [isResolveSuccess, resolvingMarketId, toast]);
+
+  // Handle Add Sub-Markets Success
+  useEffect(() => {
+      if (isCreateBatchSuccess && isAddSubMarketsModalOpen) {
+          setIsAddSubMarketsModalOpen(false);
+          setSubMarketPresets({
+              btts: false,
+              ou05: false,
+              ou15: false,
+              ou25: false,
+              ou35: false,
+              ou45: false,
+              doubleChance: false,
+              drawNoBet: false,
+              exactGoals: false,
+              halftimeResult: false,
+              bttsFirstHalf: false,
+              firstTeamToScore: false,
+          });
+          setCustomSubMarketName('');
+          setCustomSubMarketOptions('');
+      }
+  }, [isCreateBatchSuccess, isAddSubMarketsModalOpen]);
 
   if (!isMounted) return null;
 
@@ -192,11 +235,14 @@ export default function AdminPage() {
              durations.push(BigInt(durationSeconds));
          }
 
+         // For general creation, parentId is 0
+         const parentIds = Array(questions.length).fill(BigInt(0));
+
          createMarketBatch({
              address: TRUTH_MARKET_ADDRESS as `0x${string}`,
              abi: TRUTH_MARKET_ABI,
              functionName: 'createMarketBatch',
-             args: [questions, optionsArr, durations],
+             args: [questions, optionsArr, durations, parentIds],
              ...SAFE_AMOY_GAS,
          });
      } else {
@@ -214,17 +260,136 @@ export default function AdminPage() {
              address: TRUTH_MARKET_ADDRESS as `0x${string}`,
              abi: TRUTH_MARKET_ABI,
              functionName: 'createMarket',
-             args: [formattedQuestion, optionsArray, BigInt(durationSeconds)],
+             args: [formattedQuestion, optionsArray, BigInt(durationSeconds), BigInt(0)],
              ...SAFE_AMOY_GAS,
          });
      }
   };
 
-  const handleResolveSubmit = () => {
-      if (!resolveMarketId || !winningOptionIndex) {
+  const handleAddSubMarketsSubmit = () => {
+      if (!selectedParentId || !selectedParentQuestion || !selectedParentDeadline) return;
+
+      const durationSeconds = Math.floor(Number(selectedParentDeadline) - (Date.now() / 1000));
+      if (durationSeconds <= 0) {
+          toast({ title: "Error", description: "Parent market is already expired.", variant: "destructive" });
+          return;
+      }
+
+      const questions: string[] = [];
+      const optionsArr: string[][] = [];
+      const durations: bigint[] = [];
+      const parentIds: bigint[] = [];
+
+      const pId = BigInt(selectedParentId);
+      const dur = BigInt(durationSeconds);
+
+      if (subMarketPresets.btts) {
+          questions.push(`${selectedParentQuestion} (BTTS)`);
+          optionsArr.push(["Yes", "No"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.ou05) {
+          questions.push(`${selectedParentQuestion} (Over/Under 0.5 Goals)`);
+          optionsArr.push(["Over 0.5", "Under 0.5"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.ou15) {
+          questions.push(`${selectedParentQuestion} (Over/Under 1.5 Goals)`);
+          optionsArr.push(["Over 1.5", "Under 1.5"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.ou25) {
+          questions.push(`${selectedParentQuestion} (Over/Under 2.5 Goals)`);
+          optionsArr.push(["Over 2.5", "Under 2.5"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.ou35) {
+          questions.push(`${selectedParentQuestion} (Over/Under 3.5 Goals)`);
+          optionsArr.push(["Over 3.5", "Under 3.5"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.ou45) {
+          questions.push(`${selectedParentQuestion} (Over/Under 4.5 Goals)`);
+          optionsArr.push(["Over 4.5", "Under 4.5"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.doubleChance) {
+          questions.push(`${selectedParentQuestion} (Double Chance)`);
+          optionsArr.push(["Home or Draw", "Away or Draw", "Home or Away"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.drawNoBet) {
+          questions.push(`${selectedParentQuestion} (Draw No Bet)`);
+          optionsArr.push(["Home", "Away"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.exactGoals) {
+          questions.push(`${selectedParentQuestion} (Exact Goals)`);
+          optionsArr.push(["0", "1", "2", "3", "4+"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.halftimeResult) {
+          questions.push(`${selectedParentQuestion} (Half-Time Result)`);
+          optionsArr.push(["Home", "Draw", "Away"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.bttsFirstHalf) {
+          questions.push(`${selectedParentQuestion} (BTTS - 1st Half)`);
+          optionsArr.push(["Yes", "No"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+      if (subMarketPresets.firstTeamToScore) {
+          questions.push(`${selectedParentQuestion} (First Team to Score)`);
+          optionsArr.push(["Home", "Away", "None"]);
+          durations.push(dur);
+          parentIds.push(pId);
+      }
+
+      if (customSubMarketName && customSubMarketOptions) {
+          const opts = customSubMarketOptions.split(',').map(o => o.trim()).filter(o => o.length > 0);
+          if (opts.length >= 2) {
+              questions.push(`${selectedParentQuestion} (${customSubMarketName})`);
+              optionsArr.push(opts);
+              durations.push(dur);
+              parentIds.push(pId);
+          }
+      }
+
+      if (questions.length === 0) {
+          toast({ title: "Error", description: "Select at least one sub-market to add.", variant: "destructive" });
+          return;
+      }
+
+      // Dynamic gas estimation to support batching 10+ markets safely
+      const estimatedGasLimit = BigInt(1000000 + (questions.length * 300000));
+
+      createMarketBatch({
+          address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+          abi: TRUTH_MARKET_ABI,
+          functionName: 'createMarketBatch',
+          args: [questions, optionsArr, durations, parentIds],
+          gas: estimatedGasLimit,
+          maxFeePerGas: SAFE_AMOY_GAS.maxFeePerGas,
+          maxPriorityFeePerGas: SAFE_AMOY_GAS.maxPriorityFeePerGas,
+      });
+  };
+
+  const handleResolveSubmit = (marketIdToResolve: string) => {
+      if (!marketIdToResolve || !winningOptionIndex) {
           toast({
               title: "Error",
-              description: "Please fill in all fields",
+              description: "Please enter the winning option index",
               variant: "destructive"
           });
           return;
@@ -234,7 +399,7 @@ export default function AdminPage() {
           address: TRUTH_MARKET_ADDRESS as `0x${string}`,
           abi: TRUTH_MARKET_ABI,
           functionName: 'resolveMarket',
-          args: [BigInt(resolveMarketId), BigInt(winningOptionIndex)],
+          args: [BigInt(marketIdToResolve), BigInt(winningOptionIndex)],
           ...SAFE_AMOY_GAS,
       });
   };
@@ -337,45 +502,6 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
-      {/* RESOLVE MARKET FORM */}
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>Resolve Market</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Market ID</label>
-            <Input
-              type="number"
-              placeholder="0"
-              value={resolveMarketId}
-              onChange={(e) => setResolveMarketId(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Winning Option Index</label>
-            <Input
-              type="number"
-              placeholder="0"
-              value={winningOptionIndex}
-              onChange={(e) => setWinningOptionIndex(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              0 = First Option, 1 = Second Option, etc.
-            </p>
-          </div>
-
-          <Button
-            className="w-full"
-            variant="destructive"
-            onClick={handleResolveSubmit}
-            disabled={isResolvePending || isResolveConfirming}
-          >
-            {isResolvePending || isResolveConfirming ? 'Resolving...' : 'Resolve Market'}
-          </Button>
-        </CardContent>
-      </Card>
 
       {/* ADMIN MASTER TABLE */}
       <Card>
@@ -402,7 +528,7 @@ export default function AdminPage() {
                 {(marketsData || []).map((result, index) => {
                   if (result.status !== 'success' || !result.result) return null;
                   const marketId = marketIds[index];
-                  const [question, resolved, , voided, totalPool, bettingEndsAt, creator] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string];
+                  const [question, resolved, , voided, totalPool, bettingEndsAt, creator, parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
 
                   const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
                   let status = "Active";
@@ -416,36 +542,79 @@ export default function AdminPage() {
                   if (question.includes('[CRYPTO]')) categoryLabel = "Crypto";
 
                   const source = creator.toLowerCase() === BOT_WALLET_ADDRESS ? "Bot" : "Admin";
+                  const isParent = Number(parentMarketId) === 0;
 
                   return (
-                    <TableRow key={marketId.toString()}>
-                      <TableCell className="font-mono">{marketId.toString()}</TableCell>
-                      <TableCell className="max-w-xs truncate" title={question}>{question}</TableCell>
-                      <TableCell>{categoryLabel}</TableCell>
-                      <TableCell>{formatUnits(totalPool, 18)}</TableCell>
-                      <TableCell>
-                        <Badge variant={status === "Active" ? "default" : status === "Resolving" ? "secondary" : status === "Voided" ? "destructive" : "outline"}>
-                          {status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                         <Badge variant={source === "Bot" ? "outline" : "default"}>{source}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {source === "Admin" && status === "Resolving" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                                setResolveMarketId(marketId.toString());
-                                setIsResolveModalOpen(true);
-                            }}
-                          >
-                            Resolve
-                          </Button>
+                    <Fragment key={marketId.toString()}>
+                        <TableRow className={!isParent ? "bg-muted/30" : ""}>
+                          <TableCell className="font-mono">
+                              {marketId.toString()}
+                              {!isParent && <div className="text-xs text-muted-foreground mt-1">↳ Parent: {parentMarketId.toString()}</div>}
+                          </TableCell>
+                          <TableCell className="max-w-xs truncate" title={question}>{question}</TableCell>
+                          <TableCell>{categoryLabel}</TableCell>
+                          <TableCell>{formatUnits(totalPool, 18)} tNGN</TableCell>
+                          <TableCell>
+                            <Badge variant={status === "Active" ? "default" : status === "Resolving" ? "secondary" : status === "Voided" ? "destructive" : "outline"}>
+                              {status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                             <Badge variant={source === "Bot" ? "outline" : "default"}>{source}</Badge>
+                          </TableCell>
+                          <TableCell className="space-x-2 flex flex-wrap gap-2">
+                            {isParent && status === "Active" && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => {
+                                    setSelectedParentId(marketId.toString());
+                                    setSelectedParentQuestion(question);
+                                    setSelectedParentDeadline(bettingEndsAt);
+                                    setIsAddSubMarketsModalOpen(true);
+                                }}
+                              >
+                                Add Sub-Markets
+                              </Button>
+                            )}
+                            {(status === "Active" || status === "Resolving") && !resolved && !voided && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setResolvingMarketId(resolvingMarketId === marketId.toString() ? null : marketId.toString())}
+                              >
+                                {resolvingMarketId === marketId.toString() ? 'Cancel' : 'Resolve'}
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+
+                        {/* INLINE RESOLVE ROW */}
+                        {resolvingMarketId === marketId.toString() && (
+                            <TableRow>
+                                <TableCell colSpan={7} className="bg-muted/50 p-4">
+                                    <div className="flex items-end gap-4 max-w-lg">
+                                        <div className="space-y-2 flex-1">
+                                            <label className="text-sm font-medium">Winning Option Index</label>
+                                            <Input
+                                                type="number"
+                                                placeholder="e.g. 0 for first option, 1 for second..."
+                                                value={winningOptionIndex}
+                                                onChange={(e) => setWinningOptionIndex(e.target.value)}
+                                            />
+                                        </div>
+                                        <Button
+                                            variant="destructive"
+                                            onClick={() => handleResolveSubmit(marketId.toString())}
+                                            disabled={isResolvePending || isResolveConfirming}
+                                        >
+                                            {isResolvePending || isResolveConfirming ? 'Resolving...' : 'Confirm Resolution'}
+                                        </Button>
+                                    </div>
+                                </TableCell>
+                            </TableRow>
                         )}
-                      </TableCell>
-                    </TableRow>
+                    </Fragment>
                   );
                 })}
               </TableBody>
@@ -454,37 +623,88 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
-      {/* RESOLVE MARKET MODAL */}
-      <Dialog open={isResolveModalOpen} onOpenChange={setIsResolveModalOpen}>
-        <DialogContent>
+      {/* ADD SUB-MARKETS MODAL (PRESET GRID) */}
+      <Dialog open={isAddSubMarketsModalOpen} onOpenChange={setIsAddSubMarketsModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Resolve Market #{resolveMarketId}</DialogTitle>
+            <DialogTitle>Add Sub-Markets to #{selectedParentId}</DialogTitle>
             <DialogDescription>
-              Select the winning option index to resolve the market and distribute payouts. This action cannot be undone.
+              Select popular sub-markets to attach to: <strong>{selectedParentQuestion}</strong>
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Winning Option Index</label>
-              <Input
-                type="number"
-                placeholder="0"
-                value={winningOptionIndex}
-                onChange={(e) => setWinningOptionIndex(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                0 = First Option, 1 = Second Option, etc.
-              </p>
+          <div className="space-y-6 py-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-btts" checked={subMarketPresets.btts} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, btts: c === true})} />
+                    <label htmlFor="sm-btts" className="text-sm cursor-pointer select-none flex-1">BTTS (Yes/No)</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-ou05" checked={subMarketPresets.ou05} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou05: c === true})} />
+                    <label htmlFor="sm-ou05" className="text-sm cursor-pointer select-none flex-1">O/U 0.5 Goals</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-ou15" checked={subMarketPresets.ou15} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou15: c === true})} />
+                    <label htmlFor="sm-ou15" className="text-sm cursor-pointer select-none flex-1">O/U 1.5 Goals</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-ou25" checked={subMarketPresets.ou25} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou25: c === true})} />
+                    <label htmlFor="sm-ou25" className="text-sm cursor-pointer select-none flex-1">O/U 2.5 Goals</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-ou35" checked={subMarketPresets.ou35} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou35: c === true})} />
+                    <label htmlFor="sm-ou35" className="text-sm cursor-pointer select-none flex-1">O/U 3.5 Goals</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-ou45" checked={subMarketPresets.ou45} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou45: c === true})} />
+                    <label htmlFor="sm-ou45" className="text-sm cursor-pointer select-none flex-1">O/U 4.5 Goals</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-dc" checked={subMarketPresets.doubleChance} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, doubleChance: c === true})} />
+                    <label htmlFor="sm-dc" className="text-sm cursor-pointer select-none flex-1">Double Chance</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-dnb" checked={subMarketPresets.drawNoBet} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, drawNoBet: c === true})} />
+                    <label htmlFor="sm-dnb" className="text-sm cursor-pointer select-none flex-1">Draw No Bet</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-eg" checked={subMarketPresets.exactGoals} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, exactGoals: c === true})} />
+                    <label htmlFor="sm-eg" className="text-sm cursor-pointer select-none flex-1">Exact Goals</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-ht" checked={subMarketPresets.halftimeResult} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, halftimeResult: c === true})} />
+                    <label htmlFor="sm-ht" className="text-sm cursor-pointer select-none flex-1">Half-Time Result</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-btts1" checked={subMarketPresets.bttsFirstHalf} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, bttsFirstHalf: c === true})} />
+                    <label htmlFor="sm-btts1" className="text-sm cursor-pointer select-none flex-1">BTTS - 1st Half</label>
+                </div>
+                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
+                    <Checkbox id="sm-f2s" checked={subMarketPresets.firstTeamToScore} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, firstTeamToScore: c === true})} />
+                    <label htmlFor="sm-f2s" className="text-sm cursor-pointer select-none flex-1">First to Score</label>
+                </div>
+            </div>
+
+            <div className="pt-4 border-t">
+              <h4 className="text-sm font-medium mb-3">Custom Sub-Market</h4>
+              <div className="grid grid-cols-2 gap-4">
+                  <div>
+                      <label className="text-xs mb-1 block">Market Name (e.g. &quot;Total Corners&quot;)</label>
+                      <Input value={customSubMarketName} onChange={(e) => setCustomSubMarketName(e.target.value)} />
+                  </div>
+                  <div>
+                      <label className="text-xs mb-1 block">Options (Comma separated)</label>
+                      <Input value={customSubMarketOptions} onChange={(e) => setCustomSubMarketOptions(e.target.value)} placeholder="Over 10, Under 10" />
+                  </div>
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsResolveModalOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsAddSubMarketsModalOpen(false)}>Cancel</Button>
             <Button
-              variant="destructive"
-              onClick={handleResolveSubmit}
-              disabled={isResolvePending || isResolveConfirming}
+              onClick={handleAddSubMarketsSubmit}
+              disabled={isCreateBatchPending || isCreateBatchConfirming}
             >
-              {isResolvePending || isResolveConfirming ? 'Resolving...' : 'Confirm Resolution'}
+              {isCreateBatchPending || isCreateBatchConfirming ? 'Adding...' : 'Add Selected Sub-Markets'}
             </Button>
           </DialogFooter>
         </DialogContent>

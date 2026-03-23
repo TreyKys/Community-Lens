@@ -1,7 +1,7 @@
 'use client';
 
 import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
 
@@ -22,6 +22,7 @@ interface Market {
     voided: boolean;
     totalPool: bigint;
     bettingEndsAt: bigint;
+    parentMarketId: bigint;
 }
 
 const ERC20_APPROVE_ABI = [{
@@ -43,7 +44,7 @@ const ERC20_BALANCE_ABI = [{
     type: "function"
 }] as const;
 
-export function MarketList() {
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: { filterExactMarketId?: bigint, filterChildrenOfParentId?: bigint }) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'all';
 
@@ -73,24 +74,36 @@ export function MarketList() {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
-        const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string];
+        // market: [question, resolved, winningOptionIndex, voided, totalPool, bettingEndsAt, creator, parentMarketId]
+        const [question, resolved, , voided, totalPool, bettingEndsAt, , parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
 
         // 1. Expiry Check
         const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
         if (isExpired24h && !resolved) return null;
         if (isExpired24h) return null;
 
-        // 2. Category Filter
-        if (category === 'politics') {
-             if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
-        } else if (category === 'crypto') {
-             if (!question.includes('[CRYPTO]')) return null;
-        } else if (category === 'sports') {
-             const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
-             if (!isSports) return null;
+        if (filterExactMarketId !== undefined) {
+             // Specific view: Only show this exact market (used for pinning parent)
+             if (marketId !== filterExactMarketId) return null;
+        } else if (filterChildrenOfParentId !== undefined) {
+             // Specific view: Only show children of this parent
+             if (parentMarketId !== filterChildrenOfParentId) return null;
+        } else {
+             // General view: Only show Parent Markets (parentMarketId == 0)
+             if (Number(parentMarketId) !== 0) return null;
+
+             // Category Filter (only on general view)
+             if (category === 'politics') {
+                  if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
+             } else if (category === 'crypto') {
+                  if (!question.includes('[CRYPTO]')) return null;
+             } else if (category === 'sports') {
+                  const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+                  if (!isSports) return null;
+             }
         }
 
-        return { marketId, question, resolved, voided, totalPool, bettingEndsAt } as Market;
+        return { marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId } as Market;
   }).filter((m): m is Market => m !== null);
 
   return (
@@ -105,25 +118,30 @@ export function MarketList() {
                 voided={m.voided}
                 totalPool={m.totalPool}
                 bettingEndsAt={m.bettingEndsAt}
+                parentMarketId={m.parentMarketId}
+                hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             />
           ))
       ) : (
         <div className="text-center text-muted-foreground p-8">
-          No markets found for this category.
+          No markets found.
         </div>
       )}
     </div>
   );
 }
 
-function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt }: {
+export function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId, hideViewMore }: {
     marketId: bigint;
     question: string;
     resolved: boolean;
     voided: boolean;
     totalPool: bigint;
     bettingEndsAt: bigint;
+    parentMarketId?: bigint;
+    hideViewMore?: boolean;
 }) {
+    const router = useRouter();
     const { address } = useAccount();
     const { toast } = useToast();
     const [selectedOption, setSelectedOption] = useState<string>('0');
@@ -145,7 +163,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     // Check Balance
     const { data: balanceData } = useReadContract({
-        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        address: TNGN_ADDRESS as `0x${string}`,
         abi: ERC20_BALANCE_ABI,
         functionName: 'balanceOf',
         args: [address as `0x${string}`],
@@ -158,8 +176,8 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     // Check Allowance
     const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
-        address: MOCK_USDC_ADDRESS as `0x${string}`,
-        abi: MOCK_USDC_ABI,
+        address: TNGN_ADDRESS as `0x${string}`,
+        abi: TNGN_ABI,
         functionName: 'allowance',
         args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
         query: {
@@ -233,17 +251,18 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
         if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
-                description: `You have ${formatUnits(balance, 18)} USDC. Use the Wallet to mint Demo tokens.`,
+                description: `You have ${formatUnits(balance, 18)} tNGN. Use the Wallet to mint Demo tokens.`,
                 variant: "destructive"
             });
             return;
         }
 
         approve({
-            address: MOCK_USDC_ADDRESS as `0x${string}`,
+            address: TNGN_ADDRESS as `0x${string}`,
             abi: ERC20_APPROVE_ABI,
             functionName: 'approve',
             args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
+            gas: BigInt(100000),
         });
     };
 
@@ -259,7 +278,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
             </CardHeader>
             <CardContent>
               <div className="flex justify-between text-sm text-muted-foreground mt-2">
-                <span>Pool: {formatUnits(totalPool, 18)} USDC</span>
+                <span>Pool: {formatUnits(totalPool, 18)} tNGN</span>
                 <span>Ends: {endDate.toLocaleString()}</span>
               </div>
               {voided && <div className="text-red-500 text-xs mt-1">Market Voided</div>}
@@ -283,7 +302,7 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                       <div className="flex gap-2">
                           <Input
                             type="number"
-                            placeholder="Amount (USDC)"
+                            placeholder="Amount (tNGN)"
                             value={amount}
                             onChange={(e) => setAmount(e.target.value)}
                             disabled={!isLive}
@@ -308,17 +327,28 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
                       </div>
                       {address && (
                           <div className="text-xs text-right text-muted-foreground">
-                              Balance: {formatUnits(balance, 18)} USDC
+                              Balance: {formatUnits(balance, 18)} tNGN
                           </div>
                       )}
                   </div>
               )}
             </CardContent>
             {!isExpanded && (
-                <CardFooter className="pt-0">
-                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setIsExpanded(true)}>
+                <CardFooter className="pt-0 flex gap-2">
+                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={(e) => {
+                        e.stopPropagation();
+                        setIsExpanded(true);
+                    }}>
                         {isLive ? "Tap to Bet" : "View Options"}
                     </Button>
+                    {!hideViewMore && Number(parentMarketId) === 0 && (
+                        <Button variant="outline" size="sm" className="w-full text-xs" onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/event/${marketId.toString()}`);
+                        }}>
+                            View More Markets
+                        </Button>
+                    )}
                 </CardFooter>
             )}
         </Card>
