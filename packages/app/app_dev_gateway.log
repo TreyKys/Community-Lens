@@ -156,3 +156,230 @@ Import trace for requested module:
 ../../node_modules/wagmi/dist/esm/exports/connectors.js
 ../../node_modules/@rainbow-me/rainbowkit/dist/index.js
 ./components/Providers.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+
+../../node_modules/pino/lib/tools.js
+Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
+
+Import trace for requested module:
+../../node_modules/pino/lib/tools.js
+../../node_modules/pino/pino.js
+../../node_modules/@walletconnect/logger/dist/index.es.js
+../../node_modules/@walletconnect/universal-provider/dist/index.es.js
+../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
+../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+
+../../node_modules/pino/lib/tools.js
+Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
+
+Import trace for requested module:
+../../node_modules/pino/lib/tools.js
+../../node_modules/pino/pino.js
+../../node_modules/@walletconnect/logger/dist/index.es.js
+../../node_modules/@walletconnect/universal-provider/dist/index.es.js
+../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
+../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+ ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
+
+Import trace for requested module:
+../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
+../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+
+../../node_modules/pino/lib/tools.js
+Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
+
+Import trace for requested module:
+../../node_modules/pino/lib/tools.js
+../../node_modules/pino/pino.js
+../../node_modules/@walletconnect/logger/dist/index.es.js
+../../node_modules/@walletconnect/universal-provider/dist/index.es.js
+../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
+../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
+../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
+../../node_modules/wagmi/dist/esm/exports/connectors.js
+../../node_modules/@rainbow-me/rainbowkit/dist/index.js
+./components/Navbar.tsx
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 2 times.
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 2 times.
+Multiple versions of Lit loaded. Loading multiple versions is not recommended. See https://lit.dev/msg/multiple-versions for more information.
+ GET /markets 404 in 5552ms
+ GET /_next/static/css/app/layout.css?v=1774265471148 404 in 109ms
+ GET /_next/static/media/4473ecc91f70f139-s.p.woff 404 in 192ms
+ GET /_next/static/media/463dafcda517f24f-s.p.woff 404 in 184ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 105ms
+ GET /_next/static/chunks/main-app.js?v=1774265471148 404 in 112ms
+ GET /_next/static/chunks/app/layout.js 404 in 69ms
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat '/app/packages/app/.next/server/vendor-chunks/derive-valtio.js'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/derive-valtio' in /app/packages/app/.next/server for build dependencies doesn't lead to expected result '/app/packages/app/.next/server/vendor-chunks/derive-valtio.js', but to 'Error: Can't resolve './vendor-chunks/derive-valtio' in '/app/packages/app/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/derive-valtio (expected /app/packages/app/.next/server/vendor-chunks/derive-valtio.js)
+<w>  at file dependencies /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file dependencies /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file dependencies /app/node_modules/next/dist/server/require.js
+<w>  at file /app/node_modules/next/dist/server/require.js
+<w>  at file dependencies /app/node_modules/next/dist/server/load-components.js
+<w>  at file /app/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /app/node_modules/next/dist/build/utils.js
+<w>  at file /app/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file dependencies /app/node_modules/next/dist/build/swc/index.js
+<w>  at file /app/node_modules/next/dist/build/swc/index.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at resolve commonjs /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/proxy-compare' in /app/packages/app/.next/server for build dependencies doesn't lead to expected result '/app/packages/app/.next/server/vendor-chunks/proxy-compare.js', but to 'Error: Can't resolve './vendor-chunks/proxy-compare' in '/app/packages/app/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/proxy-compare (expected /app/packages/app/.next/server/vendor-chunks/proxy-compare.js)
+<w>  at file dependencies /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file dependencies /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file dependencies /app/node_modules/next/dist/server/require.js
+<w>  at file /app/node_modules/next/dist/server/require.js
+<w>  at file dependencies /app/node_modules/next/dist/server/load-components.js
+<w>  at file /app/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /app/node_modules/next/dist/build/utils.js
+<w>  at file /app/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file dependencies /app/node_modules/next/dist/build/swc/index.js
+<w>  at file /app/node_modules/next/dist/build/swc/index.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at resolve commonjs /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/big.js' in /app/packages/app/.next/server for build dependencies doesn't lead to expected result '/app/packages/app/.next/server/vendor-chunks/big.js.js', but to 'Error: Can't resolve './vendor-chunks/big.js' in '/app/packages/app/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/big.js (expected /app/packages/app/.next/server/vendor-chunks/big.js.js)
+<w>  at file dependencies /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file dependencies /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file dependencies /app/node_modules/next/dist/server/require.js
+<w>  at file /app/node_modules/next/dist/server/require.js
+<w>  at file dependencies /app/node_modules/next/dist/server/load-components.js
+<w>  at file /app/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /app/node_modules/next/dist/build/utils.js
+<w>  at file /app/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file dependencies /app/node_modules/next/dist/build/swc/index.js
+<w>  at file /app/node_modules/next/dist/build/swc/index.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at resolve commonjs /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving './vendor-chunks/lit-element' in /app/packages/app/.next/server for build dependencies doesn't lead to expected result '/app/packages/app/.next/server/vendor-chunks/lit-element.js', but to 'Error: Can't resolve './vendor-chunks/lit-element' in '/app/packages/app/.next/server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ./vendor-chunks/lit-element (expected /app/packages/app/.next/server/vendor-chunks/lit-element.js)
+<w>  at file dependencies /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file /app/packages/app/.next/server/webpack-runtime.js
+<w>  at file dependencies /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file /app/packages/app/.next/server/app/_not-found/page.js
+<w>  at file dependencies /app/node_modules/next/dist/server/require.js
+<w>  at file /app/node_modules/next/dist/server/require.js
+<w>  at file dependencies /app/node_modules/next/dist/server/load-components.js
+<w>  at file /app/node_modules/next/dist/server/load-components.js
+<w>  at file dependencies /app/node_modules/next/dist/build/utils.js
+<w>  at file /app/node_modules/next/dist/build/utils.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-app-loader.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file /app/node_modules/next/dist/compiled/loader-runner/LoaderRunner.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/bundle5.js
+<w>  at file dependencies /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file /app/node_modules/next/dist/compiled/webpack/webpack.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file /app/node_modules/next/dist/build/webpack/plugins/define-env-plugin.js
+<w>  at file dependencies /app/node_modules/next/dist/build/swc/index.js
+<w>  at file /app/node_modules/next/dist/build/swc/index.js
+<w>  at file dependencies /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at file /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js
+<w>  at resolve commonjs /app/node_modules/next/dist/build/webpack/loaders/next-barrel-loader.js

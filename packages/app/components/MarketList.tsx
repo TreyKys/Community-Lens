@@ -11,7 +11,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
 
@@ -22,6 +22,7 @@ interface Market {
     voided: boolean;
     totalPool: bigint;
     bettingEndsAt: bigint;
+    parentMarketId: bigint;
 }
 
 const ERC20_APPROVE_ABI = [{
@@ -43,7 +44,7 @@ const ERC20_BALANCE_ABI = [{
     type: "function"
 }] as const;
 
-export function MarketList() {
+export function MarketList({ filterParentId }: { filterParentId?: bigint }) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'all';
 
@@ -73,24 +74,33 @@ export function MarketList() {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
-        const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string];
+        // market: [question, resolved, winningOptionIndex, voided, totalPool, bettingEndsAt, creator, parentMarketId]
+        const [question, resolved, , voided, totalPool, bettingEndsAt, , parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
 
         // 1. Expiry Check
         const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
         if (isExpired24h && !resolved) return null;
         if (isExpired24h) return null;
 
-        // 2. Category Filter
-        if (category === 'politics') {
-             if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
-        } else if (category === 'crypto') {
-             if (!question.includes('[CRYPTO]')) return null;
-        } else if (category === 'sports') {
-             const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
-             if (!isSports) return null;
+        if (filterParentId !== undefined) {
+             // Specific view: Only show the parent and its children
+             if (marketId !== filterParentId && parentMarketId !== filterParentId) return null;
+        } else {
+             // General view: Only show Parent Markets (parentMarketId == 0)
+             if (Number(parentMarketId) !== 0) return null;
+
+             // Category Filter (only on general view)
+             if (category === 'politics') {
+                  if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
+             } else if (category === 'crypto') {
+                  if (!question.includes('[CRYPTO]')) return null;
+             } else if (category === 'sports') {
+                  const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+                  if (!isSports) return null;
+             }
         }
 
-        return { marketId, question, resolved, voided, totalPool, bettingEndsAt } as Market;
+        return { marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId } as Market;
   }).filter((m): m is Market => m !== null);
 
   return (
@@ -105,6 +115,8 @@ export function MarketList() {
                 voided={m.voided}
                 totalPool={m.totalPool}
                 bettingEndsAt={m.bettingEndsAt}
+                parentMarketId={m.parentMarketId}
+                hideViewMore={filterParentId !== undefined}
             />
           ))
       ) : (
@@ -116,14 +128,17 @@ export function MarketList() {
   );
 }
 
-function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt }: {
+export function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId, hideViewMore }: {
     marketId: bigint;
     question: string;
     resolved: boolean;
     voided: boolean;
     totalPool: bigint;
     bettingEndsAt: bigint;
+    parentMarketId?: bigint;
+    hideViewMore?: boolean;
 }) {
+    const router = useRouter();
     const { address } = useAccount();
     const { toast } = useToast();
     const [selectedOption, setSelectedOption] = useState<string>('0');
@@ -316,10 +331,21 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
               )}
             </CardContent>
             {!isExpanded && (
-                <CardFooter className="pt-0">
-                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setIsExpanded(true)}>
+                <CardFooter className="pt-0 flex gap-2">
+                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={(e) => {
+                        e.stopPropagation();
+                        setIsExpanded(true);
+                    }}>
                         {isLive ? "Tap to Bet" : "View Options"}
                     </Button>
+                    {!hideViewMore && Number(parentMarketId) === 0 && (
+                        <Button variant="outline" size="sm" className="w-full text-xs" onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/event/${marketId.toString()}`);
+                        }}>
+                            View More Markets
+                        </Button>
+                    )}
                 </CardFooter>
             )}
         </Card>
