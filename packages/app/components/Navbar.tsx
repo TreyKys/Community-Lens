@@ -1,7 +1,10 @@
 'use client';
 
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useChainId } from 'wagmi';
+import { useAccount, useChainId, useConnect } from 'wagmi';
+import { coinbaseWallet } from 'wagmi/connectors';
+import { useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
 import { WalletModal } from '@/components/WalletModal';
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -13,11 +16,17 @@ import { FcGoogle } from "react-icons/fc";
 
 function CustomGatewayModal() {
   const [isOpen, setIsOpen] = useState(false);
+  const { connect } = useConnect();
+
+  const handleSmartWalletConnect = () => {
+    connect({ connector: coinbaseWallet({ appName: 'TruthMarket', preference: 'smartWalletOnly' }) });
+    setIsOpen(false);
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button size="lg" className="font-semibold px-6">Sign In</Button>
+        <Button size="lg" className="font-semibold px-6">Sign In / Sign Up</Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
@@ -28,17 +37,17 @@ function CustomGatewayModal() {
         </DialogHeader>
 
         <div className="flex flex-col gap-3 mt-4">
-          <Button variant="outline" className="w-full justify-start text-muted-foreground relative">
+          <Button variant="outline" className="w-full justify-start text-muted-foreground relative" onClick={handleSmartWalletConnect}>
             <FcGoogle className="w-5 h-5 absolute left-4" />
             <span className="flex-1 text-center font-normal text-foreground">Continue with Google</span>
           </Button>
 
-          <Button variant="outline" className="w-full justify-start text-muted-foreground relative">
+          <Button variant="outline" className="w-full justify-start text-muted-foreground relative" onClick={handleSmartWalletConnect}>
             <Mail className="w-4 h-4 absolute left-4" />
             <span className="flex-1 text-center font-normal text-foreground">Continue with Email</span>
           </Button>
 
-          <Button variant="outline" className="w-full justify-start text-muted-foreground relative">
+          <Button variant="outline" className="w-full justify-start text-muted-foreground relative" onClick={handleSmartWalletConnect}>
             <Phone className="w-4 h-4 absolute left-4" />
             <span className="flex-1 text-center font-normal text-foreground">Continue with Phone</span>
           </Button>
@@ -142,6 +151,7 @@ function CustomGatewayModal() {
                                 }}
                               >
                                 {chain.iconUrl && (
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     alt={chain.name ?? 'Chain icon'}
                                     src={chain.iconUrl}
@@ -176,9 +186,33 @@ function CustomGatewayModal() {
 export function Navbar() {
   const chainId = useChainId();
   const { address, isConnected } = useAccount();
+  const [bonusBalance, setBonusBalance] = useState<number>(0);
 
   // Polygon Amoy is 80002
   const showWallet = chainId === 80002 && !!address;
+
+  useEffect(() => {
+    async function fetchBonusBalance() {
+      if (!address) return;
+      try {
+        const { data } = await supabase
+            .from('users')
+            .select('bonus_balance')
+            .eq('walletAddress', address.toLowerCase())
+            .single();
+
+        if (data && data.bonus_balance) {
+            setBonusBalance(data.bonus_balance);
+        }
+      } catch (err) {
+        console.error("Failed to fetch bonus balance:", err);
+      }
+    }
+
+    if (isConnected) {
+        fetchBonusBalance();
+    }
+  }, [address, isConnected]);
 
   return (
     <nav className="flex items-center justify-between p-4 border-b">
@@ -186,6 +220,16 @@ export function Navbar() {
         <span>TruthMarket</span>
       </div>
       <div className="flex items-center gap-4">
+        {isConnected && bonusBalance > 0 && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-full text-amber-500 text-sm font-medium">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+                {bonusBalance.toLocaleString()} Bonus tNGN
+            </div>
+        )}
+
         {showWallet && <WalletModal />}
 
         {isConnected ? (
