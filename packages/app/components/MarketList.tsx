@@ -267,95 +267,143 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
 
     const isBettingLoading = isBatchPending || callsStatus?.status === 'pending';
 
+    const bettingInterface = (
+        <div className="mt-4 pt-4 border-t border-muted/50 space-y-4 animate-in fade-in slide-in-from-top-2 relative z-10">
+            <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
+                {options.map((opt, idx) => {
+                    // Polymarket-style styling: Soft blue for Yes/Home/Over, Soft Red for No/Away/Under, Neutral for Draw
+                    const isBlue = opt.toLowerCase().includes('yes') || opt.toLowerCase().includes('home') || opt.toLowerCase().includes('over');
+                    const isRed = opt.toLowerCase().includes('no') || opt.toLowerCase().includes('away') || opt.toLowerCase().includes('under');
+                    const gradientClass = isBlue
+                      ? "peer-data-[state=checked]:bg-blue-500/10 peer-data-[state=checked]:border-blue-500/50 hover:border-blue-500/30"
+                      : isRed
+                      ? "peer-data-[state=checked]:bg-red-500/10 peer-data-[state=checked]:border-red-500/50 hover:border-red-500/30"
+                      : "peer-data-[state=checked]:bg-primary/10 peer-data-[state=checked]:border-primary hover:border-primary/50";
+
+                    return (
+                        <div key={idx}>
+                            <RadioGroupItem value={idx.toString()} id={`m-${marketId}-opt-${idx}`} className="peer sr-only" />
+                            <Label
+                              htmlFor={`m-${marketId}-opt-${idx}`}
+                              className={`flex flex-col items-center justify-between rounded-md border border-muted bg-popover/50 p-3 hover:bg-accent hover:text-accent-foreground transition-all cursor-pointer ${gradientClass}`}
+                            >
+                                <span className="font-medium text-sm">{opt}</span>
+                            </Label>
+                        </div>
+                    );
+                })}
+            </RadioGroup>
+
+            <div className="flex flex-col gap-4">
+                <div className="relative">
+                    <Input
+                      type="number"
+                      placeholder="Amount (₦)"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      disabled={!isLive}
+                      className="pl-8 bg-transparent"
+                    />
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                </div>
+
+                {!isLive ? (
+                    <Button disabled className="w-full">Market Closed</Button>
+                ) : (
+                    <Button
+                      onClick={handlePlaceBatchedBet}
+                      disabled={isBettingLoading || !amount}
+                      className="w-full bg-foreground text-background hover:bg-foreground/90 transition-all font-semibold relative overflow-hidden"
+                    >
+                        {isBettingLoading ? (
+                            <span className="flex items-center gap-2">
+                                <span className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
+                                Locking...
+                            </span>
+                        ) : "Lock Prediction"}
+                    </Button>
+                )}
+            </div>
+            {address && (
+                <div className="text-xs text-right text-muted-foreground">
+                    Balance: ₦{Number(formatUnits(balance, 18)).toLocaleString()}
+                </div>
+            )}
+        </div>
+    );
+
     return (
-        <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
+        <Card className="hover:shadow-lg transition-shadow bg-card relative overflow-hidden group border-muted">
+            {/* Subtle Gradient Highlights */}
+            <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+            <CardHeader className="pb-2 relative z-10">
               <div className="flex justify-between items-start">
-                <CardTitle className="text-lg font-medium">{question}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : "default"}>
-                  {resolved ? "Resolved" : isExpired ? "Closed" : "Live"}
+                <CardTitle className="text-lg font-medium tracking-tight text-foreground">{question.replace(/\[.*?\]\s*/g, '')}</CardTitle>
+                <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : "open"}>
+                  {resolved ? "Resolved" : isExpired ? "Closed" : "Open"}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="flex justify-between text-sm text-muted-foreground mt-2">
-                <span>Pool: {formatUnits(totalPool, 18)} tNGN</span>
-                <span>Ends: {endDate.toLocaleString()}</span>
+              <div className="flex justify-between text-sm text-muted-foreground mt-2 relative z-10">
+                <span>Pool: ₦{Number(formatUnits(totalPool, 18)).toLocaleString()}</span>
+                <span>Ends: {endDate.toLocaleDateString()} {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               {voided && <div className="text-red-500 text-xs mt-1">Market Voided</div>}
 
-              {isExpanded && (
-                  <div className="mt-4 pt-4 border-t space-y-4 animate-in fade-in slide-in-from-top-2">
-                      <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
-                          {options.map((opt, idx) => (
-                              <div key={idx}>
-                                  <RadioGroupItem value={idx.toString()} id={`m-${marketId}-opt-${idx}`} className="peer sr-only" />
-                                  <Label
-                                    htmlFor={`m-${marketId}-opt-${idx}`}
-                                    className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-2 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
-                                  >
-                                      {opt}
-                                  </Label>
-                              </div>
-                          ))}
-                      </RadioGroup>
-
-                      <div className="flex flex-col gap-4">
-                          <div className="relative">
-                              <Input
-                                type="number"
-                                placeholder="Amount (₦)"
-                                value={amount}
-                                onChange={(e) => setAmount(e.target.value)}
-                                disabled={!isLive}
-                                className="pl-8 bg-transparent"
-                              />
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                          </div>
-
-                          {!isLive ? (
-                              <Button disabled className="w-full">Market Closed</Button>
-                          ) : (
-                              <Button
-                                onClick={handlePlaceBatchedBet}
-                                disabled={isBettingLoading || !amount}
-                                className="w-full bg-foreground text-background hover:bg-foreground/90 transition-all font-semibold relative overflow-hidden"
-                              >
-                                  {isBettingLoading ? (
-                                      <span className="flex items-center gap-2">
-                                          <span className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
-                                          Locking...
-                                      </span>
-                                  ) : "Lock Prediction"}
-                              </Button>
-                          )}
-                      </div>
-                      {address && (
-                          <div className="text-xs text-right text-muted-foreground">
-                              Balance: ₦{Number(formatUnits(balance, 18)).toLocaleString()}
-                          </div>
-                      )}
-                  </div>
-              )}
+              <div className="hidden md:block">
+                  {isExpanded && bettingInterface}
+              </div>
             </CardContent>
-            {!isExpanded && (
-                <CardFooter className="pt-0 flex gap-2">
-                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={(e) => {
-                        e.stopPropagation();
-                        setIsExpanded(true);
-                    }}>
-                        {isLive ? "Tap to Bet" : "View Options"}
-                    </Button>
-                    {!hideViewMore && Number(parentMarketId) === 0 && (
-                        <Button variant="outline" size="sm" className="w-full text-xs" onClick={(e) => {
+
+            <CardFooter className="pt-0 flex gap-2 relative z-10">
+                <div className="hidden md:block w-full">
+                    {!isExpanded && (
+                        <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50" onClick={(e) => {
                             e.stopPropagation();
-                            router.push(`/event/${marketId.toString()}`);
+                            setIsExpanded(true);
                         }}>
-                            View More Markets
+                            {isLive ? "Predict" : "View Options"}
                         </Button>
                     )}
-                </CardFooter>
-            )}
+                </div>
+
+                <div className="md:hidden w-full">
+                    <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
+                        <DrawerTrigger asChild>
+                            <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
+                                {isLive ? "Tap to Predict" : "View Options"}
+                            </Button>
+                        </DrawerTrigger>
+                        <DrawerContent>
+                            <div className="mx-auto w-full max-w-sm">
+                                <DrawerHeader>
+                                    <DrawerTitle>{question.replace(/\[.*?\]\s*/g, '')}</DrawerTitle>
+                                    <DrawerDescription>Make your prediction below</DrawerDescription>
+                                </DrawerHeader>
+                                <div className="p-4 pb-0">
+                                    {bettingInterface}
+                                </div>
+                                <DrawerFooter>
+                                    <DrawerClose asChild>
+                                        <Button variant="outline">Cancel</Button>
+                                    </DrawerClose>
+                                </DrawerFooter>
+                            </div>
+                        </DrawerContent>
+                    </Drawer>
+                </div>
+
+                {!hideViewMore && Number(parentMarketId) === 0 && (
+                    <Button variant="outline" size="sm" className="w-full text-xs" onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/event/${marketId.toString()}`);
+                    }}>
+                        View More Markets
+                    </Button>
+                )}
+            </CardFooter>
         </Card>
     );
 }
