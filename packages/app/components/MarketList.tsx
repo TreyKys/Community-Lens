@@ -14,6 +14,7 @@ import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
 
@@ -162,6 +163,20 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
     const endDate = new Date(Number(bettingEndsAt) * 1000);
     const isLive = !resolved && !voided && !isExpired;
+
+    const [isPulsingLive, setIsPulsingLive] = useState(false);
+
+    useEffect(() => {
+        async function checkLiveStatus() {
+            const { data } = await supabase
+                .from('market_metadata')
+                .select('is_live')
+                .eq('market_id', Number(marketId))
+                .single();
+            if (data?.is_live) setIsPulsingLive(true);
+        }
+        checkLiveStatus();
+    }, [marketId]);
 
     // Check Balance
     const { data: balanceData } = useReadContract({
@@ -333,6 +348,18 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
         </div>
     );
 
+    // Regex formatting to strip bot tags like [BSA]
+    let formattedQuestion = question.replace(/\[.*?\]\s*/g, '');
+
+    // Strip redundant parent event names from child market cards
+    if (Number(parentMarketId) !== 0) {
+        // Assume format is "Arsenal vs Chelsea (Match Winner)"
+        const match = formattedQuestion.match(/\(([^)]+)\)$/);
+        if (match) {
+            formattedQuestion = match[1];
+        }
+    }
+
     return (
         <Card className="hover:shadow-lg transition-shadow bg-card relative overflow-hidden group border-muted">
             {/* Subtle Gradient Highlights */}
@@ -340,9 +367,9 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
 
             <CardHeader className="pb-2 relative z-10">
               <div className="flex justify-between items-start">
-                <CardTitle className="text-lg font-medium tracking-tight text-foreground">{question.replace(/\[.*?\]\s*/g, '')}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : "open"}>
-                  {resolved ? "Resolved" : isExpired ? "Closed" : "Open"}
+                <CardTitle className="text-lg font-medium tracking-tight text-foreground">{formattedQuestion}</CardTitle>
+                <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : isPulsingLive ? "live" : "open"}>
+                  {resolved ? "RESOLVED" : isExpired ? "CLOSED" : isPulsingLive ? "LIVE" : "OPEN"}
                 </Badge>
               </div>
             </CardHeader>
@@ -365,7 +392,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                             e.stopPropagation();
                             setIsExpanded(true);
                         }}>
-                            {isLive ? "Predict" : "View Options"}
+                                {isLive ? "Place Bet" : "View Options"}
                         </Button>
                     )}
                 </div>
@@ -374,13 +401,13 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                     <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
                         <DrawerTrigger asChild>
                             <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
-                                {isLive ? "Tap to Predict" : "View Options"}
+                                    {isLive ? "Tap to Place Bet" : "View Options"}
                             </Button>
                         </DrawerTrigger>
                         <DrawerContent>
                             <div className="mx-auto w-full max-w-sm">
                                 <DrawerHeader>
-                                    <DrawerTitle>{question.replace(/\[.*?\]\s*/g, '')}</DrawerTitle>
+                                        <DrawerTitle>{formattedQuestion}</DrawerTitle>
                                     <DrawerDescription>Make your prediction below</DrawerDescription>
                                 </DrawerHeader>
                                 <div className="p-4 pb-0">

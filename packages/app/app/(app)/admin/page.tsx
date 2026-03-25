@@ -14,6 +14,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { useReadContract, useReadContracts } from 'wagmi';
 import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase';
 
 const BOT_WALLET_ADDRESS = "0xA1622ad08E558AE506b18d4028A6F613fd90F916".toLowerCase();
 
@@ -78,6 +79,37 @@ export default function AdminPage() {
       args: [id],
     })),
   });
+
+  const [liveStatuses, setLiveStatuses] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    async function fetchLiveStatuses() {
+      const { data } = await supabase.from('market_metadata').select('market_id, is_live');
+      if (data) {
+        const statuses: Record<string, boolean> = {};
+        data.forEach(row => {
+          statuses[row.market_id.toString()] = row.is_live;
+        });
+        setLiveStatuses(statuses);
+      }
+    }
+    fetchLiveStatuses();
+  }, [marketsData]);
+
+  const toggleLiveStatus = async (marketId: string, currentStatus: boolean) => {
+      const newStatus = !currentStatus;
+
+      const { error } = await supabase
+        .from('market_metadata')
+        .upsert({ market_id: Number(marketId), is_live: newStatus, updated_at: new Date().toISOString() });
+
+      if (error) {
+          toast({ title: "Database Error", description: error.message, variant: "destructive" });
+      } else {
+          setLiveStatuses(prev => ({...prev, [marketId]: newStatus}));
+          toast({ title: "Status Updated", description: `Market ${marketId} is now ${newStatus ? 'LIVE' : 'OPEN'}` });
+      }
+  };
 
   // Contract Write Hook for Create
   const {
@@ -543,6 +575,7 @@ export default function AdminPage() {
 
                   const source = creator.toLowerCase() === BOT_WALLET_ADDRESS ? "Bot" : "Admin";
                   const isParent = Number(parentMarketId) === 0;
+                  const isLive = liveStatuses[marketId.toString()] || false;
 
                   return (
                     <Fragment key={marketId.toString()}>
@@ -554,10 +587,22 @@ export default function AdminPage() {
                           <TableCell className="max-w-xs truncate" title={question}>{question}</TableCell>
                           <TableCell>{categoryLabel}</TableCell>
                           <TableCell>{formatUnits(totalPool, 18)} tNGN</TableCell>
-                          <TableCell>
-                            <Badge variant={status === "Active" ? "default" : status === "Resolving" ? "secondary" : status === "Voided" ? "destructive" : "outline"}>
-                              {status}
+                          <TableCell className="space-y-1">
+                            <Badge variant={status === "Active" ? (isLive ? "live" : "open") : status === "Resolving" ? "secondary" : status === "Voided" ? "destructive" : "outline"}>
+                              {status === "Active" ? (isLive ? "LIVE" : "OPEN") : status}
                             </Badge>
+                            {status === "Active" && (
+                                <div className="mt-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-[10px] h-6 px-2"
+                                        onClick={() => toggleLiveStatus(marketId.toString(), isLive)}
+                                    >
+                                        Toggle {isLive ? 'OFF' : 'ON'}
+                                    </Button>
+                                </div>
+                            )}
                           </TableCell>
                           <TableCell>
                              <Badge variant={source === "Bot" ? "outline" : "default"}>{source}</Badge>
