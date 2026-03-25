@@ -8,7 +8,7 @@ import {
 } from '@rainbow-me/rainbowkit';
 import { polygonAmoy } from 'wagmi/chains';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider, http, fallback } from 'wagmi';
+import { WagmiProvider, http, fallback, cookieStorage, createStorage } from 'wagmi';
 
 const config = getDefaultConfig({
   appName: 'TruthMarket',
@@ -21,6 +21,9 @@ const config = getDefaultConfig({
     ]),
   },
   ssr: true,
+  storage: createStorage({
+    storage: cookieStorage,
+  }),
 });
 
 const queryClient = new QueryClient({

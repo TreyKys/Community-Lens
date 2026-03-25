@@ -1,6 +1,7 @@
 'use client';
 
-import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useReadContract, useReadContracts, useAccount } from 'wagmi';
+import { useSendCalls, useCallsStatus } from 'wagmi/experimental';
 import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -187,14 +188,6 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
 
     const allowance = allowanceData ? allowanceData : BigInt(0);
 
-    // Approve
-    const { writeContract: approve, data: approveHash, isPending: isApprovePending, error: approveError } = useWriteContract();
-    const { isSuccess: isApproveSuccess, isLoading: isApproveConfirming } = useWaitForTransactionReceipt({ hash: approveHash });
-
-    // Bet
-    const { writeContract: placeBet, data: betHash, isPending: isBetPending, error: betError } = useWriteContract();
-    const { isSuccess: isBetSuccess, isLoading: isBetConfirming } = useWaitForTransactionReceipt({ hash: betHash });
-
     const getParsedAmount = (val: string) => {
         try {
             return parseUnits(val, 18);
@@ -203,45 +196,30 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
         }
     };
 
-    const handlePlaceBet = () => {
-        if (!amount || Number(amount) <= 0) return;
-        placeBet({
-            address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-            abi: TRUTH_MARKET_ABI,
-            functionName: 'placeBet',
-            args: [marketId, BigInt(selectedOption), getParsedAmount(amount)],
-        });
-    };
-
-    useEffect(() => {
-        if (isApproveSuccess) {
-            toast({ title: "Approved!", description: "You can now place your bet." });
-            refetchAllowance();
+    // ERC-4337 Batching for Smart Wallets
+    const { sendCalls, data: callsIdData, isPending: isBatchPending } = useSendCalls({
+        mutation: {
+            onError: (error) => {
+                toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+            }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isApproveSuccess]);
+    });
+
+    // wagmi v2 sends back an object with an id string
+    const _callsId: string = typeof callsIdData === 'string' ? callsIdData : ((callsIdData as unknown) as { id?: string })?.id || "";
+
+    const { data: callsStatus } = useCallsStatus({ id: _callsId, query: { enabled: !!_callsId } });
 
     useEffect(() => {
-        if (approveError) {
-             toast({ title: "Approval Failed", description: approveError.message || "The transaction failed or was dropped. Please try again.", variant: "destructive" });
-        }
-    }, [approveError, toast]);
-
-    useEffect(() => {
-        if (isBetSuccess) {
-            toast({ title: "Bet Placed!", description: "Good luck!" });
+        if (callsStatus?.status === 'success') {
+            toast({ title: "Prediction Locked!", description: "Check your profile for the Bet Receipt." });
             setAmount('');
             setIsExpanded(false);
+            refetchAllowance();
         }
-    }, [isBetSuccess, toast]);
+    }, [callsStatus?.status, toast, refetchAllowance]);
 
-    useEffect(() => {
-        if (betError) {
-             toast({ title: "Error", description: betError.message, variant: "destructive" });
-        }
-    }, [betError, toast]);
-
-    const handleApprove = () => {
+    const handlePlaceBatchedBet = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
@@ -251,20 +229,43 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
         if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
-                description: `You have ${formatUnits(balance, 18)} tNGN. Use the Wallet to mint Demo tokens.`,
+                description: `You have ₦${Number(formatUnits(balance, 18)).toLocaleString()}. Use the Wallet to Deposit Naira.`,
                 variant: "destructive"
             });
             return;
         }
 
-        approve({
-            address: TNGN_ADDRESS as `0x${string}`,
-            abi: ERC20_APPROVE_ABI,
-            functionName: 'approve',
-            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
-            gas: BigInt(100000),
+        const needsApproval = allowance < betAmount;
+
+        const calls = [];
+
+        if (needsApproval) {
+            calls.push({
+                to: TNGN_ADDRESS as `0x${string}`,
+                abi: ERC20_APPROVE_ABI,
+                functionName: 'approve',
+                args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount]
+            });
+        }
+
+        calls.push({
+            to: TRUTH_MARKET_ADDRESS as `0x${string}`,
+            abi: TRUTH_MARKET_ABI,
+            functionName: 'placeBet',
+            args: [marketId, BigInt(selectedOption), betAmount]
+        });
+
+        sendCalls({
+            calls,
+            capabilities: {
+                paymasterService: {
+                    url: '/api/paymaster'
+                }
+            }
         });
     };
+
+    const isBettingLoading = isBatchPending || callsStatus?.status === 'pending';
 
     return (
         <Card className="hover:shadow-lg transition-shadow">
@@ -299,35 +300,39 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                           ))}
                       </RadioGroup>
 
-                      <div className="flex gap-2">
-                          <Input
-                            type="number"
-                            placeholder="Amount (tNGN)"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            disabled={!isLive}
-                          />
+                      <div className="flex flex-col gap-4">
+                          <div className="relative">
+                              <Input
+                                type="number"
+                                placeholder="Amount (₦)"
+                                value={amount}
+                                onChange={(e) => setAmount(e.target.value)}
+                                disabled={!isLive}
+                                className="pl-8 bg-transparent"
+                              />
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                          </div>
+
                           {!isLive ? (
-                              <Button disabled>Market Closed</Button>
-                          ) : allowance >= (amount ? getParsedAmount(amount) : BigInt(0)) ? (
-                              <Button
-                                onClick={handlePlaceBet}
-                                disabled={isBetPending || isBetConfirming}
-                              >
-                                  {isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
-                              </Button>
+                              <Button disabled className="w-full">Market Closed</Button>
                           ) : (
                               <Button
-                                onClick={handleApprove}
-                                disabled={isApprovePending || isApproveConfirming}
+                                onClick={handlePlaceBatchedBet}
+                                disabled={isBettingLoading || !amount}
+                                className="w-full bg-foreground text-background hover:bg-foreground/90 transition-all font-semibold relative overflow-hidden"
                               >
-                                  {isApprovePending ? "Pending Signature..." : isApproveConfirming ? "Confirming on-chain..." : "Approve"}
+                                  {isBettingLoading ? (
+                                      <span className="flex items-center gap-2">
+                                          <span className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
+                                          Locking...
+                                      </span>
+                                  ) : "Lock Prediction"}
                               </Button>
                           )}
                       </div>
                       {address && (
                           <div className="text-xs text-right text-muted-foreground">
-                              Balance: {formatUnits(balance, 18)} tNGN
+                              Balance: ₦{Number(formatUnits(balance, 18)).toLocaleString()}
                           </div>
                       )}
                   </div>

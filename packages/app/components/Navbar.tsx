@@ -49,7 +49,7 @@ function CustomGatewayModal() {
 
           <Button variant="outline" className="w-full justify-start text-muted-foreground relative" onClick={handleSmartWalletConnect}>
             <Phone className="w-4 h-4 absolute left-4" />
-            <span className="flex-1 text-center font-normal text-foreground">Continue with Phone</span>
+            <span className="flex-1 text-center font-normal text-foreground">Sign in with Phone Number</span>
           </Button>
         </div>
 
