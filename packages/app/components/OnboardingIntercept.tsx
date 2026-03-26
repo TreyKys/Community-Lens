@@ -53,7 +53,9 @@ export function OnboardingIntercept() {
     setIsSubmitting(true);
     try {
       const walletAddress = address.toLowerCase();
+      // Check phone OR email based on Privy Auth type.
       const phone = user?.phone?.number || null;
+      const email = user?.email?.address || null;
 
       const { error } = await supabase
         .from('users')
@@ -62,6 +64,7 @@ export function OnboardingIntercept() {
           first_name: firstName,
           dob,
           phone,
+          email,
           bonus_balance: 0 // Initialize bonus balance
         }, { onConflict: 'walletAddress' });
 
