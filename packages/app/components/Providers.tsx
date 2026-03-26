@@ -1,18 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import '@rainbow-me/rainbowkit/styles.css';
-import {
-  RainbowKitProvider,
-  getDefaultConfig,
-} from '@rainbow-me/rainbowkit';
 import { polygonAmoy } from 'wagmi/chains';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider, http, fallback, cookieStorage, createStorage } from 'wagmi';
+import { http, fallback, cookieStorage, createStorage } from 'wagmi';
+import { PrivyProvider } from '@privy-io/react-auth';
+import { WagmiProvider as PrivyWagmiProvider } from '@privy-io/wagmi';
+import { createConfig } from 'wagmi';
 
-const config = getDefaultConfig({
-  appName: 'TruthMarket',
-  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || '8b5f5a8b24622cd4bcdbe2a1f50b8d8a',
+const config = createConfig({
   chains: [polygonAmoy],
   transports: {
     [polygonAmoy.id]: fallback([
@@ -37,12 +33,25 @@ const queryClient = new QueryClient({
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <WagmiProvider config={config}>
+    <PrivyProvider
+      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || "cm2o7h8m0092h0xix2l9f116a"}
+      config={{
+        loginMethods: ['sms', 'email'],
+        appearance: {
+          theme: 'dark',
+          accentColor: '#676FFF',
+          logo: '',
+          walletList: ['metamask', 'rainbow', 'wallet_connect'],
+        },
+        defaultChain: polygonAmoy,
+        supportedChains: [polygonAmoy],
+      }}
+    >
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider>
+        <PrivyWagmiProvider config={config}>
           {children}
-        </RainbowKitProvider>
+        </PrivyWagmiProvider>
       </QueryClientProvider>
-    </WagmiProvider>
+    </PrivyProvider>
   );
 }
