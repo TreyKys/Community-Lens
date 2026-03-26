@@ -32,6 +32,10 @@ const queryClient = new QueryClient({
 });
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // Explicitly require the WALLET_CONNECT_ID fallback for Privy to compile WalletConnect under the hood
+  // Netlify environments fail without it explicitly defined or passed as a build arg.
+  const wcId = process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || "1234567890abcdef1234567890abcdef";
+
   return (
     <PrivyProvider
       appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || "cm2o7h8m0092h0xix2l9f116a"}
@@ -45,6 +49,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
         defaultChain: polygonAmoy,
         supportedChains: [polygonAmoy],
+        walletConnectCloudProjectId: wcId
       }}
     >
       <QueryClientProvider client={queryClient}>
