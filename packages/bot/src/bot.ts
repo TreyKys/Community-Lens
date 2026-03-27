@@ -17,6 +17,7 @@ interface BatchData {
     questions: string[];
     options: string[][];
     durations: number[];
+    parentMarketIds: number[];
 }
 
 const LEAGUES = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'CL', 'WC', 'EC', 'DED', 'BSA', 'PPL', 'ELC'];
@@ -83,6 +84,7 @@ function formatMarkets(fixtures: Fixture[]): BatchData {
     const questions: string[] = [];
     const options: string[][] = [];
     const durations: number[] = [];
+    const parentMarketIds: number[] = [];
 
     const now = Math.floor(Date.now() / 1000);
 
@@ -98,9 +100,10 @@ function formatMarkets(fixtures: Fixture[]): BatchData {
         questions.push(question);
         options.push(marketOptions);
         durations.push(duration);
+        parentMarketIds.push(0); // Bot creates top-level Parent Events
     }
 
-    return { questions, options, durations };
+    return { questions, options, durations, parentMarketIds };
 }
 
 async function pushToChain(batchData: BatchData) {
@@ -130,6 +133,7 @@ async function pushToChain(batchData: BatchData) {
         batchData.questions,
         batchData.options,
         batchData.durations,
+        batchData.parentMarketIds,
         {
              gasLimit: gasLimit,
              gasPrice: ethers.parseUnits("35", "gwei")

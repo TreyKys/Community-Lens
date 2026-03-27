@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  const MOCK_USDC_ADDRESS = "0x98a0c5ECAdAB5351fD6c9B7D1D66D6359F0D3d58";
+  const MOCK_USDC_ADDRESS = "0x4C233ee4b7c388e86df375673bA785274C5Db874";
 
   console.log("Deploying TruthMarket to Polygon Amoy...");
   console.log("Using MockUSDC at:", MOCK_USDC_ADDRESS);

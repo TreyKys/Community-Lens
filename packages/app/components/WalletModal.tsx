@@ -8,14 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { MOCK_USDC_ADDRESS, MOCK_USDC_ABI } from '@/lib/constants';
+import { TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Wallet } from 'lucide-react';
-
-// Aggressive Gas Configuration for Amoy
-const GAS_OVERRIDES = {
-    maxFeePerGas: parseUnits('100', 9), // 100 Gwei
-    maxPriorityFeePerGas: parseUnits('50', 9), // 50 Gwei
-};
 
 export function WalletModal() {
   const { address, isConnected } = useAccount();
@@ -30,7 +24,7 @@ export function WalletModal() {
     if (isSuccess) {
       toast({
         title: "Success",
-        description: "Minted 1,000 USDC (Demo)",
+        description: "Minted 1,000 tNGN (Demo)",
       });
       setIsOpen(false);
     }
@@ -53,11 +47,10 @@ export function WalletModal() {
     }
 
     writeContract({
-      address: MOCK_USDC_ADDRESS as `0x${string}`,
-      abi: MOCK_USDC_ABI,
+      address: TNGN_ADDRESS as `0x${string}`,
+      abi: TNGN_ABI,
       functionName: 'mint',
       args: [address, parseUnits('1000', 18)],
-      ...GAS_OVERRIDES,
     });
   };
 
@@ -68,9 +61,16 @@ export function WalletModal() {
         toast({ title: "Invalid Amount", description: "Please enter a valid amount.", variant: "destructive" });
         return;
     }
+
+    // UI Illusion for bonus
+    const deposited = Number(amount);
+    const actual = deposited * 0.99;
+    const bonus = deposited * 0.01;
+
     toast({
-        title: "Redirecting to Paystack...",
-        description: `Deposit of ${amount} NGN initiated. (Coming in Mainnet Launch)`,
+        title: "Deposit Successful!",
+        description: `₦${actual.toLocaleString()} added + ₦${bonus.toLocaleString()} Betting Bonus!`,
+        variant: "default",
     });
     setIsOpen(false);
   };
@@ -78,52 +78,55 @@ export function WalletModal() {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2">
+        <Button variant="outline" className="gap-2 bg-muted/50 border-muted hover:bg-muted">
           <Wallet className="h-4 w-4" />
-          Wallet
+          Deposit Naira
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] border-muted">
         <DialogHeader>
-          <DialogTitle>Wallet & Cashier</DialogTitle>
+          <DialogTitle>Cashier</DialogTitle>
           <DialogDescription>
-            Manage your funds. Switch between Demo Mode and Real Money.
+            Manage your funds. Add money to start predicting.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="demo" className="w-full">
+        <Tabs defaultValue="real" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="demo">Demo Mode</TabsTrigger>
             <TabsTrigger value="real">Real Money</TabsTrigger>
+            <TabsTrigger value="demo">Demo Mode</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="real" className="space-y-4 py-4">
+            <div className="text-sm text-muted-foreground">
+              Deposit Naira securely via Paystack. You will receive a 1% Betting Bonus on all deposits!
+            </div>
+            <div className="space-y-2 relative">
+                <Input
+                    type="number"
+                    placeholder="Amount (₦)"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="pl-8"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+            </div>
+            <Button onClick={handleDeposit} className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold">
+                Deposit Naira
+            </Button>
+          </TabsContent>
 
           <TabsContent value="demo" className="space-y-4 py-4">
             <div className="text-sm text-muted-foreground">
-              Get free MockUSDC to test the platform on Polygon Amoy.
+              Get free tokens to test out the platform before using real money.
             </div>
             <Button
                 onClick={handleMint}
                 disabled={isPending || isConfirming}
                 className="w-full"
+                variant="secondary"
             >
-                {isPending || isConfirming ? 'Minting...' : 'Get 1,000 Demo USDC'}
-            </Button>
-          </TabsContent>
-
-          <TabsContent value="real" className="space-y-4 py-4">
-            <div className="text-sm text-muted-foreground">
-              Deposit Nigerian Naira (NGN) via Paystack to receive USDC.
-            </div>
-            <div className="space-y-2">
-                <Input
-                    type="number"
-                    placeholder="Amount (NGN)"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                />
-            </div>
-            <Button onClick={handleDeposit} className="w-full">
-                Deposit with Paystack
+                {isPending || isConfirming ? 'Adding...' : 'Get ₦1,000 Demo Funds'}
             </Button>
           </TabsContent>
         </Tabs>

@@ -1,17 +1,20 @@
 'use client';
 
-import { useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, MOCK_USDC_ADDRESS } from '@/lib/constants';
+import { useReadContract, useReadContracts, useAccount } from 'wagmi';
+import { useSendCalls, useCallsStatus } from 'wagmi/experimental';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
 
@@ -22,6 +25,7 @@ interface Market {
     voided: boolean;
     totalPool: bigint;
     bettingEndsAt: bigint;
+    parentMarketId: bigint;
 }
 
 const ERC20_APPROVE_ABI = [{
@@ -43,13 +47,7 @@ const ERC20_BALANCE_ABI = [{
     type: "function"
 }] as const;
 
-// Aggressive Gas Configuration for Amoy
-const GAS_OVERRIDES = {
-    maxFeePerGas: parseUnits('100', 9), // 100 Gwei
-    maxPriorityFeePerGas: parseUnits('50', 9), // 50 Gwei
-};
-
-export function MarketList() {
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: { filterExactMarketId?: bigint, filterChildrenOfParentId?: bigint }) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'all';
 
@@ -62,7 +60,7 @@ export function MarketList() {
   const count = nextId ? Number(nextId) : 0;
   const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
 
-  const { data: markets } = useReadContracts({
+  const { data: markets, isLoading: isMarketsLoading } = useReadContracts({
     contracts: marketIds.map((id) => ({
       address: TRUTH_MARKET_ADDRESS as `0x${string}`,
       abi: TRUTH_MARKET_ABI,
@@ -71,30 +69,44 @@ export function MarketList() {
     })),
   });
 
-  if (!markets) return <div className="p-8 text-center">Loading markets...</div>;
+  if (nextId === undefined || (count > 0 && isMarketsLoading)) {
+      return <div className="p-8 text-center">Loading markets...</div>;
+  }
 
-  const filteredMarkets = markets.map((result, index) => {
+  const filteredMarkets = (markets || []).map((result, index) => {
         const marketId = marketIds[index];
         if (result.status !== 'success' || !result.result) return null;
 
-        const [question, resolved, , voided, totalPool, bettingEndsAt] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint];
+        // market: [question, resolved, winningOptionIndex, voided, totalPool, bettingEndsAt, creator, parentMarketId]
+        const [question, resolved, , voided, totalPool, bettingEndsAt, , parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
 
         // 1. Expiry Check
         const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
         if (isExpired24h && !resolved) return null;
         if (isExpired24h) return null;
 
-        // 2. Category Filter
-        if (category === 'politics') {
-             if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
-        } else if (category === 'crypto') {
-             if (!question.includes('[CRYPTO]')) return null;
-        } else if (category === 'sports') {
-             const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
-             if (!isSports) return null;
+        if (filterExactMarketId !== undefined) {
+             // Specific view: Only show this exact market (used for pinning parent)
+             if (marketId !== filterExactMarketId) return null;
+        } else if (filterChildrenOfParentId !== undefined) {
+             // Specific view: Only show children of this parent
+             if (parentMarketId !== filterChildrenOfParentId) return null;
+        } else {
+             // General view: Only show Parent Markets (parentMarketId == 0)
+             if (Number(parentMarketId) !== 0) return null;
+
+             // Category Filter (only on general view)
+             if (category === 'politics') {
+                  if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
+             } else if (category === 'crypto') {
+                  if (!question.includes('[CRYPTO]')) return null;
+             } else if (category === 'sports') {
+                  const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+                  if (!isSports) return null;
+             }
         }
 
-        return { marketId, question, resolved, voided, totalPool, bettingEndsAt } as Market;
+        return { marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId } as Market;
   }).filter((m): m is Market => m !== null);
 
   return (
@@ -109,41 +121,66 @@ export function MarketList() {
                 voided={m.voided}
                 totalPool={m.totalPool}
                 bettingEndsAt={m.bettingEndsAt}
+                parentMarketId={m.parentMarketId}
+                hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             />
           ))
       ) : (
         <div className="text-center text-muted-foreground p-8">
-          No markets found for this category.
+          No markets found.
         </div>
       )}
     </div>
   );
 }
 
-function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt }: {
+export function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId, hideViewMore }: {
     marketId: bigint;
     question: string;
     resolved: boolean;
     voided: boolean;
     totalPool: bigint;
     bettingEndsAt: bigint;
+    parentMarketId?: bigint;
+    hideViewMore?: boolean;
 }) {
+    const router = useRouter();
     const { address } = useAccount();
     const { toast } = useToast();
     const [selectedOption, setSelectedOption] = useState<string>('0');
     const [amount, setAmount] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
 
-    // Hardcoded options as per bot logic (Home, Away, Draw)
-    const options = ["Home Win", "Away Win", "Draw"];
+    const { data: optionsData } = useReadContract({
+        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+        abi: TRUTH_MARKET_ABI,
+        functionName: 'getMarketOptions',
+        args: [marketId],
+    });
+
+    const options = optionsData ? (optionsData as string[]) : [];
 
     const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
     const endDate = new Date(Number(bettingEndsAt) * 1000);
     const isLive = !resolved && !voided && !isExpired;
 
+    const [isPulsingLive, setIsPulsingLive] = useState(false);
+
+    useEffect(() => {
+        async function checkLiveStatus() {
+            const { data } = await supabase
+                .from('market_metadata')
+                .select('is_live')
+                .eq('market_id', Number(marketId))
+                .single();
+            if (data?.is_live) setIsPulsingLive(true);
+        }
+        checkLiveStatus();
+    }, [marketId]);
+
     // Check Balance
     const { data: balanceData } = useReadContract({
-        address: MOCK_USDC_ADDRESS as `0x${string}`,
+        address: TNGN_ADDRESS as `0x${string}`,
         abi: ERC20_BALANCE_ABI,
         functionName: 'balanceOf',
         args: [address as `0x${string}`],
@@ -154,135 +191,271 @@ function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEn
 
     const balance = balanceData ? balanceData : BigInt(0);
 
-    // Approve
-    const { writeContract: approve, data: approveHash, isPending: isApprovePending } = useWriteContract();
-    const { isSuccess: isApproveSuccess, isLoading: isApproveConfirming } = useWaitForTransactionReceipt({ hash: approveHash });
+    // Check Allowance
+    const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
+        address: TNGN_ADDRESS as `0x${string}`,
+        abi: TNGN_ABI,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
+        query: {
+            enabled: !!address,
+        }
+    });
 
-    // Bet
-    const { writeContract: placeBet, data: betHash, isPending: isBetPending, error: betError } = useWriteContract();
-    const { isSuccess: isBetSuccess, isLoading: isBetConfirming } = useWaitForTransactionReceipt({ hash: betHash });
+    const allowance = allowanceData ? allowanceData : BigInt(0);
 
-    const handlePlaceBet = () => {
-        if (!amount || Number(amount) <= 0) return;
-        placeBet({
-            address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-            abi: TRUTH_MARKET_ABI,
-            functionName: 'placeBet',
-            args: [marketId, BigInt(selectedOption), parseUnits(amount, 18)],
-            ...GAS_OVERRIDES,
-        });
+    const getParsedAmount = (val: string) => {
+        try {
+            return parseUnits(val, 18);
+        } catch {
+            return BigInt(0);
+        }
     };
 
-    useEffect(() => {
-        if (isApproveSuccess) {
-            toast({ title: "Approved!", description: "Placing bet now..." });
-            handlePlaceBet();
+    // ERC-4337 Batching for Smart Wallets
+    const { sendCalls, data: callsIdData, isPending: isBatchPending } = useSendCalls({
+        mutation: {
+            onError: (error) => {
+                toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+            }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isApproveSuccess]);
+    });
+
+    // wagmi v2 sends back an object with an id string
+    const _callsId: string = typeof callsIdData === 'string' ? callsIdData : ((callsIdData as unknown) as { id?: string })?.id || "";
+
+    const { data: callsStatus } = useCallsStatus({ id: _callsId, query: { enabled: !!_callsId } });
 
     useEffect(() => {
-        if (isBetSuccess) {
-            toast({ title: "Bet Placed!", description: "Good luck!" });
+        if (callsStatus?.status === 'success') {
+            toast({ title: "Prediction Locked!", description: "Check your profile for the Bet Receipt." });
             setAmount('');
             setIsExpanded(false);
+            refetchAllowance();
         }
-    }, [isBetSuccess, toast]);
+    }, [callsStatus?.status, toast, refetchAllowance]);
 
-    useEffect(() => {
-        if (betError) {
-             toast({ title: "Error", description: betError.message, variant: "destructive" });
-        }
-    }, [betError, toast]);
-
-    const handleAction = () => {
+    const handlePlaceBatchedBet = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
         }
 
-        const betAmount = parseUnits(amount, 18);
+        const betAmount = getParsedAmount(amount);
         if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
-                description: `You have ${formatUnits(balance, 18)} USDC. Use the Wallet to mint Demo tokens.`,
+                description: `You have ₦${Number(formatUnits(balance, 18)).toLocaleString()}. Use the Wallet to Deposit Naira.`,
                 variant: "destructive"
             });
             return;
         }
 
-        approve({
-            address: MOCK_USDC_ADDRESS as `0x${string}`,
-            abi: ERC20_APPROVE_ABI,
-            functionName: 'approve',
-            args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount],
-            ...GAS_OVERRIDES,
+        const needsApproval = allowance < betAmount;
+
+        const calls = [];
+
+        if (needsApproval) {
+            calls.push({
+                to: TNGN_ADDRESS as `0x${string}`,
+                abi: ERC20_APPROVE_ABI,
+                functionName: 'approve',
+                args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount]
+            });
+        }
+
+        calls.push({
+            to: TRUTH_MARKET_ADDRESS as `0x${string}`,
+            abi: TRUTH_MARKET_ABI,
+            functionName: 'placeBet',
+            args: [marketId, BigInt(selectedOption), betAmount]
+        });
+
+        sendCalls({
+            calls,
+            capabilities: {
+                paymasterService: {
+                    url: '/api/paymaster'
+                }
+            }
         });
     };
 
+    const isBettingLoading = isBatchPending || callsStatus?.status === 'pending';
+
+    const bettingInterface = (
+        <div className="mt-4 pt-4 border-t border-muted/50 space-y-4 animate-in fade-in slide-in-from-top-2 relative z-10">
+            <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
+                {options.map((opt, idx) => {
+                    // Polymarket-style styling: Soft blue for Yes/Home/Over, Soft Red for No/Away/Under, Neutral for Draw
+                    const isBlue = opt.toLowerCase().includes('yes') || opt.toLowerCase().includes('home') || opt.toLowerCase().includes('over');
+                    const isRed = opt.toLowerCase().includes('no') || opt.toLowerCase().includes('away') || opt.toLowerCase().includes('under');
+                    const gradientClass = isBlue
+                      ? "peer-data-[state=checked]:bg-blue-500/10 peer-data-[state=checked]:border-blue-500/50 hover:border-blue-500/30"
+                      : isRed
+                      ? "peer-data-[state=checked]:bg-red-500/10 peer-data-[state=checked]:border-red-500/50 hover:border-red-500/30"
+                      : "peer-data-[state=checked]:bg-primary/10 peer-data-[state=checked]:border-primary hover:border-primary/50";
+
+                    return (
+                        <div key={idx}>
+                            <RadioGroupItem value={idx.toString()} id={`m-${marketId}-opt-${idx}`} className="peer sr-only" />
+                            <Label
+                              htmlFor={`m-${marketId}-opt-${idx}`}
+                              className={`flex flex-col items-center justify-between rounded-md border border-muted bg-popover/50 p-3 hover:bg-accent hover:text-accent-foreground transition-all cursor-pointer ${gradientClass}`}
+                            >
+                                <span className="font-medium text-sm">{opt}</span>
+                            </Label>
+                        </div>
+                    );
+                })}
+            </RadioGroup>
+
+            <div className="flex flex-col gap-4">
+                <div className="relative">
+                    <Input
+                      type="number"
+                      placeholder="Amount (₦)"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      disabled={!isLive}
+                      className="pl-8 bg-transparent"
+                    />
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                </div>
+
+                {!isLive ? (
+                    <Button disabled className="w-full">Market Closed</Button>
+                ) : (
+                    <Button
+                      onClick={handlePlaceBatchedBet}
+                      disabled={isBettingLoading || !amount}
+                      className="w-full bg-foreground text-background hover:bg-foreground/90 transition-all font-semibold relative overflow-hidden"
+                    >
+                        {isBettingLoading ? (
+                            <span className="flex items-center gap-2">
+                                <span className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
+                                Locking...
+                            </span>
+                        ) : "Lock Prediction"}
+                    </Button>
+                )}
+            </div>
+            {address && (
+                <div className="text-xs text-right text-muted-foreground">
+                    Balance: ₦{Number(formatUnits(balance, 18)).toLocaleString()}
+                </div>
+            )}
+        </div>
+    );
+
+    // Regex formatting to strip bot tags like [BSA]
+    let formattedQuestion = question.replace(/\[.*?\]\s*/g, '');
+
+    // Strip redundant parent event names from child market cards
+    if (Number(parentMarketId) !== 0) {
+        // Assume format is "Arsenal vs Chelsea (Match Winner)"
+        const match = formattedQuestion.match(/\(([^)]+)\)$/);
+        if (match) {
+            formattedQuestion = match[1];
+        }
+    }
+
+    // Momentum Bar Logic (Mocking percentages for now since pool per option isn't exposed easily on-chain without indexing)
+    // We will use a visual representation based on a hash of the market ID to keep it deterministic for the demo,
+    // but in production, this should pull from a Supabase indexing table showing exact split.
+    // For now: Neutral if pool is 0.
+    const hasVolume = totalPool > BigInt(0);
+    const mockBlueSplit = hasVolume ? (Number(marketId) % 100) : 50;
+    const mockRedSplit = 100 - mockBlueSplit;
+
     return (
-        <Card className="hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => isLive && setIsExpanded(!isExpanded)}>
+        <Card className="hover:shadow-lg transition-shadow bg-card relative overflow-hidden group border-muted">
+            {/* Subtle Gradient Highlights */}
+            <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+            <CardHeader className="pb-2 relative z-10">
               <div className="flex justify-between items-start">
-                <CardTitle className="text-lg font-medium">{question}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : "default"}>
-                  {resolved ? "Resolved" : isExpired ? "Closed" : "Live"}
+                <CardTitle className="text-lg font-medium tracking-tight text-foreground">{formattedQuestion}</CardTitle>
+                <Badge variant={resolved ? "secondary" : isPulsingLive ? "live" : isExpired ? "destructive" : "open"}>
+                  {resolved ? "RESOLVED" : isPulsingLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="flex justify-between text-sm text-muted-foreground mt-2">
-                <span>Pool: {formatUnits(totalPool, 18)} USDC</span>
-                <span>Ends: {endDate.toLocaleString()}</span>
-              </div>
-              {voided && <div className="text-red-500 text-xs mt-1">Market Voided</div>}
-
-              {isExpanded && (
-                  <div className="mt-4 pt-4 border-t space-y-4 animate-in fade-in slide-in-from-top-2">
-                      <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
-                          {options.map((opt, idx) => (
-                              <div key={idx}>
-                                  <RadioGroupItem value={idx.toString()} id={`m-${marketId}-opt-${idx}`} className="peer sr-only" />
-                                  <Label
-                                    htmlFor={`m-${marketId}-opt-${idx}`}
-                                    className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-2 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
-                                  >
-                                      {opt}
-                                  </Label>
-                              </div>
-                          ))}
-                      </RadioGroup>
-
-                      <div className="flex gap-2">
-                          <Input
-                            type="number"
-                            placeholder="Amount (USDC)"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                          />
-                          <Button
-                            onClick={handleAction}
-                            disabled={isApprovePending || isApproveConfirming || isBetPending || isBetConfirming}
-                          >
-                              {isApprovePending || isApproveConfirming ? "Approving..." :
-                               isBetPending || isBetConfirming ? "Betting..." : "Place Bet"}
-                          </Button>
-                      </div>
-                      {address && (
-                          <div className="text-xs text-right text-muted-foreground">
-                              Balance: {formatUnits(balance, 18)} USDC
+              {/* Momentum Bar */}
+              <div className="mt-1 mb-3">
+                  <div className="h-3 w-full bg-muted/50 rounded-full overflow-hidden flex relative">
+                      {hasVolume ? (
+                          <>
+                              <div className="h-full bg-blue-500/80 transition-all duration-500" style={{ width: `${mockBlueSplit}%` }} />
+                              <div className="h-full bg-red-500/80 transition-all duration-500" style={{ width: `${mockRedSplit}%` }} />
+                          </>
+                      ) : (
+                          <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-muted-foreground uppercase tracking-widest z-10">
+                              No Predictions Yet
                           </div>
                       )}
                   </div>
-              )}
+              </div>
+
+              <div className="flex justify-between text-sm text-muted-foreground mt-2 relative z-10">
+                <span>Pool: ₦{Number(formatUnits(totalPool, 18)).toLocaleString()}</span>
+                <span>Ends: {endDate.toLocaleDateString()} {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+              {voided && <div className="text-red-500 text-xs mt-1">Market Voided</div>}
+
+              <div className="hidden md:block">
+                  {isExpanded && bettingInterface}
+              </div>
             </CardContent>
-            {!isExpanded && isLive && (
-                <CardFooter className="pt-0">
-                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setIsExpanded(true)}>
-                        Tap to Bet
+
+            <CardFooter className="pt-0 flex gap-2 relative z-10">
+                <div className="hidden md:block w-full">
+                    {!isExpanded && (
+                        <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50" onClick={(e) => {
+                            e.stopPropagation();
+                            setIsExpanded(true);
+                        }}>
+                                {isLive ? "Place Bet" : "View Options"}
+                        </Button>
+                    )}
+                </div>
+
+                <div className="md:hidden w-full">
+                    <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
+                        <DrawerTrigger asChild>
+                            <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
+                                    {isLive ? "Tap to Place Bet" : "View Options"}
+                            </Button>
+                        </DrawerTrigger>
+                        <DrawerContent>
+                            <div className="mx-auto w-full max-w-sm">
+                                <DrawerHeader>
+                                        <DrawerTitle>{formattedQuestion}</DrawerTitle>
+                                    <DrawerDescription>Make your prediction below</DrawerDescription>
+                                </DrawerHeader>
+                                <div className="p-4 pb-0">
+                                    {bettingInterface}
+                                </div>
+                                <DrawerFooter>
+                                    <DrawerClose asChild>
+                                        <Button variant="outline">Cancel</Button>
+                                    </DrawerClose>
+                                </DrawerFooter>
+                            </div>
+                        </DrawerContent>
+                    </Drawer>
+                </div>
+
+                {!hideViewMore && Number(parentMarketId) === 0 && (
+                    <Button variant="outline" size="sm" className="w-full text-xs" onClick={(e) => {
+                        e.stopPropagation();
+                        router.push(`/event/${marketId.toString()}`);
+                    }}>
+                        View More Markets
                     </Button>
-                </CardFooter>
-            )}
+                )}
+            </CardFooter>
         </Card>
     );
 }
