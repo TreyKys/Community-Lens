@@ -160,23 +160,18 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
 
     const options = optionsData ? (optionsData as string[]) : [];
 
-    const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
-    const endDate = new Date(Number(bettingEndsAt) * 1000);
-    const isLive = !resolved && !voided && !isExpired;
+    const currentTime = Date.now();
+    const endsAtMs = Number(bettingEndsAt) * 1000;
+    const isExpired = endsAtMs < currentTime;
+    const endDate = new Date(endsAtMs);
 
-    const [isPulsingLive, setIsPulsingLive] = useState(false);
+    // Automation: If currentTime >= deadline and not resolved, it's live.
+    // However, the button freeze (can't bet anymore) must use isExpired, wait, the instruction says:
+    // If currentTime >= deadline && !isResolved, automatically render the pulsing red "Live" badge.
+    // "However, the 'Place Bet' button is hard-disabled and displays 'Market Closed' to prevent execution reverts caused by the contract's deadline requirement."
+    const isLive = endsAtMs <= currentTime && !resolved;
 
-    useEffect(() => {
-        async function checkLiveStatus() {
-            const { data } = await supabase
-                .from('market_metadata')
-                .select('is_live')
-                .eq('market_id', Number(marketId))
-                .single();
-            if (data?.is_live) setIsPulsingLive(true);
-        }
-        checkLiveStatus();
-    }, [marketId]);
+    const canBet = !resolved && !voided && !isExpired;
 
     // Check Balance
     const { data: balanceData } = useReadContract({
@@ -226,14 +221,35 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
 
     const { data: callsStatus } = useCallsStatus({ id: _callsId, query: { enabled: !!_callsId } });
 
+    const [lastProcessedTx, setLastProcessedTx] = useState<string | null>(null);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const optionsStr = JSON.stringify(options);
+
     useEffect(() => {
-        if (callsStatus?.status === 'success') {
+        if (callsStatus?.status === 'success' && _callsId !== lastProcessedTx) {
+            setLastProcessedTx(_callsId);
+
+            // Insert bet into Supabase
+            const opts = JSON.parse(optionsStr);
+            if (address && opts[Number(selectedOption)]) {
+                supabase.from('user_bets').insert([{
+                    wallet_address: address,
+                    market_id: marketId.toString(),
+                    market_title: question,
+                    outcome: opts[Number(selectedOption)],
+                    staked_amount: Number(amount)
+                }]).then(({ error }) => {
+                    if (error) console.error("Failed to record bet to Supabase", error);
+                });
+            }
+
             toast({ title: "Prediction Locked!", description: "Check your profile for the Bet Receipt." });
             setAmount('');
             setIsExpanded(false);
             refetchAllowance();
         }
-    }, [callsStatus?.status, toast, refetchAllowance]);
+    }, [callsStatus?.status, _callsId, lastProcessedTx, address, marketId, question, selectedOption, amount, optionsStr, toast, refetchAllowance]);
 
     const handlePlaceBatchedBet = () => {
          if (!amount || Number(amount) <= 0) {
@@ -317,13 +333,13 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                       placeholder="Amount (₦)"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      disabled={!isLive}
+                      disabled={!canBet}
                       className="pl-8 bg-transparent"
                     />
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
                 </div>
 
-                {!isLive ? (
+                {!canBet ? (
                     <Button disabled className="w-full">Market Closed</Button>
                 ) : (
                     <Button
@@ -376,8 +392,8 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
             <CardHeader className="pb-2 relative z-10">
               <div className="flex justify-between items-start">
                 <CardTitle className="text-lg font-medium tracking-tight text-foreground">{formattedQuestion}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isPulsingLive ? "live" : isExpired ? "destructive" : "open"}>
-                  {resolved ? "RESOLVED" : isPulsingLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
+                <Badge variant={resolved ? "secondary" : isLive ? "live" : isExpired ? "destructive" : "open"}>
+                  {resolved ? "RESOLVED" : isLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
                 </Badge>
               </div>
             </CardHeader>
@@ -416,7 +432,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                             e.stopPropagation();
                             setIsExpanded(true);
                         }}>
-                                {isLive ? "Place Bet" : "View Options"}
+                                {canBet ? "Lock Prediction" : "View Options"}
                         </Button>
                     )}
                 </div>
@@ -425,7 +441,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                     <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
                         <DrawerTrigger asChild>
                             <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
-                                    {isLive ? "Tap to Place Bet" : "View Options"}
+                                    {canBet ? "Tap to Lock Prediction" : "View Options"}
                             </Button>
                         </DrawerTrigger>
                         <DrawerContent>
