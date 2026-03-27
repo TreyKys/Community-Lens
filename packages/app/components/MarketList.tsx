@@ -360,6 +360,14 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
         }
     }
 
+    // Momentum Bar Logic (Mocking percentages for now since pool per option isn't exposed easily on-chain without indexing)
+    // We will use a visual representation based on a hash of the market ID to keep it deterministic for the demo,
+    // but in production, this should pull from a Supabase indexing table showing exact split.
+    // For now: Neutral if pool is 0.
+    const hasVolume = totalPool > BigInt(0);
+    const mockBlueSplit = hasVolume ? (Number(marketId) % 100) : 50;
+    const mockRedSplit = 100 - mockBlueSplit;
+
     return (
         <Card className="hover:shadow-lg transition-shadow bg-card relative overflow-hidden group border-muted">
             {/* Subtle Gradient Highlights */}
@@ -368,12 +376,28 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
             <CardHeader className="pb-2 relative z-10">
               <div className="flex justify-between items-start">
                 <CardTitle className="text-lg font-medium tracking-tight text-foreground">{formattedQuestion}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isExpired ? "destructive" : isPulsingLive ? "live" : "open"}>
-                  {resolved ? "RESOLVED" : isExpired ? "CLOSED" : isPulsingLive ? "LIVE" : "OPEN"}
+                <Badge variant={resolved ? "secondary" : isPulsingLive ? "live" : isExpired ? "destructive" : "open"}>
+                  {resolved ? "RESOLVED" : isPulsingLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
+              {/* Momentum Bar */}
+              <div className="mt-1 mb-3">
+                  <div className="h-3 w-full bg-muted/50 rounded-full overflow-hidden flex relative">
+                      {hasVolume ? (
+                          <>
+                              <div className="h-full bg-blue-500/80 transition-all duration-500" style={{ width: `${mockBlueSplit}%` }} />
+                              <div className="h-full bg-red-500/80 transition-all duration-500" style={{ width: `${mockRedSplit}%` }} />
+                          </>
+                      ) : (
+                          <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-muted-foreground uppercase tracking-widest z-10">
+                              No Predictions Yet
+                          </div>
+                      )}
+                  </div>
+              </div>
+
               <div className="flex justify-between text-sm text-muted-foreground mt-2 relative z-10">
                 <span>Pool: ₦{Number(formatUnits(totalPool, 18)).toLocaleString()}</span>
                 <span>Ends: {endDate.toLocaleDateString()} {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

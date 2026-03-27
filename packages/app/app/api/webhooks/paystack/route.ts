@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { createPublicClient, createWalletClient, http, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygonAmoy } from 'viem/chains';
-import { TNGN_ADDRESS, TNGN_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
+import { TNGN_ADDRESS, TNGN_ABI, SAFE_AMOY_GAS_NO_LIMIT } from '@/lib/constants';
 import { supabase } from '@/lib/supabase';
 
 export async function POST(req: Request) {
@@ -111,11 +111,12 @@ export async function POST(req: Request) {
       account,
     });
 
-    // Execute Mint
+    // Execute Mint with 1.5M Gas Buffer
     // @ts-expect-error viem typing mismatch with manual gas overrides
     const txHash = await walletClient.writeContract({
         ...request,
-        ...SAFE_AMOY_GAS,
+        gas: BigInt(1500000), // 1.5M Gas limit to prevent OOG
+        ...SAFE_AMOY_GAS_NO_LIMIT,
     });
 
     console.log(`Mint successful! Tx Hash: ${txHash}`);
