@@ -15,7 +15,20 @@ const CATEGORIES = [
     icon: Trophy,
     color: 'text-yellow-500',
     subcategories: [
-      { id: 'football', label: '⚽ Football', subItems: ['Premier League', 'LaLiga', 'Serie A', 'Bundesliga', 'Ligue 1', 'Champions League', 'World Cup', 'Euros', 'Eredivisie', 'Brasileirao', 'Primeira Liga', 'Championship'] },
+      { id: 'football', label: '⚽ Football', subItems: [
+        { label: 'Premier League', id: 'pl' },
+        { label: 'LaLiga', id: 'pd' },
+        { label: 'Serie A', id: 'sa' },
+        { label: 'Bundesliga', id: 'bl1' },
+        { label: 'Ligue 1', id: 'fl1' },
+        { label: 'Champions League', id: 'cl' },
+        { label: 'World Cup', id: 'wc' },
+        { label: 'Euros', id: 'ec' },
+        { label: 'Eredivisie', id: 'ded' },
+        { label: 'Brasileirao', id: 'bsa' },
+        { label: 'Primeira Liga', id: 'ppl' },
+        { label: 'Championship', id: 'elc' }
+      ] },
       { id: 'basketball', label: '🏀 Basketball' },
       { id: 'fight', label: '🥊 Fight Night' },
       { id: 'motorsport', label: '🏎️ Motorsport' },
@@ -90,13 +103,13 @@ export function Sidebar() {
                          <CollapsibleContent className="pl-6 py-1 space-y-1 border-l ml-2 mt-1">
                             {sub.subItems?.map(item => (
                                 <Button
-                                  key={item}
-                                  variant="ghost"
+                                  key={item.id}
+                                  variant={currentSubcategory === item.id ? "secondary" : "ghost"}
                                   size="sm"
-                                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground h-7"
-                                  onClick={() => handleNavigation(category.id, item.toLowerCase())}
+                                  className={cn("w-full justify-start text-xs text-muted-foreground hover:text-foreground h-7", currentSubcategory === item.id && "text-foreground bg-muted")}
+                                  onClick={() => handleNavigation(category.id, item.id)}
                                 >
-                                  {item}
+                                  {item.label}
                                 </Button>
                             ))}
                          </CollapsibleContent>

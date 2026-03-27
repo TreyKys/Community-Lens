@@ -19,7 +19,7 @@ export function EventChart() {
   return (
     <Card className="w-full bg-card/50 backdrop-blur-sm border-muted overflow-hidden">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg font-medium tracking-tight">Momentum Volume</CardTitle>
+        <CardTitle className="text-lg font-medium tracking-tight font-sans">Momentum</CardTitle>
         <CardDescription>Real-time liquidity flow (tNGN) over the last 6 hours.</CardDescription>
       </CardHeader>
       <CardContent className="p-0 sm:p-6 sm:pt-0">
