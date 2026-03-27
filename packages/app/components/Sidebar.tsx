@@ -64,7 +64,7 @@ export function Sidebar() {
   };
 
   return (
-    <div className="w-64 border-r bg-background min-h-screen p-4 flex flex-col gap-1 hidden md:flex">
+    <div className="w-64 border-r bg-background min-h-screen p-4 flex flex-col gap-1 md:flex">
       {CATEGORIES.map((category) => {
         const Icon = category.icon;
         const isActive = currentCategory === category.id;
