@@ -1,31 +1,37 @@
 'use client';
 
-import { usePrivy } from '@privy-io/react-auth';
-import { useAccount, useChainId } from 'wagmi';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { WalletModal } from '@/components/WalletModal';
+import { AuthModal } from '@/components/AuthModal';
 import { Button } from '@/components/ui/button';
-import { Info } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 export function Navbar() {
-  const { login, authenticated, logout } = usePrivy();
-  const chainId = useChainId();
-  const { address, isConnected } = useAccount();
+  const [session, setSession] = useState<any>(null);
   const [bonusBalance, setBonusBalance] = useState<number>(0);
 
-  // Polygon Amoy is 80002
-  const showWallet = chainId === 80002 && !!address;
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     async function fetchBonusBalance() {
-      if (!address) return;
+      if (!session?.user?.id) return;
       try {
         const { data } = await supabase
             .from('users')
             .select('bonus_balance')
-            .eq('walletAddress', address.toLowerCase())
+            .eq('id', session.user.id)
             .single();
 
         if (data && data.bonus_balance) {
@@ -36,10 +42,14 @@ export function Navbar() {
       }
     }
 
-    if (isConnected || authenticated) {
+    if (session) {
         fetchBonusBalance();
     }
-  }, [address, isConnected, authenticated]);
+  }, [session]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  }
 
   return (
     <nav className="flex items-center justify-between p-4 border-b">
@@ -53,7 +63,7 @@ export function Navbar() {
         </div>
       </div>
       <div className="flex items-center gap-4">
-        {(isConnected || authenticated) && bonusBalance > 0 && (
+        {session && bonusBalance > 0 && (
             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-full text-amber-500 text-sm font-medium">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -63,31 +73,15 @@ export function Navbar() {
             </div>
         )}
 
-        {showWallet && <WalletModal />}
+        {session && <WalletModal />}
 
-        {authenticated || isConnected ? (
-            <Button onClick={logout} variant="outline">
+        {session ? (
+            <Button onClick={handleSignOut} variant="outline">
               Sign Out
             </Button>
         ) : (
             <div className="flex items-center gap-2">
-              <Button size="lg" className="font-semibold px-6" onClick={login}>
-                Sign In / Sign Up
-              </Button>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="rounded-full w-8 h-8 text-muted-foreground hover:text-primary">
-                      <Info className="h-4 w-4" />
-                      <span className="sr-only">Wallet Info</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-[250px] p-4 text-sm leading-relaxed">
-                    <p className="font-semibold mb-1">What is a Web3 Wallet?</p>
-                    A digital wallet (like MetaMask or Coinbase Wallet) lets you log in without passwords and take full custody of your funds. You approve transactions cryptographically.
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <AuthModal />
             </div>
         )}
       </div>

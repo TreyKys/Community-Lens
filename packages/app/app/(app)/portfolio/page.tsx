@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 
 export default function PortfolioPage() {
     const { address, isConnected } = useAccount();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // @ts-ignore
     const [activeBets, setActiveBets] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 

@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Navbar } from "@/components/Navbar";
+import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { OnboardingIntercept } from "@/components/OnboardingIntercept";
 import { BottomTabBar } from "@/components/BottomTabBar";
@@ -36,7 +37,10 @@ export default function RootLayout({
       >
         <Providers>
           <Navbar />
-          {children}
+          <main className="min-h-screen">
+            {children}
+          </main>
+          <Footer />
           <BottomTabBar />
           <Toaster />
           <OnboardingIntercept />
