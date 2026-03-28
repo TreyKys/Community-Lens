@@ -1,5 +1,4 @@
 import { KMSClient, GenerateDataKeyCommand, GenerateDataKeyCommandInput } from '@aws-sdk/client-kms';
-import { createHmac } from 'crypto';
 import { Wallet } from 'ethers';
 
 // Environment variables
@@ -51,12 +50,24 @@ export async function generateUserWallet(userId: string): Promise<{ walletAddres
 
     const masterSecret = Buffer.from(response.Plaintext);
 
-    // Derive private key: HMAC-SHA256(master_secret, user_id)
-    const hmac = createHmac('sha256', masterSecret);
-    hmac.update(userId);
-    const privateKeyHex = hmac.digest('hex');
+    // Use Web Crypto API for HMAC-SHA256 derivation instead of Node 'crypto'
+    const crypto = globalThis.crypto;
+    const key = await crypto.subtle.importKey(
+        'raw',
+        masterSecret,
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const signature = await crypto.subtle.sign(
+        'HMAC',
+        key,
+        new TextEncoder().encode(userId)
+    );
+    const privateKeyHex = Array.from(new Uint8Array(signature))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
 
-    // Generate ethers wallet from derived private key
     const wallet = new Wallet('0x' + privateKeyHex);
 
     // Overwrite memory containing the sensitive data to help with garbage collection

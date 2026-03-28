@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { generateUserWallet } from '@/lib/kms';
 
-import crypto from 'crypto';
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy-for-build.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy_key';
 
@@ -34,8 +32,8 @@ export async function POST(req: NextRequest) {
     if (!user) {
         // Create new user flow with KMS Zero-Key Storage
 
-        // 1. We need a unique ID for the KMS seed.
-        const newUserId = crypto.randomUUID();
+        // 1. We need a unique ID for the KMS seed. Use Web Crypto API.
+        const newUserId = globalThis.crypto.randomUUID();
 
         // 2. Generate EVM Wallet via KMS
         const { walletAddress } = await generateUserWallet(newUserId);
