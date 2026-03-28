@@ -3,171 +3,94 @@ pragma solidity 0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-contract TruthMarket is Ownable, ReentrancyGuard {
+contract TruthMarket is Ownable {
     IERC20 public immutable bettingToken;
-    address public feeTreasury;
-    uint256 public nextMarketId;
+    uint256 public lastHeartbeat;
 
-    struct Market {
-        string question;
-        string[] options;
-        bool resolved;
-        uint256 winningOptionIndex;
-        bool voided;
+    struct MarketCommit {
+        bytes32 merkleRoot;
+        bool isResolved;
         uint256 totalPool;
-        uint256 bettingEndsAt;
-        address creator;
-        uint256 parentMarketId;
     }
 
-    mapping(uint256 => Market) public markets;
-    // marketId -> optionIndex -> amount
-    mapping(uint256 => mapping(uint256 => uint256)) public marketOptionPools;
-    // marketId -> user -> optionIndex -> amount
-    mapping(uint256 => mapping(address => mapping(uint256 => uint256))) public userStakes;
-    // marketId -> user -> claimed
-    mapping(uint256 => mapping(address => bool)) public hasClaimed;
-    // marketId -> payoutPool
-    mapping(uint256 => uint256) public marketPayoutPools;
+    // marketId -> MarketCommit
+    mapping(string => MarketCommit) public marketCommits;
+    // msg.sender -> marketId -> claimed
+    mapping(address => mapping(string => bool)) public hasClaimedEmergency;
 
-    event MarketCreated(uint256 indexed marketId, string question, string[] options, uint256 bettingEndsAt, uint256 parentMarketId);
-    event BetPlaced(uint256 indexed marketId, address indexed user, uint256 optionIndex, uint256 wager, uint256 netStake);
-    event MarketResolved(uint256 indexed marketId, uint256 winningOptionIndex, bool voided);
-    event WinningsClaimed(uint256 indexed marketId, address indexed user, uint256 amount);
-    event FeeTreasuryUpdated(address oldTreasury, address newTreasury);
+    event BetStateCommitted(string marketId, bytes32 merkleRoot);
+    event MarketResolved(string marketId, string winningOutcome, uint256 payoutToMasterWallet);
+    event Heartbeat(uint256 timestamp);
+    event EmergencyWithdraw(address user, string marketId, uint256 amount);
 
-    constructor(address _bettingToken, address _feeTreasury) Ownable(msg.sender) {
+    constructor(address _bettingToken) Ownable(msg.sender) {
         bettingToken = IERC20(_bettingToken);
-        feeTreasury = _feeTreasury;
+        lastHeartbeat = block.timestamp;
     }
 
-    function setFeeTreasury(address newTreasury) external onlyOwner {
-        require(newTreasury != address(0), "Invalid address");
-        emit FeeTreasuryUpdated(feeTreasury, newTreasury);
-        feeTreasury = newTreasury;
+    /**
+     * @dev Fired by a backend CRON job strictly at the market's closes_at timestamp.
+     * Records the tamper-proof Merkle Root of the entire user_bets book for that market.
+     */
+    function commitBetState(string calldata marketId, bytes32 merkleRoot, uint256 totalPool) external onlyOwner {
+        require(marketCommits[marketId].merkleRoot == bytes32(0), "Market already committed");
+
+        marketCommits[marketId] = MarketCommit({
+            merkleRoot: merkleRoot,
+            isResolved: false,
+            totalPool: totalPool
+        });
+
+        emit BetStateCommitted(marketId, merkleRoot);
     }
 
-    function createMarket(string memory question, string[] memory options, uint256 duration, uint256 parentMarketId) external onlyOwner {
-        _createMarket(question, options, duration, parentMarketId);
+    /**
+     * @dev Fired by the Oracle to unlock the pool back to the Master Wallet for backend distribution.
+     */
+    function resolveMarket(string calldata marketId, string calldata winningOutcome, uint256 distributionAmount) external onlyOwner {
+        MarketCommit storage m = marketCommits[marketId];
+        require(m.merkleRoot != bytes32(0), "Market not committed");
+        require(!m.isResolved, "Market already resolved");
+
+        m.isResolved = true;
+
+        // Unlock funds to the master wallet for backend distribution
+        bettingToken.transfer(owner(), distributionAmount);
+
+        emit MarketResolved(marketId, winningOutcome, distributionAmount);
     }
 
-    function createMarketBatch(
-        string[] memory questions,
-        string[][] memory options,
-        uint256[] memory durations,
-        uint256[] memory parentMarketIds
-    ) external onlyOwner {
-        require(questions.length == options.length, "Mismatched arrays");
-        require(questions.length == durations.length, "Mismatched arrays");
-        require(questions.length == parentMarketIds.length, "Mismatched arrays");
-
-        for (uint256 i = 0; i < questions.length; i++) {
-            _createMarket(questions[i], options[i], durations[i], parentMarketIds[i]);
-        }
+    /**
+     * @dev Fired weekly by the backend admin to prove the backend is alive.
+     */
+    function heartbeat() external onlyOwner {
+        lastHeartbeat = block.timestamp;
+        emit Heartbeat(lastHeartbeat);
     }
 
-    function _createMarket(string memory question, string[] memory options, uint256 duration, uint256 parentMarketId) internal {
-        require(options.length > 1, "At least 2 options required");
-        uint256 marketId = nextMarketId++;
-        Market storage m = markets[marketId];
-        m.question = question;
-        m.options = options;
-        m.bettingEndsAt = block.timestamp + duration;
-        m.creator = msg.sender;
-        m.parentMarketId = parentMarketId;
-        emit MarketCreated(marketId, question, options, m.bettingEndsAt, parentMarketId);
-    }
+    /**
+     * @dev The 30-Day Escape Hatch. If the heartbeat stops for 30 days, any user can call this with their Merkle proof
+     * to withdraw directly, bypassing TruthMarket entirely.
+     */
+    function emergencyWithdraw(string calldata marketId, uint256 userBalance, bytes32[] calldata proof) external {
+        require(block.timestamp > lastHeartbeat + 30 days, "System is still active");
+        require(!hasClaimedEmergency[msg.sender][marketId], "Already claimed");
 
-    function getMarketOptions(uint256 marketId) external view returns (string[] memory) {
-        require(marketId < nextMarketId, "Market does not exist");
-        return markets[marketId].options;
-    }
+        MarketCommit memory m = marketCommits[marketId];
+        require(m.merkleRoot != bytes32(0), "Market not committed");
+        require(!m.isResolved, "Cannot escape a resolved market"); // If resolved, backend distributed it
 
-    function placeBet(uint256 marketId, uint256 optionIndex, uint256 amount) external nonReentrant {
-        require(marketId < nextMarketId, "Market does not exist");
-        Market storage m = markets[marketId];
-        require(!m.resolved, "Market resolved");
-        require(block.timestamp < m.bettingEndsAt, "Betting closed");
-        require(optionIndex < m.options.length, "Invalid option");
-        require(amount > 0, "Amount must be > 0");
+        // Verify Merkle Proof
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender, userBalance))));
+        require(MerkleProof.verify(proof, m.merkleRoot, leaf), "Invalid Merkle proof");
 
-        bettingToken.transferFrom(msg.sender, address(this), amount);
+        hasClaimedEmergency[msg.sender][marketId] = true;
 
-        // 1.5% Entry Rake
-        uint256 entryRake = (amount * 15) / 1000;
-        uint256 netStake = amount - entryRake;
+        // Transfer escape funds
+        bettingToken.transfer(msg.sender, userBalance);
 
-        if (entryRake > 0) {
-            bettingToken.transfer(feeTreasury, entryRake);
-        }
-
-        m.totalPool += netStake;
-        marketOptionPools[marketId][optionIndex] += netStake;
-        userStakes[marketId][msg.sender][optionIndex] += netStake;
-
-        emit BetPlaced(marketId, msg.sender, optionIndex, amount, netStake);
-    }
-
-    function resolveMarket(uint256 marketId, uint256 winningOptionIndex) external onlyOwner {
-        Market storage m = markets[marketId];
-        require(!m.resolved, "Already resolved");
-        require(winningOptionIndex < m.options.length, "Invalid option");
-
-        m.resolved = true;
-        m.winningOptionIndex = winningOptionIndex;
-
-        uint256 totalPool = m.totalPool;
-        uint256 winningPool = marketOptionPools[marketId][winningOptionIndex];
-        uint256 losingPool = totalPool - winningPool;
-
-        bool voided = (losingPool == 0) || (winningPool == 0);
-        m.voided = voided;
-
-        if (!voided) {
-            // 5% Resolution Rake on Profit (Losing Pool)
-            uint256 resolutionRake = (losingPool * 5) / 100;
-            if (resolutionRake > 0) {
-                bettingToken.transfer(feeTreasury, resolutionRake);
-            }
-
-            // The payout pool is the total pool minus the resolution rake
-            marketPayoutPools[marketId] = totalPool - resolutionRake;
-        }
-
-        emit MarketResolved(marketId, winningOptionIndex, voided);
-    }
-
-    function claim(uint256 marketId) external nonReentrant {
-        Market storage m = markets[marketId];
-        require(m.resolved, "Not resolved");
-        require(!hasClaimed[marketId][msg.sender], "Already claimed");
-
-        uint256 payout = 0;
-
-        if (m.voided) {
-            // Refund all net stakes for this user in this market
-            for (uint256 i = 0; i < m.options.length; i++) {
-                payout += userStakes[marketId][msg.sender][i];
-            }
-        } else {
-            // Standard Payout (Only for winning option)
-            uint256 userStake = userStakes[marketId][msg.sender][m.winningOptionIndex];
-            if (userStake > 0) {
-                 uint256 winningPool = marketOptionPools[marketId][m.winningOptionIndex];
-                 uint256 payoutPool = marketPayoutPools[marketId];
-
-                 // Payout = userStake * (payoutPool / winningPool)
-                 payout = (userStake * payoutPool) / winningPool;
-            }
-        }
-
-        require(payout > 0, "Nothing to claim");
-
-        hasClaimed[marketId][msg.sender] = true;
-        bettingToken.transfer(msg.sender, payout);
-
-        emit WinningsClaimed(marketId, msg.sender, payout);
+        emit EmergencyWithdraw(msg.sender, marketId, userBalance);
     }
 }

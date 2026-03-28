@@ -1,104 +1,192 @@
 'use client';
 
 import { useAccount } from 'wagmi';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
+import { Download, Clock } from 'lucide-react';
+
+interface UserBet {
+    id: string;
+    market_id: string;
+    market_title: string;
+    outcome: string;
+    staked_amount: number;
+    status: string;
+    created_at: string;
+}
 
 export default function PortfolioPage() {
-  const { address, isConnected } = useAccount();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [bets, setBets] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+    const { address } = useAccount();
+    const { toast } = useToast();
+    const [bets, setBets] = useState<UserBet[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [userId, setUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchBets() {
-      if (!address) return;
-      try {
-        const { data } = await supabase
-          .from('user_bets')
-          .select('*')
-          .eq('wallet_address', address)
-          .eq('status', 'Pending')
-          .order('created_at', { ascending: false });
+    useEffect(() => {
+        if (!address) return;
 
-        if (data) setBets(data);
-      } catch (err) {
-        console.error("Failed to fetch bets:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
+        const fetchBets = async () => {
+            setIsLoading(true);
 
-    if (isConnected) {
+            // First get user ID
+            const { data: user } = await supabase
+                .from('users')
+                .select('id')
+                .eq('wallet_address', address)
+                .single();
+
+            if (user) {
+                setUserId(user.id);
+                const { data: betsData, error } = await supabase
+                    .from('user_bets')
+                    .select('*, markets(question)')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false });
+
+                if (betsData && !error) {
+                    setBets(betsData.map(b => ({
+                        ...b,
+                        market_title: b.markets?.question || b.market_title
+                    })));
+                }
+            }
+            setIsLoading(false);
+        };
+
         fetchBets();
-    } else {
-        setLoading(false);
+    }, [address]);
+
+    const handleDownloadReceipt = async (marketId: string) => {
+        if (!userId) return;
+
+        try {
+            const res = await fetch(`/api/markets/${marketId}/proof?userId=${userId}`);
+            if (!res.ok) throw new Error('Proof not ready or market not committed.');
+
+            const data = await res.json();
+
+            // Trigger download
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `truthmarket-receipt-${marketId}.json`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+
+            toast({
+                title: "Receipt Downloaded",
+                description: "Your cryptographic proof is saved."
+            });
+
+        } catch (error: unknown) {
+            toast({
+                title: "Download Failed",
+                description: error instanceof Error ? error.message : "Unknown error",
+                variant: "destructive"
+            });
+        }
+    };
+
+    if (!address) {
+        return <div className="p-8 text-center text-muted-foreground">Please connect to view your portfolio.</div>;
     }
-  }, [address, isConnected]);
 
-  if (!isConnected || !address) {
+    const openBets = bets.filter(b => b.status === 'pending');
+    const resolvedBets = bets.filter(b => b.status !== 'pending');
+
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 text-center space-y-4">
-        <h2 className="text-2xl font-bold">Open Bets</h2>
-        <p className="text-muted-foreground max-w-sm">
-          Connect your wallet to view your active predictions and bet receipts.
-        </p>
-      </div>
+        <div className="space-y-6 w-full max-w-2xl mx-auto pb-24">
+            <h1 className="text-3xl font-bold tracking-tight">Portfolio</h1>
+
+            <Tabs defaultValue="open" className="w-full">
+                <TabsList className="grid w-full grid-cols-2 bg-muted/50 p-1">
+                    <TabsTrigger value="open" className="data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all rounded-md">
+                        Open Bets ({openBets.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="resolved" className="data-[state=active]:bg-background data-[state=active]:shadow-sm transition-all rounded-md">
+                        Resolved ({resolvedBets.length})
+                    </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="open" className="space-y-4 mt-6">
+                    {isLoading ? (
+                        <div className="text-center p-8 animate-pulse text-muted-foreground">Loading...</div>
+                    ) : openBets.length > 0 ? (
+                        openBets.map(bet => (
+                            <Card key={bet.id} className="bg-card/50 border-muted">
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-base leading-tight">{bet.market_title}</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="flex justify-between items-center bg-muted/30 p-3 rounded-md">
+                                        <div>
+                                            <div className="text-xs text-muted-foreground mb-1">Prediction</div>
+                                            <div className="font-medium text-foreground">{bet.outcome}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-xs text-muted-foreground mb-1">Stake</div>
+                                            <div className="font-medium text-foreground">₦{bet.staked_amount.toLocaleString()}</div>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                                <CardFooter className="pt-0 text-xs text-muted-foreground flex justify-between items-center">
+                                    <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> Pending Resolution</span>
+                                    <span>{new Date(bet.created_at).toLocaleDateString()}</span>
+                                </CardFooter>
+                            </Card>
+                        ))
+                    ) : (
+                        <div className="text-center p-12 text-muted-foreground bg-muted/10 rounded-lg border border-dashed border-muted">
+                            No open bets. Time to lock in a prediction.
+                        </div>
+                    )}
+                </TabsContent>
+
+                <TabsContent value="resolved" className="space-y-4 mt-6">
+                     {isLoading ? (
+                        <div className="text-center p-8 animate-pulse text-muted-foreground">Loading...</div>
+                    ) : resolvedBets.length > 0 ? (
+                        resolvedBets.map(bet => (
+                            <Card key={bet.id} className="bg-card/50 border-muted opacity-80 hover:opacity-100 transition-opacity">
+                                <CardHeader className="pb-2 flex flex-row items-start justify-between">
+                                    <CardTitle className="text-base leading-tight pr-4">{bet.market_title}</CardTitle>
+                                    <span className={`text-xs font-bold px-2 py-1 rounded-sm uppercase tracking-wider ${bet.status === 'won' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
+                                        {bet.status}
+                                    </span>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <span className="text-muted-foreground text-sm">Prediction: </span>
+                                            <span className="font-medium">{bet.outcome}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-muted-foreground text-sm">Stake: </span>
+                                            <span className="font-medium">₦{bet.staked_amount.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                                <CardFooter className="pt-0 justify-between">
+                                    <div className="text-xs text-muted-foreground">{new Date(bet.created_at).toLocaleDateString()}</div>
+                                    <Button variant="outline" size="sm" onClick={() => handleDownloadReceipt(bet.market_id)} className="h-8 text-xs bg-muted/20 hover:bg-muted/50 border-muted">
+                                        <Download className="w-3 h-3 mr-2" /> Receipt
+                                    </Button>
+                                </CardFooter>
+                            </Card>
+                        ))
+                    ) : (
+                        <div className="text-center p-12 text-muted-foreground bg-muted/10 rounded-lg border border-dashed border-muted">
+                            No resolved bets yet.
+                        </div>
+                    )}
+                </TabsContent>
+            </Tabs>
+        </div>
     );
-  }
-
-  return (
-    <div className="p-4 md:p-8 space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Open Bets</h1>
-        <p className="text-muted-foreground mt-2">Manage your active predictions and bet receipts.</p>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center p-8">
-            <span className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground" />
-        </div>
-      ) : bets.length === 0 ? (
-        <Card className="bg-card/50 backdrop-blur-sm border-muted border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center space-y-4">
-            <div className="p-4 bg-muted/50 rounded-full">
-              <span className="text-2xl">📋</span>
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-medium text-lg">No Active Predictions</h3>
-              <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                You don&apos;t have any open bets at the moment. Explore the markets to lock in your predictions.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {bets.map((bet) => (
-            <Card key={bet.id} className="hover:shadow-md transition-shadow bg-card border-muted relative overflow-hidden">
-              <CardContent className="p-6 relative z-10">
-                <div className="flex justify-between items-start">
-                  <div className="space-y-2">
-                    <Badge variant="outline" className="bg-muted/50">Bet Receipt</Badge>
-                    <h3 className="font-semibold text-lg">{bet.market_title}</h3>
-                    <p className="text-sm text-muted-foreground flex items-center gap-2">
-                        Prediction: <Badge variant="secondary">{bet.outcome}</Badge>
-                    </p>
-                  </div>
-                  <div className="text-right space-y-2 flex flex-col items-end">
-                    <div className="font-medium text-xl">₦{bet.staked_amount.toLocaleString()}</div>
-                    <Badge variant="open" className="animate-pulse">Active</Badge>
-                  </div>
-                </div>
-              </CardContent>
-              {/* Subtle accent line matching 'Active' open status */}
-              <div className="absolute bottom-0 left-0 h-1 bg-emerald-500/50 w-full" />
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
