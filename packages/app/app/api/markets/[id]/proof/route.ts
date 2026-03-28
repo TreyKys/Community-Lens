@@ -4,8 +4,8 @@ import { MerkleTree } from 'merkletreejs';
 import keccak256 from 'keccak256';
 import { encodePacked } from 'viem';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy-for-build.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy_key';
 
 export async function GET(
   req: NextRequest,
@@ -46,8 +46,8 @@ export async function GET(
     // Group bets by user wallet address to get total staked per user
     const userBalances: Record<string, bigint> = {};
     bets.forEach((bet) => {
-      // @ts-expect-error join types
-      const wallet = bet.users?.wallet_address || '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wallet = (bet as any).users?.wallet_address || '';
       if (!wallet) return;
       const amount = BigInt(Math.floor(bet.staked_amount * 1e18)); // Convert to wei string
       userBalances[wallet] = (userBalances[wallet] || BigInt(0)) + amount;
