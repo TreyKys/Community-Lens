@@ -3,7 +3,9 @@ import { Wallet } from 'ethers';
 
 // Environment variables
 const KMS_KEY_ID = process.env.KMS_KEY_ID || 'alias/truthmarket-master-key';
-const USE_MOCK_KMS = process.env.USE_MOCK_KMS === 'true';
+// Explicitly check for AWS credentials. If they don't exist, force the mock to prevent crashes.
+const hasAwsCredentials = !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
+const USE_MOCK_KMS = process.env.USE_MOCK_KMS === 'true' || !hasAwsCredentials;
 
 let kmsClient: KMSClient | null = null;
 
@@ -11,8 +13,8 @@ if (!USE_MOCK_KMS) {
   kmsClient = new KMSClient({
     region: process.env.AWS_REGION || 'us-east-1',
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
     },
   });
 }
@@ -86,6 +88,9 @@ export async function generateUserWallet(userId: string): Promise<{ walletAddres
  * but for this pivot, we use a KMS-managed master key to derive it or an ENV var.
  */
 export function getMasterProtocolWallet(): Wallet {
-  const MASTER_PRIVATE_KEY = process.env.MASTER_PRIVATE_KEY || 'fb4be7fcb4463e6dfecf88014f752dfacdf8cf45d9f8bc914daa55e4a850d0e8';
+  const MASTER_PRIVATE_KEY = process.env.MASTER_PRIVATE_KEY;
+  if (!MASTER_PRIVATE_KEY) {
+    throw new Error('MASTER_PRIVATE_KEY is not configured in the environment variables.');
+  }
   return new Wallet(MASTER_PRIVATE_KEY);
 }
