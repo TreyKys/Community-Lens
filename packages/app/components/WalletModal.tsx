@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Wallet } from 'lucide-react';
 
-export function WalletModal() {
+export function WalletModal({ triggerText = "Deposit Naira", className = "" }: { triggerText?: string; className?: string }) {
   const { address, isConnected } = useAccount();
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
@@ -69,7 +69,7 @@ export function WalletModal() {
 
     toast({
         title: "Deposit Successful!",
-        description: `₦${actual.toLocaleString()} added + ₦${bonus.toLocaleString()} Betting Bonus!`,
+        description: `Deposit Successful! ${actual.toLocaleString()} tNGN added + ${bonus.toLocaleString()} tNGN Betting Bonus!`,
         variant: "default",
     });
     setIsOpen(false);
@@ -78,9 +78,9 @@ export function WalletModal() {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2 bg-muted/50 border-muted hover:bg-muted">
+        <Button variant="outline" className={`gap-2 bg-muted/50 border-muted hover:bg-muted ${className}`}>
           <Wallet className="h-4 w-4" />
-          Deposit Naira
+          {triggerText}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px] border-muted">

@@ -19,7 +19,7 @@ export default function EventPage({ params }: { params: { eventId: string } }) {
 
       <div className="relative z-10 p-4 md:p-8 space-y-6 max-w-2xl mx-auto pb-24 md:pb-8">
         <div className="flex items-center gap-4">
-          <Link href="/markets">
+          <Link href="/">
               <Button variant="ghost" size="icon">
                   <ArrowLeft className="w-4 h-4" />
               </Button>
@@ -29,7 +29,7 @@ export default function EventPage({ params }: { params: { eventId: string } }) {
 
         <div className="space-y-8">
             <div className="w-full">
-              <EventChart />
+              <EventChart marketId={params.eventId} />
             </div>
 
             <div>

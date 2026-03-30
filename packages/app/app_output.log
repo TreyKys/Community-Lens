@@ -6,258 +6,32 @@
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 1882ms
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+ ✓ Ready in 1974ms
  ○ Compiling / ...
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
- GET / 200 in 116ms
- HEAD / 200 in 53ms
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 2 times.
-WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 2 times.
-Multiple versions of Lit loaded. Loading multiple versions is not recommended. See https://lit.dev/msg/multiple-versions for more information.
- GET /markets 200 in 7520ms
- HEAD /markets 200 in 42ms
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
- ⨯ ./components/MarketList.tsx:12:1
-Module not found: Can't resolve '@/components/ui/drawer'
-[0m [90m 10 |[39m [36mimport[39m { [33mLabel[39m } [36mfrom[39m [32m'@/components/ui/label'[39m[33m;[39m[0m
-[0m [90m 11 |[39m [36mimport[39m { [33mRadioGroup[39m[33m,[39m [33mRadioGroupItem[39m } [36mfrom[39m [32m'@/components/ui/radio-group'[39m[33m;[39m[0m
-[0m[31m[1m>[22m[39m[90m 12 |[39m [36mimport[39m { [33mDrawer[39m[33m,[39m [33mDrawerContent[39m[33m,[39m [33mDrawerTrigger[39m[33m,[39m [33mDrawerHeader[39m[33m,[39m [33mDrawerTitle[39m[33m,[39m [33mDrawerDescription[39m[33m,[39m [33mDrawerFooter[39m[33m,[39m [33mDrawerClose[39m } [36mfrom[39m [32m'@/components/ui/drawer'[39m[33m;[39m[0m
-[0m [90m    |[39m [31m[1m^[22m[39m[0m
-[0m [90m 13 |[39m [36mimport[39m { formatUnits[33m,[39m parseUnits } [36mfrom[39m [32m'viem'[39m[33m;[39m[0m
-[0m [90m 14 |[39m [36mimport[39m { useState[33m,[39m useEffect } [36mfrom[39m [32m'react'[39m[33m;[39m[0m
-[0m [90m 15 |[39m [36mimport[39m { useToast } [36mfrom[39m [32m'@/hooks/use-toast'[39m[33m;[39m[0m
-
-https://nextjs.org/docs/messages/module-not-found
-
-Import trace for requested module:
-./app/(app)/markets/page.tsx
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
- ⚠ ../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-Module not found: Can't resolve '@react-native-async-storage/async-storage' in '/app/node_modules/@metamask/sdk/dist/browser/es'
-
-Import trace for requested module:
-../../node_modules/@metamask/sdk/dist/browser/es/metamask-sdk.js
-../../node_modules/@wagmi/connectors/dist/esm/metaMask.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
-
-../../node_modules/pino/lib/tools.js
-Module not found: Can't resolve 'pino-pretty' in '/app/node_modules/pino/lib'
-
-Import trace for requested module:
-../../node_modules/pino/lib/tools.js
-../../node_modules/pino/pino.js
-../../node_modules/@walletconnect/logger/dist/index.es.js
-../../node_modules/@walletconnect/universal-provider/dist/index.es.js
-../../node_modules/@walletconnect/ethereum-provider/dist/index.es.js
-../../node_modules/@wagmi/connectors/dist/esm/walletConnect.js
-../../node_modules/@wagmi/connectors/dist/esm/exports/index.js
-../../node_modules/wagmi/dist/esm/exports/connectors.js
-./components/Navbar.tsx
+ ✓ Compiled / in 95s (20272 modules)
+ ✓ Compiled in 4.4s (9808 modules)
+ GET / 200 in 937ms
+ GET / 200 in 156ms
+ ○ Compiling /profile ...
+ ✓ Compiled /profile in 12.6s (20246 modules)
+ GET /profile 200 in 13675ms
+ ○ Compiling /portfolio ...
+ ✓ Compiled /portfolio in 3.6s (20252 modules)
+ GET /portfolio 200 in 4315ms
+ ✓ Compiled in 76s (20262 modules)
+ ✓ Compiled in 48.5s (20262 modules)
+ GET / 200 in 3335ms
+ GET / 200 in 92ms
+ ○ Compiling /profile ...
+ ✓ Compiled /profile in 5.9s (10454 modules)
+ GET /profile 200 in 6755ms
+ GET /portfolio 200 in 45ms
+ ✓ Compiled in 27.9s (20262 modules)
+ ✓ Compiled in 11.8s (20262 modules)
+ ✓ Compiled in 2.5s (9812 modules)
+ ✓ Compiled in 35s (20262 modules)

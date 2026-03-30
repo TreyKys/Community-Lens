@@ -7,11 +7,9 @@
     "compile": "hardhat compile"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "@openzeppelin/contracts": "^5.6.1",
     "dotenv": "^17.2.3",
-    "hardhat": "^2.28.3"
-  },
-  "dependencies": {
-    "@openzeppelin/contracts": "^5.4.0"
+    "hardhat": "^2.28.6"
   }
 }
