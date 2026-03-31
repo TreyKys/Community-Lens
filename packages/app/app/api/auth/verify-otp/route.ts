@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+// Use the service role key so we can write to the users table bypassing RLS
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST(request: Request) {
   try {
@@ -9,40 +15,53 @@ export async function POST(request: Request) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
 
+    // Verify the session token with the admin client
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
-    const { phone, email } = await request.json();
+    const { email, phone } = await request.json();
 
-    // Check if user exists in the `users` table
-    const { data: existingUser, error: checkError } = await supabase
+    // Check if this user already has a record
+    const { data: existingUser, error: checkError } = await supabaseAdmin
       .from('users')
       .select('id')
       .eq('id', user.id)
       .single();
 
-    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 is "Row not found"
-      console.error('Database error checking user:', checkError);
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('DB error checking user:', checkError);
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
     if (!existingUser) {
-      // Create user record.
-      // walletAddress is required in current schema.
-      // In phase 3, we will call AWS KMS here to derive a real address.
-      // For now, we generate a mock placeholder address to unblock the database insert.
+      // -----------------------------------------------------------------
+      // PHASE 3 TODO: Replace this mock address with a real AWS KMS call:
+      //
+      //   import { KMSClient, GenerateMacCommand } from "@aws-sdk/client-kms";
+      //   const kms = new KMSClient({ region: process.env.AWS_REGION });
+      //   const mac = await kms.send(new GenerateMacCommand({
+      //     KeyId: process.env.AWS_KMS_KEY_ID,
+      //     Message: Buffer.from(user.id),
+      //     MacAlgorithm: "HMAC_SHA_256",
+      //   }));
+      //   const privateKey = mac.Mac; // derive EVM address from this
+      //
+      // For now we generate a deterministic mock address so the DB insert
+      // works and the rest of the app is unblocked during testing.
+      // -----------------------------------------------------------------
       const mockWalletAddress = `0xmock_${user.id.replace(/-/g, '').substring(0, 32)}`;
 
-      const { error: insertError } = await supabase
+      const { error: insertError } = await supabaseAdmin
         .from('users')
         .insert([{
           id: user.id,
-          phone: phone || user.phone,
           email: email || user.email,
-          walletAddress: mockWalletAddress,
+          phone: phone || user.phone || null,
+          wallet_address: mockWalletAddress,
+          tngn_balance: 0,
           bonus_balance: 0,
         }]);
 
@@ -50,6 +69,8 @@ export async function POST(request: Request) {
         console.error('Error creating user record:', insertError);
         return NextResponse.json({ error: 'Failed to create user record' }, { status: 500 });
       }
+
+      console.log(`New user created: ${user.id} → ${mockWalletAddress}`);
     }
 
     return NextResponse.json({ success: true });

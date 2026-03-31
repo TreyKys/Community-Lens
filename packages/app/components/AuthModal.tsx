@@ -11,11 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export function AuthModal() {
   const [isOpen, setIsOpen] = useState(false);
-  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'request' | 'verify'>('request');
-  const [method, setMethod] = useState<'phone' | 'email'>('phone');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
@@ -24,33 +22,30 @@ export function AuthModal() {
     setIsLoading(true);
 
     try {
-      if (method === 'phone') {
-        // Need a robust standardizing format but basic length check for now
-        if (phone.length < 10) throw new Error("Invalid phone number");
+      if (!email.includes('@')) throw new Error('Invalid email address');
 
-        const { error } = await supabase.auth.signInWithOtp({
-          phone: phone,
-        });
-        if (error) throw error;
-      } else {
-        if (!email.includes('@')) throw new Error("Invalid email");
+      // signInWithOtp with shouldCreateUser:true sends a 6-digit code
+      // (NOT a magic link) as long as "Confirm email" is OFF in Supabase dashboard.
+      // Dashboard path: Authentication → Providers → Email → disable "Confirm email"
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: {
+          shouldCreateUser: true,
+        },
+      });
 
-        const { error } = await supabase.auth.signInWithOtp({
-          email: email,
-        });
-        if (error) throw error;
-      }
+      if (error) throw error;
 
       setStep('verify');
       toast({
-        title: "Code Sent",
-        description: `We've sent a code to your ${method}.`,
+        title: 'Code Sent',
+        description: `Check ${email} for your 6-digit code.`,
       });
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Failed to send code.",
-        variant: "destructive",
+        title: 'Error',
+        description: error.message || 'Failed to send code.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
@@ -62,45 +57,38 @@ export function AuthModal() {
     setIsLoading(true);
 
     try {
-      // @ts-ignore
       const { data: { session }, error } = await supabase.auth.verifyOtp({
-        ...(method === 'phone' ? { phone } : { email }),
-        token: otp,
-        type: method === 'phone' ? 'sms' : 'email',
+        email: email.trim().toLowerCase(),
+        token: otp.trim(),
+        type: 'email',
       });
 
       if (error) throw error;
 
       if (session?.user) {
-        // We call our internal backend endpoint to verify or create user and fetch/create KMS key.
-        // For right now, it will ensure they have a record in `users` table.
+        // Sync user record to our backend — creates the users row + derives wallet address
         const res = await fetch('/api/auth/verify-otp', {
-           method: 'POST',
-           headers: {
-             'Content-Type': 'application/json',
-             'Authorization': `Bearer ${session.access_token}`
-           },
-           body: JSON.stringify({
-             phone: method === 'phone' ? phone : null,
-             email: method === 'email' ? email : null
-           })
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ email }),
         });
 
         if (!res.ok) {
-           console.error("Backend sync failed");
+          console.error('Backend sync failed — user will still be logged in');
         }
       }
 
       setIsOpen(false);
-      setStep('request');
-      setOtp('');
-      window.location.reload(); // Refresh session state quickly
-
+      resetForm();
+      window.location.reload();
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message || "Invalid code.",
-        variant: "destructive",
+        title: 'Invalid Code',
+        description: error.message || 'The code is incorrect or expired. Try again.',
+        variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
@@ -108,16 +96,20 @@ export function AuthModal() {
   };
 
   const resetForm = () => {
-     setStep('request');
-     setOtp('');
-     setIsLoading(false);
-  }
+    setStep('request');
+    setOtp('');
+    setEmail('');
+    setIsLoading(false);
+  };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => {
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
         if (!open) resetForm();
         setIsOpen(open);
-    }}>
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="lg" className="font-semibold px-6">
           Sign In / Sign Up
@@ -125,59 +117,37 @@ export function AuthModal() {
       </DialogTrigger>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>{step === 'request' ? 'Welcome to TruthMarket' : 'Enter Code'}</DialogTitle>
+          <DialogTitle>
+            {step === 'request' ? 'Welcome to TruthMarket' : 'Enter Your Code'}
+          </DialogTitle>
           <DialogDescription>
             {step === 'request'
               ? 'Log in or create an account to start predicting.'
-              : `Enter the code sent to ${method === 'phone' ? phone : email}`}
+              : `We sent a 6-digit code to ${email}`}
           </DialogDescription>
         </DialogHeader>
 
         {step === 'request' ? (
-          <Tabs value={method} onValueChange={(v) => setMethod(v as 'phone' | 'email')} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="phone">Phone</TabsTrigger>
-              <TabsTrigger value="email">Email</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="phone">
-               <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Phone Number</Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      placeholder="+234..."
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? "Sending..." : "Continue with Phone"}
-                  </Button>
-               </form>
-            </TabsContent>
-
-            <TabsContent value="email">
-               <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">Email Address</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? "Sending..." : "Continue with Email"}
-                  </Button>
-               </form>
-            </TabsContent>
-          </Tabs>
+          <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email Address</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? 'Sending...' : 'Continue with Email'}
+            </Button>
+            <p className="text-xs text-center text-muted-foreground">
+              Phone login coming soon via SMS
+            </p>
+          </form>
         ) : (
           <form onSubmit={handleVerifyOtp} className="space-y-4 pt-4">
             <div className="space-y-2">
@@ -185,20 +155,32 @@ export function AuthModal() {
               <Input
                 id="otp"
                 type="text"
+                inputMode="numeric"
                 placeholder="000000"
                 maxLength={6}
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
                 required
+                autoComplete="one-time-code"
                 className="text-center text-2xl tracking-widest h-14"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={isLoading || otp.length < 6}>
-              {isLoading ? "Verifying..." : "Verify Code"}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isLoading || otp.length < 6}
+            >
+              {isLoading ? 'Verifying...' : 'Verify Code'}
             </Button>
             <div className="text-center">
-              <Button type="button" variant="link" size="sm" onClick={resetForm} className="text-muted-foreground">
-                Wrong {method}? Go back
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={resetForm}
+                className="text-muted-foreground"
+              >
+                Wrong email? Go back
               </Button>
             </div>
           </form>
