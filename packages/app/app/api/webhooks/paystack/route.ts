@@ -4,8 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 
 // Service role bypasses RLS — only used server-side, never exposed to client
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://build-dummy.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'build-dummy-key'
 );
 
 // Conversion spread: we credit 98.5% of received amount as tNGN.

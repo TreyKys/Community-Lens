@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://build-dummy.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'build-dummy-key'
 );
 
 // Compute a Merkle root from an array of bet records.
