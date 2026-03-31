@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "npm run test --workspaces"
+    "test": "npm run test --workspaces",
+    "build": "npm run build --workspace=app"
   }
 }

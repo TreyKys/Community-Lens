@@ -1,6 +1,6 @@
 'use client';
 
-import { useAccount, useWriteContract } from 'wagmi';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -9,10 +9,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatUnits } from 'viem';
 import { useState, useEffect, Fragment } from 'react';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI } from '@/lib/constants';
+import { useReadContract, useReadContracts } from 'wagmi';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
 
@@ -39,7 +39,6 @@ export default function AdminPage() {
   const [resolvingMarketId, setResolvingMarketId] = useState<string | null>(null);
   const [winningOptionIndex, setWinningOptionIndex] = useState('');
 
-  const [isCreating, setIsCreating] = useState(false);
   // Add Sub-Markets State
   const [isAddSubMarketsModalOpen, setIsAddSubMarketsModalOpen] = useState(false);
   const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
@@ -62,34 +61,148 @@ export default function AdminPage() {
   const [customSubMarketName, setCustomSubMarketName] = useState('');
   const [customSubMarketOptions, setCustomSubMarketOptions] = useState('');
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [marketsData, setMarketsData] = useState<any[]>([]);
-  const [isMarketsLoading, setIsMarketsLoading] = useState(false);
+  // Read Markets State
+  const { data: nextId } = useReadContract({
+    address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+    abi: TRUTH_MARKET_ABI,
+    functionName: 'nextMarketId',
+  });
 
-  const fetchMarkets = async () => {
-    setIsMarketsLoading(true);
-    const { data } = await supabase.from('markets').select('*').order('created_at', { ascending: false });
-    if (data) {
-      setMarketsData(data);
+  const count = nextId ? Number(nextId) : 0;
+  const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
+
+  const { data: marketsData, isLoading: isMarketsLoading } = useReadContracts({
+    contracts: marketIds.map((id) => ({
+      address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+      abi: TRUTH_MARKET_ABI,
+      functionName: 'markets',
+      args: [id],
+    })),
+  });
+
+  const [liveStatuses, setLiveStatuses] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    async function fetchLiveStatuses() {
+      const { data } = await supabase.from('market_metadata').select('market_id, is_live');
+      if (data) {
+        const statuses: Record<string, boolean> = {};
+        data.forEach(row => {
+          statuses[row.market_id.toString()] = row.is_live;
+        });
+        setLiveStatuses(statuses);
+      }
     }
-    setIsMarketsLoading(false);
+    fetchLiveStatuses();
+  }, [marketsData]);
+
+  const toggleLiveStatus = async (marketId: string, currentStatus: boolean) => {
+      const newStatus = !currentStatus;
+
+      const { error } = await supabase
+        .from('market_metadata')
+        .upsert({ market_id: Number(marketId), is_live: newStatus, updated_at: new Date().toISOString() });
+
+      if (error) {
+          toast({ title: "Database Error", description: error.message, variant: "destructive" });
+      } else {
+          setLiveStatuses(prev => ({...prev, [marketId]: newStatus}));
+          toast({ title: "Status Updated", description: `Market ${marketId} is now ${newStatus ? 'LIVE' : 'OPEN'}` });
+      }
   };
+
+  // Contract Write Hook for Create
+  const {
+    writeContract: createMarket,
+    data: createHash,
+    isPending: isCreatePending
+  } = useWriteContract();
+
+  const {
+      isLoading: isCreateConfirming,
+      isSuccess: isCreateSuccess
+  } = useWaitForTransactionReceipt({ hash: createHash });
+
+  // Contract Write Hook for Create Batch
+  const {
+    writeContract: createMarketBatch,
+    data: createBatchHash,
+    isPending: isCreateBatchPending
+  } = useWriteContract();
+
+  const {
+      isLoading: isCreateBatchConfirming,
+      isSuccess: isCreateBatchSuccess
+  } = useWaitForTransactionReceipt({ hash: createBatchHash });
+
+  // Contract Write Hook for Resolve
+  const {
+    writeContract: resolveMarket,
+    data: resolveHash,
+    isPending: isResolvePending
+  } = useWriteContract();
+
+  const {
+      isLoading: isResolveConfirming,
+      isSuccess: isResolveSuccess
+  } = useWaitForTransactionReceipt({ hash: resolveHash });
 
   useEffect(() => {
     setIsMounted(true);
-    void fetchMarkets();
   }, []);
 
-  // Contract Hooks for V2 Settlement Engine (Tab 2)
-  const { writeContract, isPending: isTxPending } = useWriteContract();
+  // Handle Create Success
+  useEffect(() => {
+    if (isCreateSuccess || isCreateBatchSuccess) {
+        toast({
+            title: isCreateBatchSuccess ? "Markets Created!" : "Market Created!",
+            description: "The new market(s) have been deployed.",
+        });
+        setQuestion('');
+        setOptions('');
+        setDeadline('');
+        setPresets({
+            matchWinner: false,
+            btts: false,
+            overUnder25: false,
+        });
+    }
+  }, [isCreateSuccess, isCreateBatchSuccess, toast]);
 
-  const [manualMerkleMarketId, setManualMerkleMarketId] = useState('');
-  const [manualMerkleRoot, setManualMerkleRoot] = useState('');
-  const [manualTotalPool, setManualTotalPool] = useState('');
+  // Handle Resolve Success
+  useEffect(() => {
+    if (isResolveSuccess) {
+        toast({
+            title: "Market Resolved!",
+            description: `Market ${resolvingMarketId} has been resolved.`,
+        });
+        setResolvingMarketId(null);
+        setWinningOptionIndex('');
+    }
+  }, [isResolveSuccess, resolvingMarketId, toast]);
 
-  const [manualResolveMarketId, setManualResolveMarketId] = useState('');
-  const [manualWinningOutcome, setManualWinningOutcome] = useState('');
-  const [manualDistAmount, setManualDistAmount] = useState('');
+  // Handle Add Sub-Markets Success
+  useEffect(() => {
+      if (isCreateBatchSuccess && isAddSubMarketsModalOpen) {
+          setIsAddSubMarketsModalOpen(false);
+          setSubMarketPresets({
+              btts: false,
+              ou05: false,
+              ou15: false,
+              ou25: false,
+              ou35: false,
+              ou45: false,
+              doubleChance: false,
+              drawNoBet: false,
+              exactGoals: false,
+              halftimeResult: false,
+              bttsFirstHalf: false,
+              firstTeamToScore: false,
+          });
+          setCustomSubMarketName('');
+          setCustomSubMarketOptions('');
+      }
+  }, [isCreateBatchSuccess, isAddSubMarketsModalOpen]);
 
   if (!isMounted) return null;
 
@@ -99,7 +212,7 @@ export default function AdminPage() {
   if (!isAuthorized) { ... }
   */
 
-  const handleCreateSubmit = async () => {
+  const handleCreateSubmit = () => {
      if (!question || !deadline) {
          toast({
              title: "Error",
@@ -154,55 +267,38 @@ export default function AdminPage() {
              durations.push(BigInt(durationSeconds));
          }
 
-         const parentIds = Array(questions.length).fill(0);
+         // For general creation, parentId is 0
+         const parentIds = Array(questions.length).fill(BigInt(0));
 
-         setIsCreating(true);
-         try {
-             const res = await fetch('/api/markets/create', {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ isBatch: true, questions, optionsArr, durations: durations.map(d => Number(d)), parentIds })
-             });
-             if (!res.ok) throw new Error('Failed to create markets');
-             toast({ title: "Success", description: "Markets created in Supabase." });
-             void fetchMarkets();
-             setQuestion('');
-             setOptions('');
-             setDeadline('');
-         } catch (error: unknown) {
-             toast({ title: "Error", description: error instanceof Error ? error.message : 'Unknown error', variant: "destructive" });
-         } finally {
-             setIsCreating(false);
-         }
+         createMarketBatch({
+             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+             abi: TRUTH_MARKET_ABI,
+             functionName: 'createMarketBatch',
+             args: [questions, optionsArr, durations, parentIds],
+             ...SAFE_AMOY_GAS,
+         });
      } else {
          const optionsArray = options.split(',').map(o => o.trim()).filter(o => o.length > 0);
          if (optionsArray.length < 2) {
-             toast({ title: "Error", description: "At least 2 options are required for a Custom Market", variant: "destructive" });
+             toast({
+                 title: "Error",
+                 description: "At least 2 options are required for a Custom Market",
+                 variant: "destructive"
+             });
              return;
          }
 
-         setIsCreating(true);
-         try {
-             const res = await fetch('/api/markets/create', {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ question: formattedQuestion, options: optionsArray, duration: durationSeconds, parentMarketId: 0 })
-             });
-             if (!res.ok) throw new Error('Failed to create market');
-             toast({ title: "Success", description: "Market created in Supabase." });
-             void fetchMarkets();
-             setQuestion('');
-             setOptions('');
-             setDeadline('');
-         } catch (error: unknown) {
-             toast({ title: "Error", description: error instanceof Error ? error.message : 'Unknown error', variant: "destructive" });
-         } finally {
-             setIsCreating(false);
-         }
+         createMarket({
+             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+             abi: TRUTH_MARKET_ABI,
+             functionName: 'createMarket',
+             args: [formattedQuestion, optionsArray, BigInt(durationSeconds), BigInt(0)],
+             ...SAFE_AMOY_GAS,
+         });
      }
   };
 
-  const handleAddSubMarketsSubmit = async () => {
+  const handleAddSubMarketsSubmit = () => {
       if (!selectedParentId || !selectedParentQuestion || !selectedParentDeadline) return;
 
       const durationSeconds = Math.floor(Number(selectedParentDeadline) - (Date.now() / 1000));
@@ -307,50 +403,18 @@ export default function AdminPage() {
           return;
       }
 
-      setIsCreating(true);
-      try {
-          const res = await fetch('/api/markets/create', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ isBatch: true, questions, optionsArr, durations: durations.map(d => Number(d)), parentIds: parentIds.map(p => Number(p)) })
-          });
-          if (!res.ok) throw new Error('Failed to add submarkets');
-          toast({ title: "Success", description: "Sub-markets added to Supabase." });
-          void fetchMarkets();
-          setIsAddSubMarketsModalOpen(false);
-      } catch (error: unknown) {
-          toast({ title: "Error", description: error instanceof Error ? error.message : 'Unknown error', variant: "destructive" });
-      } finally {
-          setIsCreating(false);
-      }
-  };
+      // Dynamic gas estimation to support batching 10+ markets safely
+      const estimatedGasLimit = BigInt(1000000 + (questions.length * 300000));
 
-  const handleCommitBetState = () => {
-    if (!manualMerkleMarketId || !manualMerkleRoot || !manualTotalPool) return;
-    writeContract({
-        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-        abi: TRUTH_MARKET_ABI,
-        functionName: 'commitBetState',
-        args: [manualMerkleMarketId, manualMerkleRoot as `0x${string}`, BigInt(manualTotalPool)],
-    });
-  };
-
-  const handleResolveMarketV2 = () => {
-    if (!manualResolveMarketId || !manualWinningOutcome || !manualDistAmount) return;
-    writeContract({
-        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-        abi: TRUTH_MARKET_ABI,
-        functionName: 'resolveMarket',
-        args: [manualResolveMarketId, manualWinningOutcome, BigInt(manualDistAmount)],
-    });
-  };
-
-  const handleHeartbeat = () => {
-    writeContract({
-        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-        abi: TRUTH_MARKET_ABI,
-        functionName: 'heartbeat',
-    });
+      createMarketBatch({
+          address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+          abi: TRUTH_MARKET_ABI,
+          functionName: 'createMarketBatch',
+          args: [questions, optionsArr, durations, parentIds],
+          gas: estimatedGasLimit,
+          maxFeePerGas: SAFE_AMOY_GAS.maxFeePerGas,
+          maxPriorityFeePerGas: SAFE_AMOY_GAS.maxPriorityFeePerGas,
+      });
   };
 
   const handleResolveSubmit = (marketIdToResolve: string) => {
@@ -363,28 +427,25 @@ export default function AdminPage() {
           return;
       }
 
-      // In Pivot Phase 2.5, Resolution must be handled by the backend CRON or Admin API.
-      // We stub this for now to pass compilation as the smart contract resolveMarket changed signatures.
-      console.log("Resolve:", marketIdToResolve, winningOptionIndex);
+      resolveMarket({
+          address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+          abi: TRUTH_MARKET_ABI,
+          functionName: 'resolveMarket',
+          args: [BigInt(marketIdToResolve), BigInt(winningOptionIndex)],
+          ...SAFE_AMOY_GAS,
+      });
   };
 
   return (
     <div className="container mx-auto p-8 space-y-8">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Admin Dashboard</h1>
         <div className="text-sm text-muted-foreground bg-secondary px-4 py-2 rounded-md">
            Connected: <span className="font-mono text-foreground">{address || 'Not Connected'}</span>
         </div>
       </div>
 
-      <Tabs defaultValue="management" className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-              <TabsTrigger value="management">Tab 1: Market Management</TabsTrigger>
-              <TabsTrigger value="settlement">Tab 2: V2 Settlement Engine</TabsTrigger>
-          </TabsList>
-
-          {/* TAB 1: MARKET MANAGEMENT (SUPABASE REWIRED) */}
-          <TabsContent value="management" className="space-y-8 mt-6">
+      {/* CREATE MARKET FORM */}
       <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>Create New Market</CardTitle>
@@ -465,10 +526,10 @@ export default function AdminPage() {
 
           <Button
             className="w-full"
-            onClick={() => void handleCreateSubmit()}
-            disabled={isCreating}
+            onClick={handleCreateSubmit}
+            disabled={isCreatePending || isCreateConfirming || isCreateBatchPending || isCreateBatchConfirming}
           >
-            {isCreating ? 'Creating...' : 'Create Market'}
+            {isCreatePending || isCreateConfirming || isCreateBatchPending || isCreateBatchConfirming ? 'Creating...' : 'Create Market'}
           </Button>
         </CardContent>
       </Card>
@@ -496,15 +557,10 @@ export default function AdminPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(marketsData || []).map((market) => {
-                  const marketId = market.id;
-                  const question = market.question;
-                  const resolved = market.status === 'resolved';
-                  const voided = false; // Add void logic in future
-                  const totalPool = BigInt(0); // Add aggregate pool logic
-                  const bettingEndsAt = new Date(market.closes_at).getTime() / 1000;
-                  const creator = 'Admin'; // Update schema if needed
-                  const parentMarketId = market.parent_market_id || 0;
+                {(marketsData || []).map((result, index) => {
+                  if (result.status !== 'success' || !result.result) return null;
+                  const marketId = marketIds[index];
+                  const [question, resolved, , voided, totalPool, bettingEndsAt, creator, parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
 
                   const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
                   let status = "Active";
@@ -519,6 +575,7 @@ export default function AdminPage() {
 
                   const source = creator.toLowerCase() === BOT_WALLET_ADDRESS ? "Bot" : "Admin";
                   const isParent = Number(parentMarketId) === 0;
+                  const isLive = liveStatuses[marketId.toString()] || false;
 
                   return (
                     <Fragment key={marketId.toString()}>
@@ -530,10 +587,22 @@ export default function AdminPage() {
                           <TableCell className="max-w-xs truncate" title={question}>{question}</TableCell>
                           <TableCell>{categoryLabel}</TableCell>
                           <TableCell>{formatUnits(totalPool, 18)} tNGN</TableCell>
-                          <TableCell>
-                            <Badge variant={status === "Active" ? "open" : status === "Resolving" ? "secondary" : "outline"}>
-                              {status}
+                          <TableCell className="space-y-1">
+                            <Badge variant={status === "Active" ? (isLive ? "live" : "open") : status === "Resolving" ? "secondary" : status === "Voided" ? "destructive" : "outline"}>
+                              {status === "Active" ? (isLive ? "LIVE" : "OPEN") : status}
                             </Badge>
+                            {status === "Active" && (
+                                <div className="mt-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-[10px] h-6 px-2"
+                                        onClick={() => toggleLiveStatus(marketId.toString(), isLive)}
+                                    >
+                                        Toggle {isLive ? 'OFF' : 'ON'}
+                                    </Button>
+                                </div>
+                            )}
                           </TableCell>
                           <TableCell>
                              <Badge variant={source === "Bot" ? "outline" : "default"}>{source}</Badge>
@@ -546,7 +615,7 @@ export default function AdminPage() {
                                 onClick={() => {
                                     setSelectedParentId(marketId.toString());
                                     setSelectedParentQuestion(question);
-                                    setSelectedParentDeadline(BigInt(Math.floor(bettingEndsAt)));
+                                    setSelectedParentDeadline(bettingEndsAt);
                                     setIsAddSubMarketsModalOpen(true);
                                 }}
                               >
@@ -582,8 +651,9 @@ export default function AdminPage() {
                                         <Button
                                             variant="destructive"
                                             onClick={() => handleResolveSubmit(marketId.toString())}
+                                            disabled={isResolvePending || isResolveConfirming}
                                         >
-                                            Confirm Resolution
+                                            {isResolvePending || isResolveConfirming ? 'Resolving...' : 'Confirm Resolution'}
                                         </Button>
                                     </div>
                                 </TableCell>
@@ -676,71 +746,14 @@ export default function AdminPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddSubMarketsModalOpen(false)}>Cancel</Button>
             <Button
-              onClick={() => void handleAddSubMarketsSubmit()}
-              disabled={isCreating}
+              onClick={handleAddSubMarketsSubmit}
+              disabled={isCreateBatchPending || isCreateBatchConfirming}
             >
-              {isCreating ? 'Adding...' : 'Add Selected Sub-Markets'}
+              {isCreateBatchPending || isCreateBatchConfirming ? 'Adding...' : 'Add Selected Sub-Markets'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-          </TabsContent>
-
-          {/* TAB 2: V2 SETTLEMENT ENGINE */}
-          <TabsContent value="settlement" className="space-y-8 mt-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Heartbeat Escape Hatch */}
-                  <Card className="border-red-500/50 bg-red-500/5">
-                      <CardHeader>
-                          <CardTitle className="text-red-500 flex items-center gap-2">
-                              Escape Hatch Reset (Heartbeat)
-                          </CardTitle>
-                          <DialogDescription className="text-red-400/80">
-                              Must be called every 30 days to prevent users from bypassing the vault.
-                          </DialogDescription>
-                      </CardHeader>
-                      <CardContent>
-                          <Button
-                              variant="destructive"
-                              className="w-full h-16 text-lg font-bold shadow-[0_0_20px_rgba(239,68,68,0.5)] hover:shadow-[0_0_30px_rgba(239,68,68,0.8)] transition-all"
-                              onClick={handleHeartbeat}
-                              disabled={isTxPending}
-                          >
-                              {isTxPending ? 'Sending Pulse...' : 'TRANSMIT HEARTBEAT'}
-                          </Button>
-                      </CardContent>
-                  </Card>
-
-                  {/* Manual Merkle Commit */}
-                  <Card>
-                      <CardHeader>
-                          <CardTitle>Manual Merkle Commit</CardTitle>
-                          <DialogDescription>Fallback for cron failure. Lock bet state on-chain.</DialogDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                          <Input placeholder="Market ID" value={manualMerkleMarketId} onChange={(e) => setManualMerkleMarketId(e.target.value)} />
-                          <Input placeholder="Merkle Root (0x...)" value={manualMerkleRoot} onChange={(e) => setManualMerkleRoot(e.target.value)} />
-                          <Input placeholder="Total Pool (Wei)" value={manualTotalPool} onChange={(e) => setManualTotalPool(e.target.value)} />
-                          <Button className="w-full" onClick={handleCommitBetState} disabled={isTxPending}>Commit State</Button>
-                      </CardContent>
-                  </Card>
-
-                  {/* Manual Market Resolution */}
-                  <Card>
-                      <CardHeader>
-                          <CardTitle>Manual V2 Resolution</CardTitle>
-                          <DialogDescription>Unlock the vault and return funds to Master Wallet.</DialogDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                          <Input placeholder="Market ID" value={manualResolveMarketId} onChange={(e) => setManualResolveMarketId(e.target.value)} />
-                          <Input placeholder="Winning Outcome String" value={manualWinningOutcome} onChange={(e) => setManualWinningOutcome(e.target.value)} />
-                          <Input placeholder="Distribution Amount (Wei)" value={manualDistAmount} onChange={(e) => setManualDistAmount(e.target.value)} />
-                          <Button className="w-full" onClick={handleResolveMarketV2} disabled={isTxPending}>Resolve & Unlock</Button>
-                      </CardContent>
-                  </Card>
-              </div>
-          </TabsContent>
-      </Tabs>
     </div>
   );
 }

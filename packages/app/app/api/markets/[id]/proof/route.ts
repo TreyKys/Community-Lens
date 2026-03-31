@@ -46,7 +46,7 @@ export async function GET(
     // Group bets by user wallet address to get total staked per user
     const userBalances: Record<string, bigint> = {};
     bets.forEach((bet) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       const wallet = (bet as any).users?.wallet_address || '';
       if (!wallet) return;
       const amount = BigInt(Math.floor(bet.staked_amount * 1e18)); // Convert to wei string
