@@ -57,3 +57,5 @@ Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-
  HEAD / 200 in 67ms
  GET / 200 in 52ms
  HEAD / 200 in 57ms
+ ✓ Compiled in 28.7s (11066 modules)
+ ✓ Compiled in 2.5s (5216 modules)
