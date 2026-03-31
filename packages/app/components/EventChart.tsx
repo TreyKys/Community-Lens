@@ -2,65 +2,30 @@
 
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 
-export function EventChart({ marketId }: { marketId: string }) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [chartData, setChartData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+// Mock deterministic data array showing Momentum Volume over time
+// In production, this data would come from the `market_snapshots` Supabase table
+const mockChartData = [
+  { time: '10:00 AM', yesVolume: 400, noVolume: 600 },
+  { time: '11:00 AM', yesVolume: 800, noVolume: 650 },
+  { time: '12:00 PM', yesVolume: 1200, noVolume: 700 },
+  { time: '1:00 PM', yesVolume: 2500, noVolume: 800 },
+  { time: '2:00 PM', yesVolume: 3100, noVolume: 1200 },
+  { time: '3:00 PM', yesVolume: 4800, noVolume: 1500 },
+  { time: '4:00 PM', yesVolume: 5200, noVolume: 1900 },
+];
 
-  useEffect(() => {
-    async function fetchData() {
-      if (!marketId) return;
-      try {
-        const { data } = await supabase
-          .from('market_snapshots')
-          .select('created_at, yes_volume, no_volume')
-          .eq('market_id', marketId)
-          .order('created_at', { ascending: true });
-
-        if (data && data.length > 0) {
-          const formattedData = data.map(row => {
-            const date = new Date(row.created_at);
-            return {
-              time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              yesVolume: row.yes_volume,
-              noVolume: row.no_volume
-            };
-          });
-          setChartData(formattedData);
-        } else {
-          setChartData([]);
-        }
-      } catch (err) {
-        console.error("Failed to fetch chart data:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, [marketId]);
-
+export function EventChart() {
   return (
     <Card className="w-full bg-card/50 backdrop-blur-sm border-muted overflow-hidden">
       <CardHeader className="pb-2">
         <CardTitle className="text-lg font-medium tracking-tight font-sans">Momentum</CardTitle>
-        <CardDescription>Real-time liquidity flow (tNGN).</CardDescription>
+        <CardDescription>Real-time liquidity flow (tNGN) over the last 6 hours.</CardDescription>
       </CardHeader>
       <CardContent className="p-0 sm:p-6 sm:pt-0">
         <div className="h-[250px] w-full mt-4">
-          {loading ? (
-            <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-              Loading Data...
-            </div>
-          ) : chartData.length === 0 ? (
-            <div className="w-full h-full flex items-center justify-center text-muted-foreground border border-dashed border-muted rounded-md bg-muted/20">
-              <span className="font-medium text-sm">Awaiting Market Data</span>
-            </div>
-          ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <AreaChart data={mockChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorYes" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -115,7 +80,6 @@ export function EventChart({ marketId }: { marketId: string }) {
               />
             </AreaChart>
           </ResponsiveContainer>
-          )}
         </div>
       </CardContent>
     </Card>

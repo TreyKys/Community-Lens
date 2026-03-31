@@ -15,27 +15,27 @@ const CATEGORIES = [
     icon: Trophy,
     color: 'text-yellow-500',
     subcategories: [
-      { id: 'football', label: 'Football', subItems: [
-        { label: '[PL] Premier League', id: 'pl' },
-        { label: '[PD] LaLiga', id: 'pd' },
-        { label: '[SA] Serie A', id: 'sa' },
-        { label: '[BL1] Bundesliga', id: 'bl1' },
-        { label: '[FL1] Ligue 1', id: 'fl1' },
-        { label: '[CL] Champions League', id: 'cl' },
-        { label: '[WC] World Cup', id: 'wc' },
-        { label: '[EC] Euros', id: 'ec' },
-        { label: '[DED] Eredivisie', id: 'ded' },
-        { label: '[BSA] Brasileirao', id: 'bsa' },
-        { label: '[PPL] Primeira Liga', id: 'ppl' },
-        { label: '[ELC] Championship', id: 'elc' }
+      { id: 'football', label: '⚽ Football', subItems: [
+        { label: 'Premier League', id: 'pl' },
+        { label: 'LaLiga', id: 'pd' },
+        { label: 'Serie A', id: 'sa' },
+        { label: 'Bundesliga', id: 'bl1' },
+        { label: 'Ligue 1', id: 'fl1' },
+        { label: 'Champions League', id: 'cl' },
+        { label: 'World Cup', id: 'wc' },
+        { label: 'Euros', id: 'ec' },
+        { label: 'Eredivisie', id: 'ded' },
+        { label: 'Brasileirao', id: 'bsa' },
+        { label: 'Primeira Liga', id: 'ppl' },
+        { label: 'Championship', id: 'elc' }
       ] },
-      { id: 'basketball', label: 'Basketball' },
-      { id: 'fight', label: 'Fight Night' },
-      { id: 'motorsport', label: 'Motorsport' },
-      { id: 'esports', label: 'eSports' }
+      { id: 'basketball', label: '🏀 Basketball' },
+      { id: 'fight', label: '🥊 Fight Night' },
+      { id: 'motorsport', label: '🏎️ Motorsport' },
+      { id: 'esports', label: '🎮 eSports' }
     ]
   },
-  { id: 'politics', label: 'Naija Politics', icon: null, color: 'text-green-500' },
+  { id: 'politics', label: '🗳️ Naija Politics', icon: null, color: 'text-green-500' },
   { id: 'crypto', label: 'Crypto', icon: Bitcoin, color: 'text-yellow-600' },
   { id: 'pop', label: 'Pop Culture & Music', icon: Star, color: 'text-pink-500' },
   { id: 'geo', label: 'Geopolitics', icon: Globe, color: 'text-blue-500' },
@@ -60,11 +60,11 @@ export function Sidebar() {
     } else {
       params.delete('subcategory');
     }
-    router.push(`/?${params.toString()}`);
+    router.push(`/markets?${params.toString()}`);
   };
 
   return (
-    <div className="w-64 border-r bg-background h-screen overflow-y-auto p-4 flex flex-col gap-1 md:flex pb-24">
+    <div className="w-64 border-r bg-background min-h-screen p-4 flex flex-col gap-1 md:flex">
       {CATEGORIES.map((category) => {
         const Icon = category.icon;
         const isActive = currentCategory === category.id;
