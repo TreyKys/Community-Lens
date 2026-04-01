@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 const RESOLUTION_RAKE = 0.05; // 5% of the losing (profit) pool
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     }
 
     // 1. Fetch market
-    const { data: market, error: marketError } = await supabaseAdmin
+    const { data: market, error: marketError } = await getSupabaseAdmin()
       .from('markets')
       .select('*')
       .eq('id', marketId)
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     // 2. Fetch all active bets for this market
-    const { data: bets, error: betsError } = await supabaseAdmin
+    const { data: bets, error: betsError } = await getSupabaseAdmin()
       .from('user_bets')
       .select('id, user_id, outcome_index, net_stake_tngn')
       .eq('market_id', marketId)
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
 
     if (!bets || bets.length === 0) {
       // No bets — void the market
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('markets')
         .update({ status: 'voided', resolved_outcome: null })
         .eq('id', marketId);
@@ -69,26 +69,26 @@ export async function POST(request: Request) {
     if (winningPool === 0 || losingPool === 0) {
       // Void and refund all bets
       for (const bet of bets) {
-        const { data: userData } = await supabaseAdmin
+        const { data: userData } = await getSupabaseAdmin()
           .from('users')
           .select('tngn_balance')
           .eq('id', bet.user_id)
           .single();
 
         if (userData) {
-          await supabaseAdmin
+          await getSupabaseAdmin()
             .from('users')
             .update({ tngn_balance: (userData.tngn_balance || 0) + bet.net_stake_tngn })
             .eq('id', bet.user_id);
         }
 
-        await supabaseAdmin
+        await getSupabaseAdmin()
           .from('user_bets')
           .update({ status: 'refunded' })
           .eq('id', bet.id);
       }
 
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('markets')
         .update({ status: 'voided', resolved_outcome: winningOutcomeIndex })
         .eq('id', marketId);
@@ -110,20 +110,20 @@ export async function POST(request: Request) {
       payouts.push({ userId: bet.user_id, payout });
 
       // Credit the user's balance
-      const { data: userData } = await supabaseAdmin
+      const { data: userData } = await getSupabaseAdmin()
         .from('users')
         .select('tngn_balance')
         .eq('id', bet.user_id)
         .single();
 
       if (userData) {
-        await supabaseAdmin
+        await getSupabaseAdmin()
           .from('users')
           .update({ tngn_balance: (userData.tngn_balance || 0) + payout })
           .eq('id', bet.user_id);
       }
 
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('user_bets')
         .update({ status: 'won', payout_tngn: payout })
         .eq('id', bet.id);
@@ -131,14 +131,14 @@ export async function POST(request: Request) {
 
     // 6. Mark losing bets as lost
     for (const bet of losingBets) {
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('user_bets')
         .update({ status: 'lost', payout_tngn: 0 })
         .eq('id', bet.id);
     }
 
     // 7. Log the resolution rake to treasury
-    await supabaseAdmin.from('treasury_log').insert({
+    await getSupabaseAdmin().from('treasury_log').insert({
       type: 'resolution_rake',
       amount_tngn: resolutionRakeAmount,
       market_id: marketId,
@@ -146,7 +146,7 @@ export async function POST(request: Request) {
     });
 
     // 8. Mark market as resolved
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('markets')
       .update({
         status: 'resolved',

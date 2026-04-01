@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 // Fee structure
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error: authError } = await getSupabaseAdmin().auth.getUser(token);
     if (authError || !user) {
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     }
 
     // 1. Fetch user balance (only real tNGN can be withdrawn — not bonus)
-    const { data: userData, error: userError } = await supabaseAdmin
+    const { data: userData, error: userError } = await getSupabaseAdmin()
       .from('users')
       .select('tngn_balance')
       .eq('id', user.id)
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
 
     // 3. Deduct balance immediately (hold it while withdrawal processes)
     const newBalance = (userData.tngn_balance || 0) - amountTNGN;
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('users')
       .update({ tngn_balance: newBalance })
       .eq('id', user.id);
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     const isLargeWithdrawal = amountTNGN >= LARGE_WITHDRAWAL_THRESHOLD;
 
     // 5. Create withdrawal record
-    const { data: withdrawal, error: wdError } = await supabaseAdmin
+    const { data: withdrawal, error: wdError } = await getSupabaseAdmin()
       .from('withdrawals')
       .insert({
         user_id: user.id,
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
 
     if (wdError) {
       // Refund balance if we couldn't create the record
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('users')
         .update({ tngn_balance: userData.tngn_balance })
         .eq('id', user.id);
@@ -148,14 +148,14 @@ export async function POST(request: Request) {
     // });
     // const { data: transfer } = await transferRes.json();
     //
-    // await supabaseAdmin.from('withdrawals').update({
+    // await getSupabaseAdmin().from('withdrawals').update({
     //   status: 'completed',
     //   paystack_transfer_code: transfer.transfer_code,
     // }).eq('id', withdrawal.id);
     // ---------------------------------------------------------------
 
     // For now, mark as queued for manual Paystack processing
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('withdrawals')
       .update({ status: 'queued_for_paystack' })
       .eq('id', withdrawal.id);

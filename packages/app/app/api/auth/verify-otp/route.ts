@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // Use the service role key so we can write to the users table bypassing RLS
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 export async function POST(request: Request) {
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const token = authHeader.replace('Bearer ', '');
 
     // Verify the session token with the admin client
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error: userError } = await getSupabaseAdmin().auth.getUser(token);
     if (userError || !user) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     const { email, phone } = await request.json();
 
     // Check if this user already has a record
-    const { data: existingUser, error: checkError } = await supabaseAdmin
+    const { data: existingUser, error: checkError } = await getSupabaseAdmin()
       .from('users')
       .select('id')
       .eq('id', user.id)
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       // -----------------------------------------------------------------
       const mockWalletAddress = `0xmock_${user.id.replace(/-/g, '').substring(0, 32)}`;
 
-      const { error: insertError } = await supabaseAdmin
+      const { error: insertError } = await getSupabaseAdmin()
         .from('users')
         .insert([{
           id: user.id,

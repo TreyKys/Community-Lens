@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 // This endpoint is called weekly by an Inngest job.
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     }
 
     // Log the heartbeat in Supabase
-    await supabaseAdmin.from('heartbeat_log').insert({
+    await getSupabaseAdmin().from('heartbeat_log').insert({
       fired_at: new Date().toISOString(),
       polygon_tx_hash: null, // Updated once on-chain tx confirms
     });
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     //   const kms = new KMSClient({ region: process.env.AWS_REGION });
     //   // ... sign and send heartbeat() transaction to ESCAPE_HATCH_CONTRACT
     //
-    //   await supabaseAdmin.from('heartbeat_log')
+    //   await getSupabaseAdmin().from('heartbeat_log')
     //     .update({ polygon_tx_hash: txHash })
     //     .eq('fired_at', firedAt);
     // ---------------------------------------------------------------

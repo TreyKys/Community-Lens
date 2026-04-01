@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 // Entry Rake: 1.5% deducted from stake before it enters the pool
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error: authError } = await getSupabaseAdmin().auth.getUser(token);
     if (authError || !user) {
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     }
 
     // 1. Fetch user balance
-    const { data: userData, error: userError } = await supabaseAdmin
+    const { data: userData, error: userError } = await getSupabaseAdmin()
       .from('users')
       .select('tngn_balance, bonus_balance')
       .eq('id', user.id)
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     }
 
     // 3. Fetch market and verify it's still open
-    const { data: market, error: marketError } = await supabaseAdmin
+    const { data: market, error: marketError } = await getSupabaseAdmin()
       .from('markets')
       .select('id, status, closes_at, options')
       .eq('id', marketId)
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     }
 
     // 7. Write bet to database (this is the fast path — no blockchain)
-    const { data: bet, error: betError } = await supabaseAdmin
+    const { data: bet, error: betError } = await getSupabaseAdmin()
       .from('user_bets')
       .insert({
         user_id: user.id,
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
     }
 
     // 8. Update user balance
-    const { error: balanceError } = await supabaseAdmin
+    const { error: balanceError } = await getSupabaseAdmin()
       .from('users')
       .update({
         tngn_balance: newRealBalance,
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
     if (balanceError) {
       console.error('Failed to update balance:', balanceError);
       // Critical: bet was written but balance not deducted — log for manual review
-      await supabaseAdmin.from('error_log').insert({
+      await getSupabaseAdmin().from('error_log').insert({
         type: 'balance_deduction_failed',
         bet_id: bet.id,
         user_id: user.id,
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
     }
 
     // 9. Record the rake in the treasury log
-    await supabaseAdmin.from('treasury_log').insert({
+    await getSupabaseAdmin().from('treasury_log').insert({
       type: 'entry_rake',
       amount_tngn: entryRakeAmount,
       bet_id: bet.id,

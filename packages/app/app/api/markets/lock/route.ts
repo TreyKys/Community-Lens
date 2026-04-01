@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 // Compute a Merkle root from an array of bet records.
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
     }
 
     // 1. Verify market exists and is still open
-    const { data: market, error: marketError } = await supabaseAdmin
+    const { data: market, error: marketError } = await getSupabaseAdmin()
       .from('markets')
       .select('id, status, closes_at')
       .eq('id', marketId)
@@ -71,13 +71,13 @@ export async function POST(request: Request) {
     }
 
     // 2. Lock the market immediately — no more bets accepted
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('markets')
       .update({ status: 'locked' })
       .eq('id', marketId);
 
     // 3. Fetch ALL bets for this market
-    const { data: bets, error: betsError } = await supabaseAdmin
+    const { data: bets, error: betsError } = await getSupabaseAdmin()
       .from('user_bets')
       .select('id, user_id, market_id, outcome_index, net_stake_tngn')
       .eq('market_id', marketId)
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     const merkleRoot = buildMerkleRoot(bets || []);
 
     // 5. Store the commit in Supabase
-    const { error: commitError } = await supabaseAdmin
+    const { error: commitError } = await getSupabaseAdmin()
       .from('merkle_commits')
       .insert({
         market_id: marketId,
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
     }
 
     // 6. Update market with Merkle root
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('markets')
       .update({ merkle_root: merkleRoot })
       .eq('id', marketId);
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
     //     args: [BigInt(marketId), `0x${merkleRoot}`],
     //   });
     //
-    //   await supabaseAdmin.from('merkle_commits')
+    //   await getSupabaseAdmin().from('merkle_commits')
     //     .update({ polygon_tx_hash: txHash })
     //     .eq('market_id', marketId);
     // ---------------------------------------------------------------

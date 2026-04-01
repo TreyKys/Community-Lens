@@ -3,9 +3,9 @@ import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 // Service role bypasses RLS — only used server-side, never exposed to client
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+const getSupabaseAdmin = () => createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://mock.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "mock-key"
 );
 
 // Conversion spread: we credit 98.5% of received amount as tNGN.
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     }
 
     // 2. Idempotency check — prevent double-crediting on webhook replays
-    const { data: existingTx } = await supabaseAdmin
+    const { data: existingTx } = await getSupabaseAdmin()
       .from('paystack_transactions')
       .select('reference')
       .eq('reference', reference)
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     const tNGNToCredit = amountInNGN - spreadAmount; // what user receives
 
     // 3. Mark transaction as pending to prevent race conditions
-    const { error: insertError } = await supabaseAdmin
+    const { error: insertError } = await getSupabaseAdmin()
       .from('paystack_transactions')
       .insert({
         reference,
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
     // NOTE: No blockchain transaction here. Supabase IS the source of truth.
     // The Master Protocol Wallet's on-chain tNGN supply is reconciled separately
     // via the treasury dashboard (Phase 3 admin panel).
-    const { data: userData, error: userError } = await supabaseAdmin
+    const { data: userData, error: userError } = await getSupabaseAdmin()
       .from('users')
       .select('tngn_balance')
       .eq('id', userId)
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     if (userError || !userData) {
       console.error('User not found for deposit:', userId);
       // Mark transaction as failed
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('paystack_transactions')
         .update({ status: 'failed_user_not_found' })
         .eq('reference', reference);
@@ -104,14 +104,14 @@ export async function POST(req: Request) {
 
     const newBalance = (userData.tngn_balance || 0) + tNGNToCredit;
 
-    const { error: updateError } = await supabaseAdmin
+    const { error: updateError } = await getSupabaseAdmin()
       .from('users')
       .update({ tngn_balance: newBalance })
       .eq('id', userId);
 
     if (updateError) {
       console.error('Failed to credit balance:', updateError);
-      await supabaseAdmin
+      await getSupabaseAdmin()
         .from('paystack_transactions')
         .update({ status: 'failed_balance_update' })
         .eq('reference', reference);
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
     }
 
     // 5. Mark transaction as completed
-    await supabaseAdmin
+    await getSupabaseAdmin()
       .from('paystack_transactions')
       .update({ status: 'completed' })
       .eq('reference', reference);
