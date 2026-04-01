@@ -3,22 +3,35 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { Home, Compass, PieChart, User, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { usePrivy } from '@privy-io/react-auth';
-import { useAccount } from 'wagmi';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Sidebar } from '@/components/Sidebar';
+import { AuthModal } from '@/components/AuthModal';
+import { Dialog, DialogTrigger, DialogContent } from '@/components/ui/dialog';
 
 export function BottomTabBar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { login, authenticated } = usePrivy();
-  const { isConnected } = useAccount();
+  const [session, setSession] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleProfileClick = () => {
-    if (authenticated || isConnected) {
+    if (session) {
       router.push('/profile');
-    } else {
-      login();
     }
   };
 
@@ -66,13 +79,19 @@ export function BottomTabBar() {
         <span className="text-[10px] font-medium">Open Bets</span>
       </button>
 
-      <button
-        onClick={handleProfileClick}
-        className={cn("flex flex-col items-center justify-center w-16 h-full gap-1 text-muted-foreground transition-colors", pathname.startsWith('/profile') && "text-foreground")}
-      >
-        <User className="w-5 h-5" />
-        <span className="text-[10px] font-medium">Profile</span>
-      </button>
+      {session ? (
+        <button
+          onClick={handleProfileClick}
+          className={cn("flex flex-col items-center justify-center w-16 h-full gap-1 text-muted-foreground transition-colors", pathname.startsWith('/profile') && "text-foreground")}
+        >
+          <User className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Profile</span>
+        </button>
+      ) : (
+        <div className="flex flex-col items-center justify-center w-16 h-full gap-1 text-muted-foreground transition-colors">
+          <AuthModal />
+        </div>
+      )}
     </div>
   );
 }

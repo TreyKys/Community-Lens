@@ -1,7 +1,5 @@
 'use client';
 
-import { usePrivy } from '@privy-io/react-auth';
-import { useAccount } from 'wagmi';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -11,30 +9,38 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 
 export function OnboardingIntercept() {
-  const { authenticated, user } = usePrivy();
-  const { address } = useAccount();
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [dob, setDob] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [session, setSession] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     async function checkUserRegistration() {
-      // Need both authenticated and a wallet address
-      if (!authenticated || !user || !address) return;
+      if (!session?.user?.id) return;
 
       try {
-        const walletAddress = address.toLowerCase();
-
-        // Check if user already exists in our database
         const { data, error } = await supabase
           .from('users')
           .select('first_name')
-          .eq('walletAddress', walletAddress)
+          .eq('id', session.user.id)
           .single();
 
-        // If user doesn't exist or doesn't have a first name, show the form
         if (error || !data?.first_name) {
           setIsOpen(true);
         }
@@ -44,29 +50,22 @@ export function OnboardingIntercept() {
     }
 
     checkUserRegistration();
-  }, [authenticated, user, address]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firstName || !dob || !address) return;
+    if (!firstName || !dob || !session?.user?.id) return;
 
     setIsSubmitting(true);
     try {
-      const walletAddress = address.toLowerCase();
-      // Check phone OR email based on Privy Auth type.
-      const phone = user?.phone?.number || null;
-      const email = user?.email?.address || null;
-
       const { error } = await supabase
         .from('users')
-        .upsert({
-          walletAddress,
+        .update({
           first_name: firstName,
           dob,
-          phone,
-          email,
-          bonus_balance: 0 // Initialize bonus balance
-        }, { onConflict: 'walletAddress' });
+        })
+        .eq('id', session.user.id);
 
       if (error) throw error;
 

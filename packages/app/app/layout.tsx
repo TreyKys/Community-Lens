@@ -3,11 +3,10 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Navbar } from "@/components/Navbar";
+import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { OnboardingIntercept } from "@/components/OnboardingIntercept";
 import { BottomTabBar } from "@/components/BottomTabBar";
-import { Sidebar } from "@/components/Sidebar";
-import { Suspense } from "react";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -38,16 +37,10 @@ export default function RootLayout({
       >
         <Providers>
           <Navbar />
-          <div className="flex min-h-[calc(100vh-73px)]">
-            <div className="hidden md:block">
-              <Suspense fallback={<div className="w-64 h-screen border-r bg-background"></div>}>
-                <Sidebar />
-              </Suspense>
-            </div>
-            <div className="flex-1 bg-background pb-20 md:pb-0">
-              {children}
-            </div>
-          </div>
+          <main className="min-h-screen">
+            {children}
+          </main>
+          <Footer />
           <BottomTabBar />
           <Toaster />
           <OnboardingIntercept />
