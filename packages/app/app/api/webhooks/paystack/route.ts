@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { createPublicClient, createWalletClient, http, parseUnits } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { polygonAmoy } from 'viem/chains';
-import { TNGN_ADDRESS, TNGN_ABI, SAFE_AMOY_GAS_NO_LIMIT } from '@/lib/constants';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+// Service role bypasses RLS — only used server-side, never exposed to client
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+// Conversion spread: we credit 98.5% of received amount as tNGN.
+// The 1.5% goes to platform treasury. This is invisible to the user.
+const CONVERSION_SPREAD = 0.015;
 
 export async function POST(req: Request) {
   try {
@@ -16,32 +22,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing secret or signature' }, { status: 400 });
     }
 
-    // 1. HMAC SHA512 Verification
+    // 1. Verify Paystack HMAC signature
     const hash = crypto.createHmac('sha512', secret).update(rawBody).digest('hex');
     if (hash !== signature) {
       console.error('Paystack signature verification failed.');
-      return NextResponse.json({ error: 'Unauthorized payload' }, { status: 400 });
+      return NextResponse.json({ error: 'Unauthorized payload' }, { status: 401 });
     }
 
     const payload = JSON.parse(rawBody);
 
     // Only process successful charges
     if (payload.event !== 'charge.success') {
-      return NextResponse.json({ status: 'ignored event' }, { status: 200 });
+      return NextResponse.json({ status: 'ignored' }, { status: 200 });
     }
 
     const { reference, amount, metadata } = payload.data;
 
-    // We assume the user's wallet address was passed in the Paystack checkout metadata
-    const userWalletAddress = metadata?.walletAddress;
-
-    if (!userWalletAddress) {
-      console.error('Missing wallet address in Paystack metadata.');
-      return NextResponse.json({ error: 'Missing wallet metadata' }, { status: 400 });
+    // We expect the Supabase user ID in Paystack metadata
+    const userId = metadata?.userId;
+    if (!userId) {
+      console.error('Missing userId in Paystack metadata.');
+      return NextResponse.json({ error: 'Missing userId in metadata' }, { status: 400 });
     }
 
-    // 2. Idempotency Check (Replay Attack Protection via Supabase)
-    const { data: existingTx } = await supabase
+    // 2. Idempotency check — prevent double-crediting on webhook replays
+    const { data: existingTx } = await supabaseAdmin
       .from('paystack_transactions')
       .select('reference')
       .eq('reference', reference)
@@ -52,124 +57,80 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: 'already processed' }, { status: 200 });
     }
 
-    // Mark as processed immediately to prevent race conditions
-    const { error: insertError } = await supabase
+    // amount from Paystack is in kobo (smallest unit)
+    const amountInNGN = amount / 100;
+
+    // Apply 1.5% conversion spread
+    const spreadAmount = amountInNGN * CONVERSION_SPREAD;
+    const tNGNToCredit = amountInNGN - spreadAmount; // what user receives
+
+    // 3. Mark transaction as pending to prevent race conditions
+    const { error: insertError } = await supabaseAdmin
       .from('paystack_transactions')
       .insert({
-        reference: reference,
-        processed_at: new Date().toISOString(),
-        amount: amount,
-        wallet_address: userWalletAddress,
-        status: 'pending_mint'
+        reference,
+        user_id: userId,
+        amount_ngn: amountInNGN,
+        tngn_credited: tNGNToCredit,
+        spread_captured: spreadAmount,
+        status: 'pending',
+        created_at: new Date().toISOString(),
       });
 
     if (insertError) {
-      console.error('Failed to insert transaction into Supabase:', insertError);
+      console.error('Failed to insert transaction:', insertError);
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
-    // 3. Server-Side Mint Execution
-    // Convert kobo to standard NGN
-    const amountInNGN = amount / 100;
+    // 4. Credit user's tNGN balance in Supabase (atomic increment)
+    // NOTE: No blockchain transaction here. Supabase IS the source of truth.
+    // The Master Protocol Wallet's on-chain tNGN supply is reconciled separately
+    // via the treasury dashboard (Phase 3 admin panel).
+    const { data: userData, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('tngn_balance')
+      .eq('id', userId)
+      .single();
 
-    // Frictional 1% conversion buffer
-    const amountToMintNGN = amountInNGN * 0.99;
-    const bonusAmountNGN = amountInNGN * 0.01;
-
-    // Parse to 18 decimals for the ERC-20 token
-    const amountToMint = parseUnits(amountToMintNGN.toString(), 18);
-
-    if (!process.env.PRIVATE_KEY) {
-      throw new Error('Server PRIVATE_KEY not configured.');
+    if (userError || !userData) {
+      console.error('User not found for deposit:', userId);
+      // Mark transaction as failed
+      await supabaseAdmin
+        .from('paystack_transactions')
+        .update({ status: 'failed_user_not_found' })
+        .eq('reference', reference);
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const account = privateKeyToAccount(`0x${process.env.PRIVATE_KEY.replace('0x', '')}`);
+    const newBalance = (userData.tngn_balance || 0) + tNGNToCredit;
 
-    // Fallback to Alchemy RPC if NEXT_PUBLIC_ALCHEMY_KEY is available
-    const rpcUrl = process.env.NEXT_PUBLIC_ALCHEMY_KEY
-        ? `https://polygon-amoy.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`
-        : 'https://rpc-amoy.polygon.technology/';
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({ tngn_balance: newBalance })
+      .eq('id', userId);
 
-    const publicClient = createPublicClient({
-      chain: polygonAmoy,
-      transport: http(rpcUrl),
-    });
+    if (updateError) {
+      console.error('Failed to credit balance:', updateError);
+      await supabaseAdmin
+        .from('paystack_transactions')
+        .update({ status: 'failed_balance_update' })
+        .eq('reference', reference);
+      return NextResponse.json({ error: 'Failed to credit balance' }, { status: 500 });
+    }
 
-    const walletClient = createWalletClient({
-      account,
-      chain: polygonAmoy,
-      transport: http(rpcUrl),
-    });
-
-    console.log(`Minting ${amountInNGN} tNGN to ${userWalletAddress} (Ref: ${reference})...`);
-
-    const { request } = await publicClient.simulateContract({
-      address: TNGN_ADDRESS,
-      abi: TNGN_ABI,
-      functionName: 'mint',
-      args: [userWalletAddress, amountToMint],
-      account,
-    });
-
-    // Execute Mint with 1.5M Gas Buffer
-    // @ts-expect-error viem typing mismatch with manual gas overrides
-    const txHash = await walletClient.writeContract({
-        ...request,
-        gas: BigInt(1500000), // 1.5M Gas limit to prevent OOG
-        ...SAFE_AMOY_GAS_NO_LIMIT,
-    });
-
-    console.log(`Mint successful! Tx Hash: ${txHash}`);
-
-    // Update status
-    await supabase
+    // 5. Mark transaction as completed
+    await supabaseAdmin
       .from('paystack_transactions')
-      .update({
-        status: 'completed',
-        tx_hash: txHash,
-        frictional_amount: amountToMintNGN,
-        bonus_credited: bonusAmountNGN,
-      })
+      .update({ status: 'completed' })
       .eq('reference', reference);
 
-    // Also track the user's bonus balance explicitly if they have an active user profile
-    try {
-        const normalizedAddress = userWalletAddress.toLowerCase();
-        const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('bonus_balance')
-            .eq('walletAddress', normalizedAddress)
-            .single();
+    console.log(`Deposit complete: user=${userId}, NGN=${amountInNGN}, tNGN credited=${tNGNToCredit}, spread=${spreadAmount}`);
 
-        if (userError && userError.code !== 'PGRST116') {
-             // PGRST116 means no rows returned (which is fine, user doesn't exist)
-             throw userError;
-        }
-
-        if (userData) {
-            const currentBonus = userData.bonus_balance || 0;
-            await supabase
-                .from('users')
-                .update({ bonus_balance: currentBonus + bonusAmountNGN })
-                .eq('walletAddress', normalizedAddress);
-            console.log(`Credited ${bonusAmountNGN} bonus to user ${userWalletAddress} (Supabase)`);
-        } else {
-            // Create user profile if they don't exist yet but received a deposit
-            await supabase
-                .from('users')
-                .insert({
-                    walletAddress: normalizedAddress,
-                    bonus_balance: bonusAmountNGN,
-                    created_at: new Date().toISOString()
-                });
-            console.log(`Created new profile with ${bonusAmountNGN} bonus for user ${userWalletAddress} (Supabase)`);
-        }
-    } catch (e) {
-        console.error('Failed to credit user bonus balance in Supabase:', e);
-        // Not throwing to avoid rolling back the Paystack success
-    }
-
-    return NextResponse.json({ status: 'success', txHash, bonusAdded: bonusAmountNGN }, { status: 200 });
+    return NextResponse.json({
+      status: 'success',
+      tNGNcredited: tNGNToCredit,
+      spreadCaptured: spreadAmount,
+    }, { status: 200 });
 
   } catch (error: unknown) {
     console.error('Paystack webhook error:', error);

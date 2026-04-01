@@ -1,6 +1,8 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useReadContract, useReadContracts, useAccount } from 'wagmi';
+import { useSendCalls, useCallsStatus } from 'wagmi/experimental';
+import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,12 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
-import { formatUnits } from 'viem';
+import { formatUnits, parseUnits } from 'viem';
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { useUser } from '@/components/UserContext';
 
 const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
 
@@ -27,81 +28,86 @@ interface Market {
     parentMarketId: bigint;
 }
 
+const ERC20_APPROVE_ABI = [{
+    inputs: [
+        { name: "spender", type: "address" },
+        { name: "value", type: "uint256" }
+    ],
+    name: "approve",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function"
+}] as const;
+
+const ERC20_BALANCE_ABI = [{
+    inputs: [{ name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+}] as const;
+
 export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: { filterExactMarketId?: bigint, filterChildrenOfParentId?: bigint }) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'all';
-  const tag = searchParams.get('tag');
 
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [isMarketsLoading, setIsMarketsLoading] = useState(true);
+  const { data: nextId } = useReadContract({
+    address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+    abi: TRUTH_MARKET_ABI,
+    functionName: 'nextMarketId',
+  });
 
-  // Hybrid Pivot: Fetch strictly from Supabase Off-Chain `markets` table
-  useEffect(() => {
-      const fetchMarkets = async () => {
-          setIsMarketsLoading(true);
-          const { data, error } = await supabase
-              .from('markets')
-              .select('*')
-              .order('created_at', { ascending: false });
+  const count = nextId ? Number(nextId) : 0;
+  const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
 
-          if (!error && data) {
-              const mapped = data.map(m => ({
-                  marketId: BigInt(m.id),
-                  question: m.question,
-                  resolved: m.status === 'resolved',
-                  voided: false, // Default to false until we implement void logic fully off-chain
-                  totalPool: BigInt(0), // Would need aggregate logic, using default for now
-                  bettingEndsAt: BigInt(Math.floor(new Date(m.closes_at).getTime() / 1000)),
-                  parentMarketId: BigInt(0) // Default 0 for demo
-              }));
-              setMarkets(mapped);
-          }
-          setIsMarketsLoading(false);
-      };
+  const { data: markets, isLoading: isMarketsLoading } = useReadContracts({
+    contracts: marketIds.map((id) => ({
+      address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+      abi: TRUTH_MARKET_ABI,
+      functionName: 'markets',
+      args: [id],
+    })),
+  });
 
-      fetchMarkets();
-  }, []);
-
-  if (isMarketsLoading) {
-      return <div className="p-8 text-center text-muted-foreground animate-pulse">Loading markets...</div>;
+  if (nextId === undefined || (count > 0 && isMarketsLoading)) {
+      return <div className="p-8 text-center">Loading markets...</div>;
   }
 
-  const filteredMarkets = markets.filter((m) => {
-        // Expiry Check
-        const isExpired24h = Number(m.bettingEndsAt) * 1000 + 86400000 < Date.now();
-        if (isExpired24h && !m.resolved) return false;
-        if (isExpired24h) return false;
+  const filteredMarkets = (markets || []).map((result, index) => {
+        const marketId = marketIds[index];
+        if (result.status !== 'success' || !result.result) return null;
+
+        // market: [question, resolved, winningOptionIndex, voided, totalPool, bettingEndsAt, creator, parentMarketId]
+        const [question, resolved, , voided, totalPool, bettingEndsAt, , parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
+
+        // 1. Expiry Check
+        const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
+        if (isExpired24h && !resolved) return null;
+        if (isExpired24h) return null;
 
         if (filterExactMarketId !== undefined) {
              // Specific view: Only show this exact market (used for pinning parent)
-             if (m.marketId !== filterExactMarketId) return false;
+             if (marketId !== filterExactMarketId) return null;
         } else if (filterChildrenOfParentId !== undefined) {
              // Specific view: Only show children of this parent
-             if (m.parentMarketId !== filterChildrenOfParentId) return false;
+             if (parentMarketId !== filterChildrenOfParentId) return null;
         } else {
              // General view: Only show Parent Markets (parentMarketId == 0)
-             if (Number(m.parentMarketId) !== 0) return false;
+             if (Number(parentMarketId) !== 0) return null;
 
-             // Mandatory Tag Filtering (e.g. ?tag=[PL])
-             if (tag && !m.question.includes(tag)) {
-                  return false;
-             }
-
-             // Category Filter (only on general view if no specific tag)
-             if (!tag) {
-                 if (category === 'politics') {
-                      if (!m.question.includes('[POLITICS]') && !m.question.includes('[US]') && !m.question.includes('[NG]')) return false;
-                 } else if (category === 'crypto') {
-                      if (!m.question.includes('[CRYPTO]')) return false;
-                 } else if (category === 'sports') {
-                      const isSports = SPORTS_TAGS.some(t => m.question.includes(t));
-                      if (!isSports) return false;
-                 }
+             // Category Filter (only on general view)
+             if (category === 'politics') {
+                  if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
+             } else if (category === 'crypto') {
+                  if (!question.includes('[CRYPTO]')) return null;
+             } else if (category === 'sports') {
+                  const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
+                  if (!isSports) return null;
              }
         }
 
-        return true;
-  });
+        return { marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId } as Market;
+  }).filter((m): m is Market => m !== null);
 
   return (
     <div className="space-y-4 w-full max-w-2xl">
@@ -139,105 +145,143 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
     hideViewMore?: boolean;
 }) {
     const router = useRouter();
+    const { address } = useAccount();
     const { toast } = useToast();
     const [selectedOption, setSelectedOption] = useState<string>('0');
     const [amount, setAmount] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
 
-    const [options, setOptions] = useState<string[]>(['Yes', 'No']);
+    const { data: optionsData } = useReadContract({
+        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
+        abi: TRUTH_MARKET_ABI,
+        functionName: 'getMarketOptions',
+        args: [marketId],
+    });
+
+    const options = optionsData ? (optionsData as string[]) : [];
+
+    const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
+    const endDate = new Date(Number(bettingEndsAt) * 1000);
+    const isLive = !resolved && !voided && !isExpired;
+
+    const [isPulsingLive, setIsPulsingLive] = useState(false);
 
     useEffect(() => {
-        const fetchOptions = async () => {
-             const { data } = await supabase.from('markets').select('options').eq('id', marketId.toString()).single();
-             if (data && data.options && Array.isArray(data.options)) {
-                  setOptions(data.options);
-             }
-        };
-        fetchOptions();
+        async function checkLiveStatus() {
+            const { data } = await supabase
+                .from('market_metadata')
+                .select('is_live')
+                .eq('market_id', Number(marketId))
+                .single();
+            if (data?.is_live) setIsPulsingLive(true);
+        }
+        checkLiveStatus();
     }, [marketId]);
 
-    const currentTime = Date.now();
-    const endsAtMs = Number(bettingEndsAt) * 1000;
-    const isExpired = endsAtMs < currentTime;
-    const endDate = new Date(endsAtMs);
-
-    // Automation: If currentTime >= deadline and not resolved, it's live.
-    // However, the button freeze (can't bet anymore) must use isExpired, wait, the instruction says:
-    // If currentTime >= deadline && !isResolved, automatically render the pulsing red "Live" badge.
-    // "However, the 'Place Bet' button is hard-disabled and displays 'Market Closed' to prevent execution reverts caused by the contract's deadline requirement."
-    const isLive = endsAtMs <= currentTime && !resolved;
-
-    const canBet = !resolved && !voided && !isExpired;
-
-    // Hybrid Settlement Pivot: Fetch off-chain Supabase balance for default OTP users.
-    const queryClient = useQueryClient();
-    const { user, refreshUser } = useUser();
-
-    // N+1 Fix: Read directly from UserContext
-    const offChainBalance = user?.tngn_balance ?? 0;
-
-    // Hybrid Settlement Pivot: Off-chain mutation via React Query
-    const placeBetMutation = useMutation({
-        mutationFn: async (betData: { userId: string; marketId: string; outcome: string; amount: number }) => {
-            const response = await fetch('/api/bet', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(betData),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to place bet');
-            }
-
-            return response.json();
-        },
-        onError: (err) => {
-            toast({ title: "Prediction Failed", description: err.message, variant: "destructive" });
-        },
-        onSuccess: async () => {
-            toast({ title: "Prediction Locked!", description: "Check your portfolio for the Bet Receipt." });
-            await refreshUser();
-            setAmount('');
-            setIsExpanded(false);
-
-            queryClient.invalidateQueries({ queryKey: ['user_bets'] });
+    // Check Balance
+    const { data: balanceData } = useReadContract({
+        address: TNGN_ADDRESS as `0x${string}`,
+        abi: ERC20_BALANCE_ABI,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+        query: {
+            enabled: !!address,
         }
     });
 
-    const handlePlaceBet = () => {
+    const balance = balanceData ? balanceData : BigInt(0);
+
+    // Check Allowance
+    const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
+        address: TNGN_ADDRESS as `0x${string}`,
+        abi: TNGN_ABI,
+        functionName: 'allowance',
+        args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
+        query: {
+            enabled: !!address,
+        }
+    });
+
+    const allowance = allowanceData ? allowanceData : BigInt(0);
+
+    const getParsedAmount = (val: string) => {
+        try {
+            return parseUnits(val, 18);
+        } catch {
+            return BigInt(0);
+        }
+    };
+
+    // ERC-4337 Batching for Smart Wallets
+    const { sendCalls, data: callsIdData, isPending: isBatchPending } = useSendCalls({
+        mutation: {
+            onError: (error) => {
+                toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
+            }
+        }
+    });
+
+    // wagmi v2 sends back an object with an id string
+    const _callsId: string = typeof callsIdData === 'string' ? callsIdData : ((callsIdData as unknown) as { id?: string })?.id || "";
+
+    const { data: callsStatus } = useCallsStatus({ id: _callsId, query: { enabled: !!_callsId } });
+
+    useEffect(() => {
+        if (callsStatus?.status === 'success') {
+            toast({ title: "Prediction Locked!", description: "Check your profile for the Bet Receipt." });
+            setAmount('');
+            setIsExpanded(false);
+            refetchAllowance();
+        }
+    }, [callsStatus?.status, toast, refetchAllowance]);
+
+    const handlePlaceBatchedBet = () => {
          if (!amount || Number(amount) <= 0) {
             toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
             return;
         }
 
-        const numericAmount = Number(amount);
-
-        if (!user || !user.id) {
-            toast({ title: "Sign in required", description: "Please sign in to place a prediction.", variant: "destructive" });
-            return;
-        }
-
-        if (numericAmount > offChainBalance) {
+        const betAmount = getParsedAmount(amount);
+        if (betAmount > balance) {
             toast({
                 title: "Insufficient Balance",
-                description: `You have ₦${offChainBalance.toLocaleString()}. Deposit Naira to continue.`,
+                description: `You have ₦${Number(formatUnits(balance, 18)).toLocaleString()}. Use the Wallet to Deposit Naira.`,
                 variant: "destructive"
             });
             return;
         }
 
-        const outcomeStr = options[Number(selectedOption)] || 'Unknown';
+        const needsApproval = allowance < betAmount;
 
-        placeBetMutation.mutate({
-            userId: user.id,
-            marketId: marketId.toString(),
-            outcome: outcomeStr,
-            amount: numericAmount,
+        const calls = [];
+
+        if (needsApproval) {
+            calls.push({
+                to: TNGN_ADDRESS as `0x${string}`,
+                abi: ERC20_APPROVE_ABI,
+                functionName: 'approve',
+                args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount]
+            });
+        }
+
+        calls.push({
+            to: TRUTH_MARKET_ADDRESS as `0x${string}`,
+            abi: TRUTH_MARKET_ABI,
+            functionName: 'placeBet',
+            args: [marketId, BigInt(selectedOption), betAmount]
+        });
+
+        sendCalls({
+            calls,
+            capabilities: {
+                paymasterService: {
+                    url: '/api/paymaster'
+                }
+            }
         });
     };
 
-    const isBettingLoading = placeBetMutation.isPending;
+    const isBettingLoading = isBatchPending || callsStatus?.status === 'pending';
 
     const bettingInterface = (
         <div className="mt-4 pt-4 border-t border-muted/50 space-y-4 animate-in fade-in slide-in-from-top-2 relative z-10">
@@ -273,17 +317,17 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                       placeholder="Amount (₦)"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      disabled={!canBet}
+                      disabled={!isLive}
                       className="pl-8 bg-transparent"
                     />
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
                 </div>
 
-                {!canBet ? (
+                {!isLive ? (
                     <Button disabled className="w-full">Market Closed</Button>
                 ) : (
                     <Button
-                      onClick={handlePlaceBet}
+                      onClick={handlePlaceBatchedBet}
                       disabled={isBettingLoading || !amount}
                       className="w-full bg-foreground text-background hover:bg-foreground/90 transition-all font-semibold relative overflow-hidden"
                     >
@@ -296,9 +340,9 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                     </Button>
                 )}
             </div>
-            {user && (
+            {address && (
                 <div className="text-xs text-right text-muted-foreground">
-                    Balance: ₦{offChainBalance.toLocaleString()}
+                    Balance: ₦{Number(formatUnits(balance, 18)).toLocaleString()}
                 </div>
             )}
         </div>
@@ -332,8 +376,8 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
             <CardHeader className="pb-2 relative z-10">
               <div className="flex justify-between items-start">
                 <CardTitle className="text-lg font-medium tracking-tight text-foreground">{formattedQuestion}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isLive ? "live" : isExpired ? "destructive" : "open"}>
-                  {resolved ? "RESOLVED" : isLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
+                <Badge variant={resolved ? "secondary" : isPulsingLive ? "live" : isExpired ? "destructive" : "open"}>
+                  {resolved ? "RESOLVED" : isPulsingLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
                 </Badge>
               </div>
             </CardHeader>
@@ -372,7 +416,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                             e.stopPropagation();
                             setIsExpanded(true);
                         }}>
-                                {canBet ? "Lock Prediction" : "View Options"}
+                                {isLive ? "Place Bet" : "View Options"}
                         </Button>
                     )}
                 </div>
@@ -381,7 +425,7 @@ export function MarketCard({ marketId, question, resolved, voided, totalPool, be
                     <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
                         <DrawerTrigger asChild>
                             <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
-                                    {canBet ? "Tap to Lock Prediction" : "View Options"}
+                                    {isLive ? "Tap to Place Bet" : "View Options"}
                             </Button>
                         </DrawerTrigger>
                         <DrawerContent>

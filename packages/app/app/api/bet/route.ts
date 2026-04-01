@@ -1,38 +1,60 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy-for-build.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy_key';
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-export async function POST(req: NextRequest) {
+// Entry Rake: 1.5% deducted from stake before it enters the pool
+const ENTRY_RAKE = 0.015;
+
+export async function POST(request: Request) {
   try {
-    const { userId, marketId, outcome, amount } = await req.json();
-
-    if (!userId || !marketId || !outcome || amount <= 0) {
-      return NextResponse.json({ error: 'Missing required parameters or invalid amount' }, { status: 400 });
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+    }
 
-    // 1. Read user balance
-    const { data: user, error: userError } = await supabase
+    const { marketId, outcomeIndex, stakeAmount } = await request.json();
+
+    // Validate inputs
+    if (!marketId || outcomeIndex === undefined || !stakeAmount) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (stakeAmount < 100) {
+      return NextResponse.json({ error: 'Minimum stake is ₦100 (100 tNGN)' }, { status: 400 });
+    }
+
+    // 1. Fetch user balance
+    const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('id, tngn_balance, is_custodial')
-      .eq('id', userId)
+      .select('tngn_balance, bonus_balance')
+      .eq('id', user.id)
       .single();
 
-    if (userError || !user) {
+    if (userError || !userData) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    if (user.tngn_balance < amount) {
-      return NextResponse.json({ error: 'Insufficient tNGN balance' }, { status: 400 });
+    // 2. Check if user has sufficient balance
+    // Use real balance first, then bonus balance
+    const totalAvailable = (userData.tngn_balance || 0) + (userData.bonus_balance || 0);
+    if (totalAvailable < stakeAmount) {
+      return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
     }
 
-    // 2. Fetch the market to verify it's open
-    const { data: market, error: marketError } = await supabase
+    // 3. Fetch market and verify it's still open
+    const { data: market, error: marketError } = await supabaseAdmin
       .from('markets')
-      .select('id, status, closes_at')
+      .select('id, status, closes_at, options')
       .eq('id', marketId)
       .single();
 
@@ -40,60 +62,104 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Market not found' }, { status: 404 });
     }
 
-    if (market.status !== 'open' || new Date(market.closes_at) <= new Date()) {
-      return NextResponse.json({ error: 'Market is closed' }, { status: 400 });
+    if (market.status !== 'open') {
+      return NextResponse.json({ error: 'Market is not open for betting' }, { status: 400 });
     }
 
-    // 3. Begin transaction-like sequence (Supabase REST lacks standard transactions, so we update cautiously)
-    const newBalance = user.tngn_balance - amount;
-
-    // Deduct balance
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ tngn_balance: newBalance })
-      .eq('id', userId)
-      .eq('tngn_balance', user.tngn_balance); // Optimistic locking
-
-    if (updateError) {
-      return NextResponse.json({ error: 'Failed to update balance. Try again.' }, { status: 500 });
+    if (new Date(market.closes_at) < new Date()) {
+      return NextResponse.json({ error: 'Market betting period has ended' }, { status: 400 });
     }
 
-    // Write bet
-    const { data: bet, error: betError } = await supabase
+    // 4. Calculate rake
+    const entryRakeAmount = stakeAmount * ENTRY_RAKE;
+    const netStake = stakeAmount - entryRakeAmount;
+
+    // 5. Determine if this qualifies for the jackpot
+    // We check after the bet is placed — jackpot eligibility is tracked per slip
+    // For now we record it and the jackpot engine evaluates at market lock
+    const isJackpotEligible = stakeAmount >= 500;
+
+    // 6. Deduct from balance (use real balance first, then bonus)
+    let newRealBalance = userData.tngn_balance || 0;
+    let newBonusBalance = userData.bonus_balance || 0;
+
+    if (newRealBalance >= stakeAmount) {
+      newRealBalance -= stakeAmount;
+    } else {
+      // Spend real balance first, then bonus
+      const remainingAfterReal = stakeAmount - newRealBalance;
+      newRealBalance = 0;
+      newBonusBalance -= remainingAfterReal;
+    }
+
+    // 7. Write bet to database (this is the fast path — no blockchain)
+    const { data: bet, error: betError } = await supabaseAdmin
       .from('user_bets')
       .insert({
-        user_id: userId,
+        user_id: user.id,
         market_id: marketId,
-        outcome,
-        staked_amount: amount,
-        status: 'pending'
+        outcome_index: outcomeIndex,
+        stake_tngn: stakeAmount,
+        net_stake_tngn: netStake,
+        entry_rake_tngn: entryRakeAmount,
+        is_jackpot_eligible: isJackpotEligible,
+        placed_at: new Date().toISOString(),
+        status: 'active',
       })
-      .select()
+      .select('id')
       .single();
 
     if (betError) {
-      // Rollback balance if bet insertion failed
-      await supabase
-        .from('users')
-        .update({ tngn_balance: user.tngn_balance })
-        .eq('id', userId);
-
-      return NextResponse.json({ error: 'Failed to record bet' }, { status: 500 });
+      console.error('Failed to write bet:', betError);
+      return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
     }
 
-    // Log transaction
-    await supabase.from('transactions').insert({
-        user_id: userId,
-        type: 'bet_placed',
-        amount: amount,
-        currency: 'tNGN',
-        status: 'completed'
+    // 8. Update user balance
+    const { error: balanceError } = await supabaseAdmin
+      .from('users')
+      .update({
+        tngn_balance: newRealBalance,
+        bonus_balance: Math.max(0, newBonusBalance),
+      })
+      .eq('id', user.id);
+
+    if (balanceError) {
+      console.error('Failed to update balance:', balanceError);
+      // Critical: bet was written but balance not deducted — log for manual review
+      await supabaseAdmin.from('error_log').insert({
+        type: 'balance_deduction_failed',
+        bet_id: bet.id,
+        user_id: user.id,
+        amount: stakeAmount,
+        created_at: new Date().toISOString(),
+      });
+      return NextResponse.json({ error: 'Balance update failed' }, { status: 500 });
+    }
+
+    // 9. Record the rake in the treasury log
+    await supabaseAdmin.from('treasury_log').insert({
+      type: 'entry_rake',
+      amount_tngn: entryRakeAmount,
+      bet_id: bet.id,
+      user_id: user.id,
+      market_id: marketId,
+      created_at: new Date().toISOString(),
     });
 
-    return NextResponse.json({ success: true, bet, newBalance }, { status: 200 });
+    console.log(`Bet placed: user=${user.id}, market=${marketId}, stake=${stakeAmount}, netStake=${netStake}, rake=${entryRakeAmount}`);
 
-  } catch (error: unknown) {
-    console.error('Error placing bet:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      betId: bet.id,
+      stakeAmount,
+      netStake,
+      entryRake: entryRakeAmount,
+      isJackpotEligible,
+      newBalance: newRealBalance,
+    }, { status: 200 });
+
+  } catch (error: any) {
+    console.error('Bet placement error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

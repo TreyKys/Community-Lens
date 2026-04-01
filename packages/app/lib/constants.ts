@@ -9,6 +9,11 @@ export const TRUTH_MARKET_ABI = [
         "internalType": "address",
         "name": "_bettingToken",
         "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "_feeTreasury",
+        "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
@@ -37,22 +42,45 @@ export const TRUTH_MARKET_ABI = [
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "ReentrancyGuardReentrantCall",
+    "type": "error"
+  },
+  {
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
-        "internalType": "string",
+        "indexed": true,
+        "internalType": "uint256",
         "name": "marketId",
-        "type": "string"
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
       },
       {
         "indexed": false,
-        "internalType": "bytes32",
-        "name": "merkleRoot",
-        "type": "bytes32"
+        "internalType": "uint256",
+        "name": "optionIndex",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "wager",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "netStake",
+        "type": "uint256"
       }
     ],
-    "name": "BetStateCommitted",
+    "name": "BetPlaced",
     "type": "event"
   },
   {
@@ -61,58 +89,76 @@ export const TRUTH_MARKET_ABI = [
       {
         "indexed": false,
         "internalType": "address",
-        "name": "user",
+        "name": "oldTreasury",
         "type": "address"
       },
       {
         "indexed": false,
-        "internalType": "string",
-        "name": "marketId",
-        "type": "string"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
+        "internalType": "address",
+        "name": "newTreasury",
+        "type": "address"
       }
     ],
-    "name": "EmergencyWithdraw",
+    "name": "FeeTreasuryUpdated",
     "type": "event"
   },
   {
     "anonymous": false,
     "inputs": [
       {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "marketId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "question",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string[]",
+        "name": "options",
+        "type": "string[]"
+      },
+      {
         "indexed": false,
         "internalType": "uint256",
-        "name": "timestamp",
+        "name": "bettingEndsAt",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "parentMarketId",
         "type": "uint256"
       }
     ],
-    "name": "Heartbeat",
+    "name": "MarketCreated",
     "type": "event"
   },
   {
     "anonymous": false,
     "inputs": [
       {
-        "indexed": false,
-        "internalType": "string",
+        "indexed": true,
+        "internalType": "uint256",
         "name": "marketId",
-        "type": "string"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "winningOutcome",
-        "type": "string"
+        "type": "uint256"
       },
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "payoutToMasterWallet",
+        "name": "winningOptionIndex",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "voided",
+        "type": "bool"
       }
     ],
     "name": "MarketResolved",
@@ -138,6 +184,31 @@ export const TRUTH_MARKET_ABI = [
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "marketId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "WinningsClaimed",
+    "type": "event"
+  },
+  {
     "inputs": [],
     "name": "bettingToken",
     "outputs": [
@@ -153,22 +224,12 @@ export const TRUTH_MARKET_ABI = [
   {
     "inputs": [
       {
-        "internalType": "string",
-        "name": "marketId",
-        "type": "string"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "merkleRoot",
-        "type": "bytes32"
-      },
-      {
         "internalType": "uint256",
-        "name": "totalPool",
+        "name": "marketId",
         "type": "uint256"
       }
     ],
-    "name": "commitBetState",
+    "name": "claim",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -177,39 +238,104 @@ export const TRUTH_MARKET_ABI = [
     "inputs": [
       {
         "internalType": "string",
-        "name": "marketId",
+        "name": "question",
         "type": "string"
       },
       {
+        "internalType": "string[]",
+        "name": "options",
+        "type": "string[]"
+      },
+      {
         "internalType": "uint256",
-        "name": "userBalance",
+        "name": "duration",
         "type": "uint256"
       },
       {
-        "internalType": "bytes32[]",
-        "name": "proof",
-        "type": "bytes32[]"
+        "internalType": "uint256",
+        "name": "parentMarketId",
+        "type": "uint256"
       }
     ],
-    "name": "emergencyWithdraw",
+    "name": "createMarket",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
   },
   {
     "inputs": [
+      {
+        "internalType": "string[]",
+        "name": "questions",
+        "type": "string[]"
+      },
+      {
+        "internalType": "string[][]",
+        "name": "options",
+        "type": "string[][]"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "durations",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "parentMarketIds",
+        "type": "uint256[]"
+      }
+    ],
+    "name": "createMarketBatch",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "feeTreasury",
+    "outputs": [
       {
         "internalType": "address",
         "name": "",
         "type": "address"
-      },
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
       }
     ],
-    "name": "hasClaimedEmergency",
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "marketId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getMarketOptions",
+    "outputs": [
+      {
+        "internalType": "string[]",
+        "name": "",
+        "type": "string[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "hasClaimed",
     "outputs": [
       {
         "internalType": "bool",
@@ -221,15 +347,19 @@ export const TRUTH_MARKET_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "heartbeat",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "lastHeartbeat",
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "marketOptionPools",
     "outputs": [
       {
         "internalType": "uint256",
@@ -243,26 +373,83 @@ export const TRUTH_MARKET_ABI = [
   {
     "inputs": [
       {
-        "internalType": "string",
+        "internalType": "uint256",
         "name": "",
-        "type": "string"
+        "type": "uint256"
       }
     ],
-    "name": "marketCommits",
+    "name": "marketPayoutPools",
     "outputs": [
       {
-        "internalType": "bytes32",
-        "name": "merkleRoot",
-        "type": "bytes32"
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "markets",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "question",
+        "type": "string"
       },
       {
         "internalType": "bool",
-        "name": "isResolved",
+        "name": "resolved",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "winningOptionIndex",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "voided",
         "type": "bool"
       },
       {
         "internalType": "uint256",
         "name": "totalPool",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "bettingEndsAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "creator",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "parentMarketId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "nextMarketId",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
         "type": "uint256"
       }
     ],
@@ -283,6 +470,29 @@ export const TRUTH_MARKET_ABI = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "marketId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "optionIndex",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "placeBet",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "renounceOwnership",
     "outputs": [],
@@ -292,22 +502,30 @@ export const TRUTH_MARKET_ABI = [
   {
     "inputs": [
       {
-        "internalType": "string",
+        "internalType": "uint256",
         "name": "marketId",
-        "type": "string"
-      },
-      {
-        "internalType": "string",
-        "name": "winningOutcome",
-        "type": "string"
+        "type": "uint256"
       },
       {
         "internalType": "uint256",
-        "name": "distributionAmount",
+        "name": "winningOptionIndex",
         "type": "uint256"
       }
     ],
     "name": "resolveMarket",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newTreasury",
+        "type": "address"
+      }
+    ],
+    "name": "setFeeTreasury",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -323,6 +541,35 @@ export const TRUTH_MARKET_ABI = [
     "name": "transferOwnership",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "userStakes",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   }
 ] as const;

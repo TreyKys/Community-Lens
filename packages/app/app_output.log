@@ -4,34 +4,47 @@
 
   ▲ Next.js 14.2.35
   - Local:        http://localhost:3000
+  - Environments: .env.local
 
  ✓ Starting...
-Attention: Next.js now collects completely anonymous telemetry regarding usage.
-This information is used to shape Next.js' roadmap and prioritize features.
-You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
-https://nextjs.org/telemetry
-
- ✓ Ready in 1974ms
+ ✓ Ready in 1897ms
  ○ Compiling / ...
- ✓ Compiled / in 95s (20272 modules)
- ✓ Compiled in 4.4s (9808 modules)
- GET / 200 in 937ms
- GET / 200 in 156ms
- ○ Compiling /profile ...
- ✓ Compiled /profile in 12.6s (20246 modules)
- GET /profile 200 in 13675ms
- ○ Compiling /portfolio ...
- ✓ Compiled /portfolio in 3.6s (20252 modules)
- GET /portfolio 200 in 4315ms
- ✓ Compiled in 76s (20262 modules)
- ✓ Compiled in 48.5s (20262 modules)
- GET / 200 in 3335ms
- GET / 200 in 92ms
- ○ Compiling /profile ...
- ✓ Compiled /profile in 5.9s (10454 modules)
- GET /profile 200 in 6755ms
- GET /portfolio 200 in 45ms
- ✓ Compiled in 27.9s (20262 modules)
- ✓ Compiled in 11.8s (20262 modules)
- ✓ Compiled in 2.5s (9812 modules)
- ✓ Compiled in 35s (20262 modules)
+ ✓ Compiled / in 48.8s (11092 modules)
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+ GET / 200 in 51412ms
+[Reown Config] Failed to fetch remote project configuration. Using local/default values. Error: HTTP status code: 403
+    at fetchData (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:9:21)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async FetchUtil.get (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:24:26)
+    at async Object.fetchProjectConfig (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/controllers/ApiController.js:118:26)
+    at async Object.fetchRemoteFeatures (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/utils/ConfigUtil.js:186:32)
+    at async AppKit.initialize (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/client/appkit-base-client.js:237:31) {
+  [cause]: Response {
+    status: 403,
+    statusText: 'Forbidden',
+    headers: Headers {
+      date: 'Wed, 01 Apr 2026 11:37:37 GMT',
+      'content-type': 'text/plain; charset=UTF-8',
+      'content-length': '9',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=300, s-maxage=300',
+      server: 'cloudflare',
+      'cf-ray': '9e574d87dccbcc1a-ORD',
+      'alt-svc': 'h3=":443"; ma=86400'
+    },
+    body: ReadableStream { locked: false, state: 'readable', supportsBYOB: true },
+    bodyUsed: false,
+    ok: false,
+    redirected: false,
+    type: 'default',
+    url: 'https://api.web3modal.org/appkit/v1/config?projectId=your-walletconnect-project-id&st=appkit&sv=html-core-1.7.8'
+  }
+}
+ ✓ Compiled in 3.7s (5216 modules)
+ GET / 200 in 159ms
+ HEAD / 200 in 57ms
+ GET / 200 in 56ms
+ HEAD / 200 in 47ms
+ GET / 200 in 46ms
+ HEAD / 200 in 58ms
