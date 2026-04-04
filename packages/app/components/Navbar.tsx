@@ -4,39 +4,28 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { WalletModal } from '@/components/WalletModal';
 import { AuthModal } from '@/components/AuthModal';
+import { NotificationBell } from '@/components/NotificationBell';
 import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export function Navbar() {
   const [session, setSession] = useState<any>(null);
   const [bonusBalance, setBonusBalance] = useState<number>(0);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!session?.user?.id) return;
-
-    const fetchBonusBalance = async () => {
-      const { data } = await supabase
-        .from('users')
-        // Column is now bonus_balance (not walletAddress-based lookup)
-        .select('bonus_balance')
-        .eq('id', session.user.id)
-        .single();
-
-      if (data?.bonus_balance) setBonusBalance(data.bonus_balance);
-    };
-
-    fetchBonusBalance();
+    supabase
+      .from('users')
+      .select('bonus_balance')
+      .eq('id', session.user.id)
+      .single()
+      .then(({ data }) => { if (data?.bonus_balance) setBonusBalance(data.bonus_balance); });
   }, [session]);
 
   const handleSignOut = async () => {
@@ -45,16 +34,15 @@ export function Navbar() {
   };
 
   return (
-    <nav className="flex items-center justify-between p-4 border-b">
-      <div className="text-xl font-bold flex items-center gap-4">
-        <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-white to-zinc-500 text-black font-extrabold rounded-md shadow-lg shadow-white/10 tracking-tighter">
+    <nav className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur-sm sticky top-0 z-40">
+      <Link href="/" className="text-xl font-bold flex items-center gap-3 hover:opacity-80 transition-opacity">
+        <div className="flex items-center justify-center w-9 h-9 bg-gradient-to-br from-white to-zinc-500 text-black font-extrabold rounded-md shadow-lg shadow-white/10 tracking-tighter text-sm">
           T/M
         </div>
-        <span className="hidden md:inline">TruthMarket</span>
-      </div>
+        <span className="hidden md:inline tracking-tight">TruthMarket</span>
+      </Link>
 
-      <div className="flex items-center gap-4">
-        {/* Bonus balance badge — only shown when user has a bonus credit */}
+      <div className="flex items-center gap-2">
         {session && bonusBalance > 0 && (
           <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 rounded-full text-amber-500 text-sm font-medium">
             <span className="relative flex h-2 w-2">
@@ -65,11 +53,11 @@ export function Navbar() {
           </div>
         )}
 
-        {/* Cashier button — only shown when logged in */}
+        {session && <NotificationBell />}
         {session && <WalletModal />}
 
         {session ? (
-          <Button onClick={handleSignOut} variant="outline">
+          <Button onClick={handleSignOut} variant="outline" size="sm">
             Sign Out
           </Button>
         ) : (

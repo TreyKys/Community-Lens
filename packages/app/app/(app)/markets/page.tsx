@@ -1,23 +1,24 @@
-'use client';
-
-import { Suspense } from 'react';
-import { MarketList } from '@/components/MarketList';
+import { MarketList } from "@/components/MarketList";
+import { JackpotBanner } from "@/components/JackpotBanner";
+import { Suspense } from "react";
 
 export default function MarketsPage() {
   return (
-    <div className="container mx-auto p-8 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 items-center sm:items-start w-full">
-        <h1 className="text-4xl font-bold mb-8 text-center sm:text-left w-full">
-            Active Markets
-            <span className="block text-muted-foreground text-lg font-light mt-1">Bet on your favorite outcomes.</span>
-        </h1>
-
-        <div className="w-full">
-            <Suspense fallback={<div className="p-8 text-center">Loading markets...</div>}>
-                <MarketList />
-            </Suspense>
-        </div>
-      </main>
+    <div className="flex flex-col min-h-screen pb-20 md:pb-0">
+      <Suspense fallback={null}>
+        <JackpotBanner />
+      </Suspense>
+      <div className="flex-1 p-4 md:p-6">
+        <Suspense fallback={
+          <div className="space-y-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-36 bg-muted/30 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        }>
+          <MarketList />
+        </Suspense>
+      </div>
     </div>
   );
 }

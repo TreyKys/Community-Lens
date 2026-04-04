@@ -1,8 +1,7 @@
 'use client';
 
-import { useReadContract, useReadContracts, useAccount } from 'wagmi';
-import { useSendCalls, useCallsStatus } from 'wagmi/experimental';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, TNGN_ADDRESS, TNGN_ABI } from '@/lib/constants';
+import { useEffect, useState, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,452 +9,542 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
-import { formatUnits, parseUnits } from 'viem';
-import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-
-const SPORTS_TAGS = ['[PL]', '[PD]', '[SA]', '[BL1]', '[FL1]', '[CL]', '[WC]', '[EC]', '[DED]', '[BSA]', '[PPL]', '[ELC]', '[NBA]'];
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface Market {
-    marketId: bigint;
-    question: string;
-    resolved: boolean;
-    voided: boolean;
-    totalPool: bigint;
-    bettingEndsAt: bigint;
-    parentMarketId: bigint;
+  id: number;
+  title: string;
+  question: string;
+  category: string;
+  options: string[];
+  status: 'open' | 'locked' | 'resolved' | 'voided';
+  closes_at: string;
+  total_pool: number;
+  resolved_outcome: number | null;
+  parent_market_id: number | null;
+  on_chain_market_id: number | null;
+  merkle_root: string | null;
 }
 
-const ERC20_APPROVE_ABI = [{
-    inputs: [
-        { name: "spender", type: "address" },
-        { name: "value", type: "uint256" }
-    ],
-    name: "approve",
-    outputs: [{ name: "", type: "bool" }],
-    stateMutability: "nonpayable",
-    type: "function"
-}] as const;
+interface MarketCardProps {
+  market: Market;
+  session: any;
+  onBetPlaced: (marketId: number) => void;
+  hideViewMore?: boolean;
+}
 
-const ERC20_BALANCE_ABI = [{
-    inputs: [{ name: "account", type: "address" }],
-    name: "balanceOf",
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-    type: "function"
-}] as const;
-
-export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: { filterExactMarketId?: bigint, filterChildrenOfParentId?: bigint }) {
-  const searchParams = useSearchParams();
-  const category = searchParams.get('category') || 'all';
-
-  const { data: nextId } = useReadContract({
-    address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-    abi: TRUTH_MARKET_ABI,
-    functionName: 'nextMarketId',
-  });
-
-  const count = nextId ? Number(nextId) : 0;
-  const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
-
-  const { data: markets, isLoading: isMarketsLoading } = useReadContracts({
-    contracts: marketIds.map((id) => ({
-      address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-      abi: TRUTH_MARKET_ABI,
-      functionName: 'markets',
-      args: [id],
-    })),
-  });
-
-  if (nextId === undefined || (count > 0 && isMarketsLoading)) {
-      return <div className="p-8 text-center">Loading markets...</div>;
+// Color coding by option type — Polymarket style
+function getOptionStyle(opt: string) {
+  const o = opt.toLowerCase();
+  if (o.includes('yes') || o.includes('home') || o.includes('win') || o.includes('over')) {
+    return 'peer-data-[state=checked]:bg-blue-500/15 peer-data-[state=checked]:border-blue-500/60 hover:border-blue-500/30 hover:bg-blue-500/5';
   }
+  if (o.includes('no') || o.includes('away') || o.includes('lose') || o.includes('under')) {
+    return 'peer-data-[state=checked]:bg-red-500/15 peer-data-[state=checked]:border-red-500/60 hover:border-red-500/30 hover:bg-red-500/5';
+  }
+  // Draw / neutral
+  return 'peer-data-[state=checked]:bg-amber-500/15 peer-data-[state=checked]:border-amber-500/60 hover:border-amber-500/30 hover:bg-amber-500/5';
+}
 
-  const filteredMarkets = (markets || []).map((result, index) => {
-        const marketId = marketIds[index];
-        if (result.status !== 'success' || !result.result) return null;
+function BettingInterface({
+  market,
+  session,
+  onSuccess,
+  onCancel,
+}: {
+  market: Market;
+  session: any;
+  onSuccess: () => void;
+  onCancel?: () => void;
+}) {
+  const [selectedOption, setSelectedOption] = useState('');
+  const [amount, setAmount] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [distribution, setDistribution] = useState<{ option: string; percentage: number }[]>([]);
+  const { toast } = useToast();
 
-        // market: [question, resolved, winningOptionIndex, voided, totalPool, bettingEndsAt, creator, parentMarketId]
-        const [question, resolved, , voided, totalPool, bettingEndsAt, , parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
+  // Fetch user balance + bet distribution on mount
+  useEffect(() => {
+    if (session?.user?.id) {
+      supabase
+        .from('users')
+        .select('tngn_balance, bonus_balance')
+        .eq('id', session.user.id)
+        .single()
+        .then(({ data }) => {
+          if (data) setBalance((data.tngn_balance || 0) + (data.bonus_balance || 0));
+        });
+    }
 
-        // 1. Expiry Check
-        const isExpired24h = Number(bettingEndsAt) * 1000 + 86400000 < Date.now();
-        if (isExpired24h && !resolved) return null;
-        if (isExpired24h) return null;
+    // Fetch real bet distribution
+    fetch(`/api/markets/chart?marketId=${market.id}&mode=distribution`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.distribution) setDistribution(data.distribution);
+      })
+      .catch(() => {});
+  }, [market.id, session?.user?.id]);
 
-        if (filterExactMarketId !== undefined) {
-             // Specific view: Only show this exact market (used for pinning parent)
-             if (marketId !== filterExactMarketId) return null;
-        } else if (filterChildrenOfParentId !== undefined) {
-             // Specific view: Only show children of this parent
-             if (parentMarketId !== filterChildrenOfParentId) return null;
-        } else {
-             // General view: Only show Parent Markets (parentMarketId == 0)
-             if (Number(parentMarketId) !== 0) return null;
+  const handlePlaceBet = async () => {
+    if (!session?.access_token) {
+      toast({ title: 'Please sign in to place a bet', variant: 'destructive' });
+      return;
+    }
+    if (!selectedOption) {
+      toast({ title: 'Pick an outcome first', variant: 'destructive' });
+      return;
+    }
+    if (!amount || Number(amount) < 100) {
+      toast({ title: 'Minimum bet is ₦100', variant: 'destructive' });
+      return;
+    }
+    if (balance !== null && Number(amount) > balance) {
+      toast({ title: 'Insufficient balance', description: 'Top up your account to continue.', variant: 'destructive' });
+      return;
+    }
 
-             // Category Filter (only on general view)
-             if (category === 'politics') {
-                  if (!question.includes('[POLITICS]') && !question.includes('[US]') && !question.includes('[NG]')) return null;
-             } else if (category === 'crypto') {
-                  if (!question.includes('[CRYPTO]')) return null;
-             } else if (category === 'sports') {
-                  const isSports = SPORTS_TAGS.some(tag => question.includes(tag));
-                  if (!isSports) return null;
-             }
-        }
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/bet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          marketId: market.id,
+          outcomeIndex: parseInt(selectedOption),
+          stakeAmount: Number(amount),
+        }),
+      });
 
-        return { marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId } as Market;
-  }).filter((m): m is Market => m !== null);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Bet failed');
+
+      const isJackpot = data.isJackpotEligible;
+      toast({
+        title: isJackpot ? '🏆 Bet locked — Jackpot eligible!' : '✅ Prediction locked!',
+        description: `₦${Number(amount).toLocaleString()} staked on ${market.options[parseInt(selectedOption)]}${isJackpot ? ' — this slip enters the weekly jackpot.' : ''}`,
+      });
+
+      onSuccess();
+    } catch (err: any) {
+      toast({ title: 'Bet failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const stakeNum = Number(amount);
+  const rake = stakeNum * 0.015;
+  const netStake = stakeNum - rake;
 
   return (
-    <div className="space-y-4 w-full max-w-2xl">
-      {filteredMarkets.length > 0 ? (
-          filteredMarkets.map((m) => (
-            <MarketCard
-                key={m.marketId.toString()}
-                marketId={m.marketId}
-                question={m.question}
-                resolved={m.resolved}
-                voided={m.voided}
-                totalPool={m.totalPool}
-                bettingEndsAt={m.bettingEndsAt}
-                parentMarketId={m.parentMarketId}
-                hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
-            />
-          ))
-      ) : (
-        <div className="text-center text-muted-foreground p-8">
-          No markets found.
+    <div className="space-y-4 pt-2">
+      {/* Real bet distribution bars */}
+      {distribution.length > 0 && (
+        <div className="space-y-1.5">
+          {distribution.map((d, i) => (
+            <div key={d.option} className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-20 truncate">{d.option}</span>
+              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${d.percentage}%`,
+                    background: i === 0 ? '#3b82f6' : i === 1 ? '#f59e0b' : '#ef4444',
+                  }}
+                />
+              </div>
+              <span className="text-xs font-medium w-8 text-right">{d.percentage}%</span>
+            </div>
+          ))}
         </div>
       )}
+
+      {/* Option selector */}
+      <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
+        {market.options.map((opt, idx) => (
+          <div key={idx}>
+            <RadioGroupItem value={idx.toString()} id={`m${market.id}-opt${idx}`} className="peer sr-only" />
+            <Label
+              htmlFor={`m${market.id}-opt${idx}`}
+              className={cn(
+                'flex items-center justify-center rounded-lg border border-muted bg-popover/50 p-3 cursor-pointer transition-all text-sm font-medium text-center',
+                getOptionStyle(opt)
+              )}
+            >
+              {opt}
+            </Label>
+          </div>
+        ))}
+      </RadioGroup>
+
+      {/* Amount input */}
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+        <Input
+          type="number"
+          placeholder="Amount (min ₦100)"
+          value={amount}
+          onChange={e => setAmount(e.target.value)}
+          className="pl-8 bg-transparent"
+          min={100}
+        />
+      </div>
+
+      {/* Fee preview */}
+      {stakeNum >= 100 && (
+        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-2.5 space-y-1">
+          <div className="flex justify-between">
+            <span>Entry rake (1.5%)</span>
+            <span>₦{rake.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between font-medium text-foreground">
+            <span>Net stake</span>
+            <span>₦{netStake.toFixed(2)}</span>
+          </div>
+          {stakeNum >= 500 && (
+            <div className="text-amber-400 flex items-center gap-1 pt-0.5 border-t border-border/50 mt-1">
+              🏆 This slip qualifies for the weekly jackpot
+            </div>
+          )}
+        </div>
+      )}
+
+      {balance !== null && (
+        <p className="text-xs text-right text-muted-foreground">
+          Balance: ₦{balance.toLocaleString()} tNGN
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        {onCancel && (
+          <Button variant="outline" onClick={onCancel} className="flex-1">
+            Cancel
+          </Button>
+        )}
+        <Button
+          onClick={handlePlaceBet}
+          disabled={isLoading || !selectedOption || !amount || Number(amount) < 100}
+          className="flex-1 bg-foreground text-background hover:bg-foreground/90 font-semibold"
+        >
+          {isLoading ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Locking...
+            </span>
+          ) : 'Lock Prediction'}
+        </Button>
+      </div>
     </div>
   );
 }
 
-export function MarketCard({ marketId, question, resolved, voided, totalPool, bettingEndsAt, parentMarketId, hideViewMore }: {
-    marketId: bigint;
-    question: string;
-    resolved: boolean;
-    voided: boolean;
-    totalPool: bigint;
-    bettingEndsAt: bigint;
-    parentMarketId?: bigint;
-    hideViewMore?: boolean;
-}) {
-    const router = useRouter();
-    const { address } = useAccount();
-    const { toast } = useToast();
-    const [selectedOption, setSelectedOption] = useState<string>('0');
-    const [amount, setAmount] = useState('');
-    const [isExpanded, setIsExpanded] = useState(false);
+function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: MarketCardProps) {
+  const router = useRouter();
+  const [isExpanded, setIsExpanded] = useState(false);
 
-    const { data: optionsData } = useReadContract({
-        address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-        abi: TRUTH_MARKET_ABI,
-        functionName: 'getMarketOptions',
-        args: [marketId],
-    });
+  const closesAt = new Date(market.closes_at);
+  const isOpen = market.status === 'open' && closesAt > new Date();
+  const isLocked = market.status === 'locked';
+  const isResolved = market.status === 'resolved';
+  const isVoided = market.status === 'voided';
 
-    const options = optionsData ? (optionsData as string[]) : [];
+  // Strip bracket tags from question (e.g. "[PL] Arsenal vs Chelsea" → "Arsenal vs Chelsea")
+  const cleanQuestion = market.question.replace(/\[.*?\]\s*/g, '').trim();
+  // For child markets in the event view, strip the parent prefix
+  const displayQuestion = market.parent_market_id
+    ? (cleanQuestion.match(/\(([^)]+)\)$/) || [])[1] || cleanQuestion
+    : cleanQuestion;
 
-    const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
-    const endDate = new Date(Number(bettingEndsAt) * 1000);
-    const isLive = !resolved && !voided && !isExpired;
+  const statusBadge = () => {
+    if (isResolved) return <Badge variant="secondary" className="text-[10px]">RESOLVED</Badge>;
+    if (isVoided) return <Badge variant="destructive" className="text-[10px]">VOIDED</Badge>;
+    if (isLocked) return (
+      <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[10px] flex items-center gap-1">
+        <Lock className="w-2.5 h-2.5" /> LOCKED
+      </Badge>
+    );
+    if (isOpen) return (
+      <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px] flex items-center gap-1">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+        </span>
+        OPEN
+      </Badge>
+    );
+    return <Badge variant="outline" className="text-[10px]">CLOSED</Badge>;
+  };
 
-    const [isPulsingLive, setIsPulsingLive] = useState(false);
+  const resolvedOption = isResolved && market.resolved_outcome !== null
+    ? market.options[market.resolved_outcome]
+    : null;
 
-    useEffect(() => {
-        async function checkLiveStatus() {
-            const { data } = await supabase
-                .from('market_metadata')
-                .select('is_live')
-                .eq('market_id', Number(marketId))
-                .single();
-            if (data?.is_live) setIsPulsingLive(true);
-        }
-        checkLiveStatus();
-    }, [marketId]);
+  return (
+    <Card className="hover:shadow-lg transition-all bg-card relative overflow-hidden group border-muted">
+      <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-    // Check Balance
-    const { data: balanceData } = useReadContract({
-        address: TNGN_ADDRESS as `0x${string}`,
-        abi: ERC20_BALANCE_ABI,
-        functionName: 'balanceOf',
-        args: [address as `0x${string}`],
-        query: {
-            enabled: !!address,
-        }
-    });
-
-    const balance = balanceData ? balanceData : BigInt(0);
-
-    // Check Allowance
-    const { data: allowanceData, refetch: refetchAllowance } = useReadContract({
-        address: TNGN_ADDRESS as `0x${string}`,
-        abi: TNGN_ABI,
-        functionName: 'allowance',
-        args: [address as `0x${string}`, TRUTH_MARKET_ADDRESS as `0x${string}`],
-        query: {
-            enabled: !!address,
-        }
-    });
-
-    const allowance = allowanceData ? allowanceData : BigInt(0);
-
-    const getParsedAmount = (val: string) => {
-        try {
-            return parseUnits(val, 18);
-        } catch {
-            return BigInt(0);
-        }
-    };
-
-    // ERC-4337 Batching for Smart Wallets
-    const { sendCalls, data: callsIdData, isPending: isBatchPending } = useSendCalls({
-        mutation: {
-            onError: (error) => {
-                toast({ title: "Transaction Failed", description: error.message, variant: "destructive" });
-            }
-        }
-    });
-
-    // wagmi v2 sends back an object with an id string
-    const _callsId: string = typeof callsIdData === 'string' ? callsIdData : ((callsIdData as unknown) as { id?: string })?.id || "";
-
-    const { data: callsStatus } = useCallsStatus({ id: _callsId, query: { enabled: !!_callsId } });
-
-    useEffect(() => {
-        if (callsStatus?.status === 'success') {
-            toast({ title: "Prediction Locked!", description: "Check your profile for the Bet Receipt." });
-            setAmount('');
-            setIsExpanded(false);
-            refetchAllowance();
-        }
-    }, [callsStatus?.status, toast, refetchAllowance]);
-
-    const handlePlaceBatchedBet = () => {
-         if (!amount || Number(amount) <= 0) {
-            toast({ title: "Invalid Amount", description: "Please enter a valid amount", variant: "destructive" });
-            return;
-        }
-
-        const betAmount = getParsedAmount(amount);
-        if (betAmount > balance) {
-            toast({
-                title: "Insufficient Balance",
-                description: `You have ₦${Number(formatUnits(balance, 18)).toLocaleString()}. Use the Wallet to Deposit Naira.`,
-                variant: "destructive"
-            });
-            return;
-        }
-
-        const needsApproval = allowance < betAmount;
-
-        const calls = [];
-
-        if (needsApproval) {
-            calls.push({
-                to: TNGN_ADDRESS as `0x${string}`,
-                abi: ERC20_APPROVE_ABI,
-                functionName: 'approve',
-                args: [TRUTH_MARKET_ADDRESS as `0x${string}`, betAmount]
-            });
-        }
-
-        calls.push({
-            to: TRUTH_MARKET_ADDRESS as `0x${string}`,
-            abi: TRUTH_MARKET_ABI,
-            functionName: 'placeBet',
-            args: [marketId, BigInt(selectedOption), betAmount]
-        });
-
-        sendCalls({
-            calls,
-            capabilities: {
-                paymasterService: {
-                    url: '/api/paymaster'
-                }
-            }
-        });
-    };
-
-    const isBettingLoading = isBatchPending || callsStatus?.status === 'pending';
-
-    const bettingInterface = (
-        <div className="mt-4 pt-4 border-t border-muted/50 space-y-4 animate-in fade-in slide-in-from-top-2 relative z-10">
-            <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
-                {options.map((opt, idx) => {
-                    // Polymarket-style styling: Soft blue for Yes/Home/Over, Soft Red for No/Away/Under, Neutral for Draw
-                    const isBlue = opt.toLowerCase().includes('yes') || opt.toLowerCase().includes('home') || opt.toLowerCase().includes('over');
-                    const isRed = opt.toLowerCase().includes('no') || opt.toLowerCase().includes('away') || opt.toLowerCase().includes('under');
-                    const gradientClass = isBlue
-                      ? "peer-data-[state=checked]:bg-blue-500/10 peer-data-[state=checked]:border-blue-500/50 hover:border-blue-500/30"
-                      : isRed
-                      ? "peer-data-[state=checked]:bg-red-500/10 peer-data-[state=checked]:border-red-500/50 hover:border-red-500/30"
-                      : "peer-data-[state=checked]:bg-primary/10 peer-data-[state=checked]:border-primary hover:border-primary/50";
-
-                    return (
-                        <div key={idx}>
-                            <RadioGroupItem value={idx.toString()} id={`m-${marketId}-opt-${idx}`} className="peer sr-only" />
-                            <Label
-                              htmlFor={`m-${marketId}-opt-${idx}`}
-                              className={`flex flex-col items-center justify-between rounded-md border border-muted bg-popover/50 p-3 hover:bg-accent hover:text-accent-foreground transition-all cursor-pointer ${gradientClass}`}
-                            >
-                                <span className="font-medium text-sm">{opt}</span>
-                            </Label>
-                        </div>
-                    );
-                })}
-            </RadioGroup>
-
-            <div className="flex flex-col gap-4">
-                <div className="relative">
-                    <Input
-                      type="number"
-                      placeholder="Amount (₦)"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      disabled={!isLive}
-                      className="pl-8 bg-transparent"
-                    />
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                </div>
-
-                {!isLive ? (
-                    <Button disabled className="w-full">Market Closed</Button>
-                ) : (
-                    <Button
-                      onClick={handlePlaceBatchedBet}
-                      disabled={isBettingLoading || !amount}
-                      className="w-full bg-foreground text-background hover:bg-foreground/90 transition-all font-semibold relative overflow-hidden"
-                    >
-                        {isBettingLoading ? (
-                            <span className="flex items-center gap-2">
-                                <span className="animate-spin rounded-full h-4 w-4 border-2 border-background border-t-transparent" />
-                                Locking...
-                            </span>
-                        ) : "Lock Prediction"}
-                    </Button>
-                )}
-            </div>
-            {address && (
-                <div className="text-xs text-right text-muted-foreground">
-                    Balance: ₦{Number(formatUnits(balance, 18)).toLocaleString()}
-                </div>
-            )}
+      <CardHeader className="pb-2 relative z-10">
+        <div className="flex justify-between items-start gap-3">
+          <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug">
+            {displayQuestion}
+          </CardTitle>
+          <div className="shrink-0">{statusBadge()}</div>
         </div>
-    );
+      </CardHeader>
 
-    // Regex formatting to strip bot tags like [BSA]
-    let formattedQuestion = question.replace(/\[.*?\]\s*/g, '');
+      <CardContent className="relative z-10">
+        {/* Resolved outcome */}
+        {isResolved && resolvedOption && (
+          <div className="flex items-center gap-2 mb-3 text-sm">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="text-emerald-400 font-medium">Result: {resolvedOption}</span>
+          </div>
+        )}
 
-    // Strip redundant parent event names from child market cards
-    if (Number(parentMarketId) !== 0) {
-        // Assume format is "Arsenal vs Chelsea (Match Winner)"
-        const match = formattedQuestion.match(/\(([^)]+)\)$/);
-        if (match) {
-            formattedQuestion = match[1];
-        }
-    }
+        {/* Pool + deadline */}
+        <div className="flex justify-between text-xs text-muted-foreground mt-1 mb-3">
+          <span className="flex items-center gap-1">
+            <TrendingUp className="w-3 h-3" />
+            Pool: ₦{(market.total_pool || 0).toLocaleString()} tNGN
+          </span>
+          <span className="flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            {isResolved || isLocked
+              ? `Closed ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`
+              : `Closes ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+            }
+          </span>
+        </div>
 
-    // Momentum Bar Logic (Mocking percentages for now since pool per option isn't exposed easily on-chain without indexing)
-    // We will use a visual representation based on a hash of the market ID to keep it deterministic for the demo,
-    // but in production, this should pull from a Supabase indexing table showing exact split.
-    // For now: Neutral if pool is 0.
-    const hasVolume = totalPool > BigInt(0);
-    const mockBlueSplit = hasVolume ? (Number(marketId) % 100) : 50;
-    const mockRedSplit = 100 - mockBlueSplit;
+        {/* On-chain verification badge */}
+        {market.merkle_root && (
+          <div className="flex items-center gap-1.5 text-xs text-emerald-400/70 mb-3">
+            <Lock className="w-3 h-3" />
+            <span>Bet book sealed on Polygon</span>
+          </div>
+        )}
 
-    return (
-        <Card className="hover:shadow-lg transition-shadow bg-card relative overflow-hidden group border-muted">
-            {/* Subtle Gradient Highlights */}
-            <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+        {/* Desktop inline betting */}
+        {isOpen && isExpanded && (
+          <div className="hidden md:block border-t border-muted/50 mt-3 pt-3 animate-in fade-in slide-in-from-top-2">
+            <BettingInterface
+              market={market}
+              session={session}
+              onSuccess={() => {
+                setIsExpanded(false);
+                onBetPlaced(market.id);
+              }}
+              onCancel={() => setIsExpanded(false)}
+            />
+          </div>
+        )}
+      </CardContent>
 
-            <CardHeader className="pb-2 relative z-10">
-              <div className="flex justify-between items-start">
-                <CardTitle className="text-lg font-medium tracking-tight text-foreground">{formattedQuestion}</CardTitle>
-                <Badge variant={resolved ? "secondary" : isPulsingLive ? "live" : isExpired ? "destructive" : "open"}>
-                  {resolved ? "RESOLVED" : isPulsingLive ? "LIVE" : isExpired ? "CLOSED" : "OPEN"}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {/* Momentum Bar */}
-              <div className="mt-1 mb-3">
-                  <div className="h-3 w-full bg-muted/50 rounded-full overflow-hidden flex relative">
-                      {hasVolume ? (
-                          <>
-                              <div className="h-full bg-blue-500/80 transition-all duration-500" style={{ width: `${mockBlueSplit}%` }} />
-                              <div className="h-full bg-red-500/80 transition-all duration-500" style={{ width: `${mockRedSplit}%` }} />
-                          </>
-                      ) : (
-                          <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-muted-foreground uppercase tracking-widest z-10">
-                              No Predictions Yet
-                          </div>
-                      )}
+      <CardFooter className="pt-0 flex gap-2 relative z-10">
+        {/* Desktop place bet */}
+        <div className="hidden md:flex gap-2 w-full">
+          {isOpen && !isExpanded && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-1 text-xs bg-muted/20 hover:bg-muted/50"
+              onClick={() => setIsExpanded(true)}
+            >
+              Place Bet
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile drawer */}
+        <div className="md:hidden w-full">
+          {isOpen ? (
+            <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
+              <DrawerTrigger asChild>
+                <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
+                  Tap to Place Bet
+                </Button>
+              </DrawerTrigger>
+              <DrawerContent>
+                <div className="mx-auto w-full max-w-sm">
+                  <DrawerHeader>
+                    <DrawerTitle className="text-base">{displayQuestion}</DrawerTitle>
+                    <DrawerDescription>Make your prediction</DrawerDescription>
+                  </DrawerHeader>
+                  <div className="p-4 pb-0">
+                    <BettingInterface
+                      market={market}
+                      session={session}
+                      onSuccess={() => {
+                        setIsExpanded(false);
+                        onBetPlaced(market.id);
+                      }}
+                    />
                   </div>
-              </div>
-
-              <div className="flex justify-between text-sm text-muted-foreground mt-2 relative z-10">
-                <span>Pool: ₦{Number(formatUnits(totalPool, 18)).toLocaleString()}</span>
-                <span>Ends: {endDate.toLocaleDateString()} {endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-              {voided && <div className="text-red-500 text-xs mt-1">Market Voided</div>}
-
-              <div className="hidden md:block">
-                  {isExpanded && bettingInterface}
-              </div>
-            </CardContent>
-
-            <CardFooter className="pt-0 flex gap-2 relative z-10">
-                <div className="hidden md:block w-full">
-                    {!isExpanded && (
-                        <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50" onClick={(e) => {
-                            e.stopPropagation();
-                            setIsExpanded(true);
-                        }}>
-                                {isLive ? "Place Bet" : "View Options"}
-                        </Button>
-                    )}
+                  <DrawerFooter>
+                    <DrawerClose asChild>
+                      <Button variant="outline">Close</Button>
+                    </DrawerClose>
+                  </DrawerFooter>
                 </div>
+              </DrawerContent>
+            </Drawer>
+          ) : (
+            !isResolved && !isVoided && (
+              <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground py-1">
+                <Lock className="w-3 h-3" />
+                {isLocked ? 'Betting closed' : 'Market closed'}
+              </div>
+            )
+          )}
+        </div>
 
-                <div className="md:hidden w-full">
-                    <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
-                        <DrawerTrigger asChild>
-                            <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
-                                    {isLive ? "Tap to Place Bet" : "View Options"}
-                            </Button>
-                        </DrawerTrigger>
-                        <DrawerContent>
-                            <div className="mx-auto w-full max-w-sm">
-                                <DrawerHeader>
-                                        <DrawerTitle>{formattedQuestion}</DrawerTitle>
-                                    <DrawerDescription>Make your prediction below</DrawerDescription>
-                                </DrawerHeader>
-                                <div className="p-4 pb-0">
-                                    {bettingInterface}
-                                </div>
-                                <DrawerFooter>
-                                    <DrawerClose asChild>
-                                        <Button variant="outline">Cancel</Button>
-                                    </DrawerClose>
-                                </DrawerFooter>
-                            </div>
-                        </DrawerContent>
-                    </Drawer>
-                </div>
+        {/* View more markets (parent markets only) */}
+        {!hideViewMore && !market.parent_market_id && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs shrink-0 gap-1"
+            onClick={() => router.push(`/event/${market.id}`)}
+          >
+            <ExternalLink className="w-3 h-3" />
+            Sub-Markets
+          </Button>
+        )}
+      </CardFooter>
+    </Card>
+  );
+}
 
-                {!hideViewMore && Number(parentMarketId) === 0 && (
-                    <Button variant="outline" size="sm" className="w-full text-xs" onClick={(e) => {
-                        e.stopPropagation();
-                        router.push(`/event/${marketId.toString()}`);
-                    }}>
-                        View More Markets
-                    </Button>
-                )}
-            </CardFooter>
-        </Card>
+// Category → Supabase query mapping
+function buildCategoryFilter(category: string, subcategory: string | null) {
+  const base = {
+    column: 'category',
+    value: '',
+    questionFilter: null as string | null,
+  };
+
+  const SPORTS_LEAGUE_MAP: Record<string, string> = {
+    pl: '[PL]', pd: '[PD]', sa: '[SA]', bl1: '[BL1]', fl1: '[FL1]',
+    cl: '[CL]', wc: '[WC]', ec: '[EC]', ded: '[DED]', bsa: '[BSA]',
+    ppl: '[PPL]', elc: '[ELC]', nba: '[NBA]',
+  };
+
+  if (category === 'sports' || category === 'trending') {
+    base.column = 'category';
+    base.value = 'sports';
+    if (subcategory && SPORTS_LEAGUE_MAP[subcategory]) {
+      base.questionFilter = SPORTS_LEAGUE_MAP[subcategory];
+    }
+  } else if (category === 'politics') {
+    base.value = 'politics';
+  } else if (category === 'crypto') {
+    base.value = 'finance';
+  } else if (category === 'pop') {
+    base.value = 'entertainment';
+  } else if (category === 'economy') {
+    base.value = 'economics';
+  } else if (category === 'tech') {
+    base.value = 'finance';
+  } else if (category === 'geo') {
+    base.value = 'politics';
+  } else {
+    base.value = category;
+  }
+
+  return base;
+}
+
+interface MarketListProps {
+  filterExactMarketId?: number;
+  filterChildrenOfParentId?: number;
+}
+
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: MarketListProps) {
+  const searchParams = useSearchParams();
+  const category = searchParams.get('category') || 'trending';
+  const subcategory = searchParams.get('subcategory') || null;
+
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [session, setSession] = useState<any>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchMarkets = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let query = supabase
+        .from('markets')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root')
+        .not('status', 'eq', 'voided')
+        .order('closes_at', { ascending: true });
+
+      if (filterExactMarketId !== undefined) {
+        query = query.eq('id', filterExactMarketId);
+      } else if (filterChildrenOfParentId !== undefined) {
+        query = query.eq('parent_market_id', filterChildrenOfParentId);
+      } else {
+        // General market list — top-level only
+        query = query.is('parent_market_id', null);
+
+        const { column, value, questionFilter } = buildCategoryFilter(category, subcategory);
+        if (value) query = query.eq(column, value);
+        if (questionFilter) query = query.ilike('question', `%${questionFilter}%`);
+      }
+
+      const { data, error } = await query.limit(50);
+      if (error) throw error;
+      setMarkets((data || []) as Market[]);
+    } catch (err) {
+      console.error('Failed to fetch markets:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory]);
+
+  useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-36 bg-muted/30 rounded-xl animate-pulse" />
+        ))}
+      </div>
     );
+  }
+
+  if (markets.length === 0) {
+    return (
+      <div className="text-center p-12 border border-muted rounded-xl bg-card/50">
+        <p className="text-muted-foreground">
+          {filterChildrenOfParentId ? 'No sub-markets for this event.' : 'No markets in this category yet.'}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {markets.map(market => (
+        <MarketCard
+          key={market.id}
+          market={market}
+          session={session}
+          onBetPlaced={fetchMarkets}
+          hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
+        />
+      ))}
+    </div>
+  );
 }

@@ -6,138 +6,136 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const RESOLUTION_RAKE = 0.05; // 5% of the losing (profit) pool
+const RESOLUTION_RAKE = 0.05;
+const FIRST_BET_INSURANCE_CAP = 2000;
+
+async function applyFirstBetInsurance(userId: string, bet: any) {
+  // Only applies if: this is the user's very first resolved bet AND it was a loss
+  const { count } = await supabaseAdmin
+    .from('user_bets')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .in('status', ['won', 'lost']);
+
+  // count will be 1 at this point — the bet we just marked as lost
+  if (count !== 1) return;
+
+  // Check not already refunded
+  const { data: alreadyRefunded } = await supabaseAdmin
+    .from('user_bets')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_first_bet_refunded', true)
+    .single();
+
+  if (alreadyRefunded) return;
+
+  const refundAmount = Math.min(bet.stake_tngn, FIRST_BET_INSURANCE_CAP);
+
+  // Credit free_bet_credits
+  const { data: user } = await supabaseAdmin.from('users').select('free_bet_credits').eq('id', userId).single();
+  await supabaseAdmin.from('users').update({
+    free_bet_credits: (user?.free_bet_credits || 0) + refundAmount,
+  }).eq('id', userId);
+
+  // Flag the bet
+  await supabaseAdmin.from('user_bets').update({ is_first_bet_refunded: true }).eq('id', bet.id);
+
+  // Fire notification
+  await supabaseAdmin.from('notifications').insert({
+    user_id: userId,
+    type: 'first_bet_refund',
+    message: `Tough break! Your first bet is insured. ₦${refundAmount.toLocaleString()} has been added to your Free Bet Credits. 🛡`,
+    amount: refundAmount,
+  });
+
+  // Log to treasury
+  await supabaseAdmin.from('treasury_log').insert({
+    type: 'first_bet_insurance',
+    amount_tngn: refundAmount,
+    bet_id: bet.id,
+    user_id: userId,
+    created_at: new Date().toISOString(),
+  });
+
+  console.log(`First Bet Insurance: user=${userId} refund=${refundAmount} tNGN`);
+}
 
 export async function POST(request: Request) {
   try {
-    // Only callable by the oracle bot or admin
     const cronSecret = request.headers.get('x-cron-secret');
     if (cronSecret !== process.env.CRON_SECRET) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { marketId, winningOutcomeIndex } = await request.json();
-
     if (!marketId || winningOutcomeIndex === undefined) {
       return NextResponse.json({ error: 'Missing marketId or winningOutcomeIndex' }, { status: 400 });
     }
 
-    // 1. Fetch market
     const { data: market, error: marketError } = await supabaseAdmin
-      .from('markets')
-      .select('*')
-      .eq('id', marketId)
-      .single();
+      .from('markets').select('*').eq('id', marketId).single();
 
-    if (marketError || !market) {
-      return NextResponse.json({ error: 'Market not found' }, { status: 404 });
-    }
+    if (marketError || !market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
+    if (market.status !== 'locked') return NextResponse.json({ error: 'Market must be locked before resolving' }, { status: 400 });
 
-    if (market.status !== 'locked') {
-      return NextResponse.json({ error: 'Market must be locked before resolving' }, { status: 400 });
-    }
-
-    // 2. Fetch all active bets for this market
-    const { data: bets, error: betsError } = await supabaseAdmin
+    const { data: bets } = await supabaseAdmin
       .from('user_bets')
-      .select('id, user_id, outcome_index, net_stake_tngn')
+      .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn')
       .eq('market_id', marketId)
       .eq('status', 'active');
 
-    if (betsError) {
-      return NextResponse.json({ error: 'Failed to fetch bets' }, { status: 500 });
-    }
-
     if (!bets || bets.length === 0) {
-      // No bets — void the market
-      await supabaseAdmin
-        .from('markets')
-        .update({ status: 'voided', resolved_outcome: null })
-        .eq('id', marketId);
+      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null }).eq('id', marketId);
       return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
     }
 
-    // 3. Calculate pools
-    const winningBets = bets.filter((b) => b.outcome_index === winningOutcomeIndex);
-    const losingBets = bets.filter((b) => b.outcome_index !== winningOutcomeIndex);
-
-    const winningPool = winningBets.reduce((sum, b) => sum + b.net_stake_tngn, 0);
-    const losingPool = losingBets.reduce((sum, b) => sum + b.net_stake_tngn, 0);
+    const winningBets = bets.filter(b => b.outcome_index === winningOutcomeIndex);
+    const losingBets = bets.filter(b => b.outcome_index !== winningOutcomeIndex);
+    const winningPool = winningBets.reduce((s, b) => s + b.net_stake_tngn, 0);
+    const losingPool = losingBets.reduce((s, b) => s + b.net_stake_tngn, 0);
     const totalPool = winningPool + losingPool;
 
-    // Handle edge cases: everyone bet the same side
+    // Void if no losers or no winners
     if (winningPool === 0 || losingPool === 0) {
-      // Void and refund all bets
       for (const bet of bets) {
-        const { data: userData } = await supabaseAdmin
-          .from('users')
-          .select('tngn_balance')
-          .eq('id', bet.user_id)
-          .single();
-
-        if (userData) {
-          await supabaseAdmin
-            .from('users')
-            .update({ tngn_balance: (userData.tngn_balance || 0) + bet.net_stake_tngn })
-            .eq('id', bet.user_id);
-        }
-
-        await supabaseAdmin
-          .from('user_bets')
-          .update({ status: 'refunded' })
-          .eq('id', bet.id);
+        const { data: u } = await supabaseAdmin.from('users').select('tngn_balance').eq('id', bet.user_id).single();
+        if (u) await supabaseAdmin.from('users').update({ tngn_balance: (u.tngn_balance || 0) + bet.net_stake_tngn }).eq('id', bet.user_id);
+        await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', bet.id);
       }
-
-      await supabaseAdmin
-        .from('markets')
-        .update({ status: 'voided', resolved_outcome: winningOutcomeIndex })
-        .eq('id', marketId);
-
+      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
       return NextResponse.json({ status: 'voided', reason: 'No losers — all bets refunded' });
     }
 
-    // 4. Apply Resolution Rake on losing pool
     const resolutionRakeAmount = losingPool * RESOLUTION_RAKE;
-    const payoutPool = totalPool - resolutionRakeAmount; // what winners share
+    const payoutPool = totalPool - resolutionRakeAmount;
 
-    // 5. Distribute winnings to each winner proportionally
-    const payouts: { userId: string; payout: number }[] = [];
-
+    // Pay winners
     for (const bet of winningBets) {
-      // payout = bet's share of winning pool × total payout pool
       const share = bet.net_stake_tngn / winningPool;
       const payout = share * payoutPool;
-      payouts.push({ userId: bet.user_id, payout });
-
-      // Credit the user's balance
-      const { data: userData } = await supabaseAdmin
-        .from('users')
-        .select('tngn_balance')
-        .eq('id', bet.user_id)
-        .single();
-
-      if (userData) {
-        await supabaseAdmin
-          .from('users')
-          .update({ tngn_balance: (userData.tngn_balance || 0) + payout })
-          .eq('id', bet.user_id);
-      }
-
-      await supabaseAdmin
-        .from('user_bets')
-        .update({ status: 'won', payout_tngn: payout })
-        .eq('id', bet.id);
+      const { data: u } = await supabaseAdmin.from('users').select('tngn_balance').eq('id', bet.user_id).single();
+      if (u) await supabaseAdmin.from('users').update({ tngn_balance: (u.tngn_balance || 0) + payout }).eq('id', bet.user_id);
+      await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
+      // Win notification
+      // non-critical
+      Promise.resolve(
+        supabaseAdmin.from('notifications').insert({
+          user_id: bet.user_id,
+          type: 'bet_won',
+          message: `You won! ₦${payout.toLocaleString()} has been credited to your account. 🎉`,
+          amount: payout,
+        })
+      ).catch(() => {});
     }
 
-    // 6. Mark losing bets as lost
+    // Mark losers + apply First Bet Insurance
     for (const bet of losingBets) {
-      await supabaseAdmin
-        .from('user_bets')
-        .update({ status: 'lost', payout_tngn: 0 })
-        .eq('id', bet.id);
+      await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', bet.id);
+      await applyFirstBetInsurance(bet.user_id, bet);
     }
 
-    // 7. Log the resolution rake to treasury
+    // Resolution rake to treasury
     await supabaseAdmin.from('treasury_log').insert({
       type: 'resolution_rake',
       amount_tngn: resolutionRakeAmount,
@@ -145,17 +143,13 @@ export async function POST(request: Request) {
       created_at: new Date().toISOString(),
     });
 
-    // 8. Mark market as resolved
-    await supabaseAdmin
-      .from('markets')
-      .update({
-        status: 'resolved',
-        resolved_outcome: winningOutcomeIndex,
-        total_pool: totalPool,
-      })
-      .eq('id', marketId);
+    await supabaseAdmin.from('markets').update({
+      status: 'resolved',
+      resolved_outcome: winningOutcomeIndex,
+      total_pool: totalPool,
+    }).eq('id', marketId);
 
-    console.log(`Market ${marketId} resolved. Winner: outcome ${winningOutcomeIndex}. Pool: ${totalPool}. Rake: ${resolutionRakeAmount}. Payouts: ${payouts.length} winners.`);
+    console.log(`Market ${marketId} resolved. Winners: ${winningBets.length}. Pool: ${totalPool}. Rake: ${resolutionRakeAmount}.`);
 
     return NextResponse.json({
       success: true,
@@ -167,6 +161,7 @@ export async function POST(request: Request) {
       resolutionRake: resolutionRakeAmount,
       payoutPool,
       winnersCount: winningBets.length,
+      losersCount: losingBets.length,
     }, { status: 200 });
 
   } catch (error: any) {
