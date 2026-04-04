@@ -1,759 +1,596 @@
 'use client';
 
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { formatUnits } from 'viem';
-import { useState, useEffect, Fragment } from 'react';
-import { useReadContract, useReadContracts } from 'wagmi';
-import { TRUTH_MARKET_ADDRESS, TRUTH_MARKET_ABI, SAFE_AMOY_GAS } from '@/lib/constants';
-import { useToast } from '@/hooks/use-toast';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-const BOT_WALLET_ADDRESS = "0xA1622ad08E558AE506b18d4028A6F613fd90F916".toLowerCase();
+const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
 
-export default function AdminPage() {
-  const { address } = useAccount();
-  const { toast } = useToast();
-  const [isMounted, setIsMounted] = useState(false);
-  // const adminAddress = process.env.NEXT_PUBLIC_ADMIN_ADDRESS; // Auth check disabled for debugging
-
-  // Create Market State
-  const [category, setCategory] = useState('');
-  const [question, setQuestion] = useState('');
-  const [options, setOptions] = useState('');
-  const [deadline, setDeadline] = useState('');
-  const [presets, setPresets] = useState({
-      matchWinner: false,
-      btts: false,
-      overUnder25: false,
-  });
-
-  // Resolve Market State (Inline)
-  const [resolvingMarketId, setResolvingMarketId] = useState<string | null>(null);
-  const [winningOptionIndex, setWinningOptionIndex] = useState('');
-
-  // Add Sub-Markets State
-  const [isAddSubMarketsModalOpen, setIsAddSubMarketsModalOpen] = useState(false);
-  const [selectedParentId, setSelectedParentId] = useState<string | null>(null);
-  const [selectedParentQuestion, setSelectedParentQuestion] = useState<string>('');
-  const [selectedParentDeadline, setSelectedParentDeadline] = useState<bigint | null>(null);
-  const [subMarketPresets, setSubMarketPresets] = useState({
-      btts: false,
-      ou05: false,
-      ou15: false,
-      ou25: false,
-      ou35: false,
-      ou45: false,
-      doubleChance: false,
-      drawNoBet: false,
-      exactGoals: false,
-      halftimeResult: false,
-      bttsFirstHalf: false,
-      firstTeamToScore: false,
-  });
-  const [customSubMarketName, setCustomSubMarketName] = useState('');
-  const [customSubMarketOptions, setCustomSubMarketOptions] = useState('');
-
-  // Read Markets State
-  const { data: nextId } = useReadContract({
-    address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-    abi: TRUTH_MARKET_ABI,
-    functionName: 'nextMarketId',
-  });
-
-  const count = nextId ? Number(nextId) : 0;
-  const marketIds = Array.from({ length: count }, (_, i) => BigInt(count - 1 - i));
-
-  const { data: marketsData, isLoading: isMarketsLoading } = useReadContracts({
-    contracts: marketIds.map((id) => ({
-      address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-      abi: TRUTH_MARKET_ABI,
-      functionName: 'markets',
-      args: [id],
-    })),
-  });
-
-  const [liveStatuses, setLiveStatuses] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    async function fetchLiveStatuses() {
-      const { data } = await supabase.from('market_metadata').select('market_id, is_live');
-      if (data) {
-        const statuses: Record<string, boolean> = {};
-        data.forEach(row => {
-          statuses[row.market_id.toString()] = row.is_live;
-        });
-        setLiveStatuses(statuses);
-      }
-    }
-    fetchLiveStatuses();
-  }, [marketsData]);
-
-  const toggleLiveStatus = async (marketId: string, currentStatus: boolean) => {
-      const newStatus = !currentStatus;
-
-      const { error } = await supabase
-        .from('market_metadata')
-        .upsert({ market_id: Number(marketId), is_live: newStatus, updated_at: new Date().toISOString() });
-
-      if (error) {
-          toast({ title: "Database Error", description: error.message, variant: "destructive" });
-      } else {
-          setLiveStatuses(prev => ({...prev, [marketId]: newStatus}));
-          toast({ title: "Status Updated", description: `Market ${marketId} is now ${newStatus ? 'LIVE' : 'OPEN'}` });
-      }
+function adminHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${ADMIN_SECRET}`,
   };
+}
 
-  // Contract Write Hook for Create
-  const {
-    writeContract: createMarket,
-    data: createHash,
-    isPending: isCreatePending
-  } = useWriteContract();
+function cronHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'x-cron-secret': process.env.NEXT_PUBLIC_CRON_SECRET || '',
+  };
+}
 
-  const {
-      isLoading: isCreateConfirming,
-      isSuccess: isCreateSuccess
-  } = useWaitForTransactionReceipt({ hash: createHash });
-
-  // Contract Write Hook for Create Batch
-  const {
-    writeContract: createMarketBatch,
-    data: createBatchHash,
-    isPending: isCreateBatchPending
-  } = useWriteContract();
-
-  const {
-      isLoading: isCreateBatchConfirming,
-      isSuccess: isCreateBatchSuccess
-  } = useWaitForTransactionReceipt({ hash: createBatchHash });
-
-  // Contract Write Hook for Resolve
-  const {
-    writeContract: resolveMarket,
-    data: resolveHash,
-    isPending: isResolvePending
-  } = useWriteContract();
-
-  const {
-      isLoading: isResolveConfirming,
-      isSuccess: isResolveSuccess
-  } = useWaitForTransactionReceipt({ hash: resolveHash });
+// ── Treasury Overview ────────────────────────────────────────────────────
+function TreasuryPanel() {
+  const [stats, setStats] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    setIsMounted(true);
+    async function fetchStats() {
+      const [rakeData, usersData, marketsData, heartbeatData] = await Promise.all([
+        supabase.from('treasury_log').select('amount_tngn, type').then(r => r.data || []),
+        supabase.from('users').select('id', { count: 'exact', head: true }).then(r => r.count || 0),
+        supabase.from('markets').select('status', { count: 'exact', head: false }).then(r => r.data || []),
+        supabase.from('heartbeat_log').select('fired_at').order('fired_at', { ascending: false }).limit(1).then(r => r.data?.[0] || null),
+      ]);
+
+      const entryRake = rakeData.filter((r: any) => r.type === 'entry_rake').reduce((s: number, r: any) => s + r.amount_tngn, 0);
+      const resolutionRake = rakeData.filter((r: any) => r.type === 'resolution_rake').reduce((s: number, r: any) => s + r.amount_tngn, 0);
+      const totalRake = entryRake + resolutionRake;
+
+      const openMarkets = (marketsData as any[]).filter(m => m.status === 'open').length;
+      const lockedMarkets = (marketsData as any[]).filter(m => m.status === 'locked').length;
+
+      const lastHeartbeat = heartbeatData?.fired_at ? new Date(heartbeatData.fired_at) : null;
+      const daysSinceHeartbeat = lastHeartbeat
+        ? Math.floor((Date.now() - lastHeartbeat.getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
+      setStats({ totalRake, entryRake, resolutionRake, usersData, openMarkets, lockedMarkets, lastHeartbeat, daysSinceHeartbeat });
+      setIsLoading(false);
+    }
+    fetchStats();
   }, []);
 
-  // Handle Create Success
-  useEffect(() => {
-    if (isCreateSuccess || isCreateBatchSuccess) {
-        toast({
-            title: isCreateBatchSuccess ? "Markets Created!" : "Market Created!",
-            description: "The new market(s) have been deployed.",
-        });
-        setQuestion('');
-        setOptions('');
-        setDeadline('');
-        setPresets({
-            matchWinner: false,
-            btts: false,
-            overUnder25: false,
-        });
+  if (isLoading) return <div className="h-32 bg-muted/30 rounded-xl animate-pulse" />;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total Rake', value: `₦${(stats?.totalRake || 0).toLocaleString()}`, icon: Coins, color: 'text-emerald-400' },
+          { label: 'Total Users', value: stats?.usersData || 0, icon: Users, color: 'text-blue-400' },
+          { label: 'Open Markets', value: stats?.openMarkets || 0, icon: Activity, color: 'text-amber-400' },
+          { label: 'Locked Markets', value: stats?.lockedMarkets || 0, icon: Lock, color: 'text-purple-400' },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <Card key={label} className="bg-card/50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-muted-foreground uppercase tracking-wider">{label}</span>
+                <Icon className={cn('w-4 h-4', color)} />
+              </div>
+              <div className="text-2xl font-bold">{value}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Heartbeat status */}
+      <Card className={cn('border', stats?.daysSinceHeartbeat >= 25 ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5')}>
+        <CardContent className="p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Shield className={cn('w-5 h-5', stats?.daysSinceHeartbeat >= 25 ? 'text-red-400' : 'text-emerald-400')} />
+            <div>
+              <p className="text-sm font-medium">Escape Hatch Clock</p>
+              <p className="text-xs text-muted-foreground">
+                {stats?.lastHeartbeat
+                  ? `Last heartbeat: ${stats.lastHeartbeat.toLocaleDateString()} (${stats.daysSinceHeartbeat} days ago)`
+                  : 'No heartbeat recorded'}
+              </p>
+            </div>
+          </div>
+          <Badge className={cn(stats?.daysSinceHeartbeat >= 25 ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30')}>
+            {30 - (stats?.daysSinceHeartbeat || 0)} days remaining
+          </Badge>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Market Creation ───────────────────────────────────────────────────────
+function CreateMarketPanel() {
+  const { toast } = useToast();
+  const [question, setQuestion] = useState('');
+  const [category, setCategory] = useState('sports');
+  const [optionsText, setOptionsText] = useState('Home Win, Draw, Away Win');
+  const [closesAt, setClosesAt] = useState('');
+  const [fixtureId, setFixtureId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const PRESETS = [
+    { label: '1X2 (Football)', options: 'Home Win, Draw, Away Win' },
+    { label: 'Yes/No', options: 'Yes, No' },
+    { label: 'Over/Under 2.5', options: 'Over 2.5, Under 2.5' },
+    { label: 'BTTS', options: 'Yes - Both Score, No - Both Score' },
+    { label: 'Win/Lose', options: 'Win, Lose' },
+  ];
+
+  const handleCreate = async () => {
+    if (!question || !closesAt) {
+      toast({ title: 'Question and close time are required', variant: 'destructive' });
+      return;
     }
-  }, [isCreateSuccess, isCreateBatchSuccess, toast]);
 
-  // Handle Resolve Success
-  useEffect(() => {
-    if (isResolveSuccess) {
-        toast({
-            title: "Market Resolved!",
-            description: `Market ${resolvingMarketId} has been resolved.`,
-        });
-        setResolvingMarketId(null);
-        setWinningOptionIndex('');
+    const options = optionsText.split(',').map(o => o.trim()).filter(Boolean);
+    if (options.length < 2) {
+      toast({ title: 'At least 2 options required', variant: 'destructive' });
+      return;
     }
-  }, [isResolveSuccess, resolvingMarketId, toast]);
 
-  // Handle Add Sub-Markets Success
-  useEffect(() => {
-      if (isCreateBatchSuccess && isAddSubMarketsModalOpen) {
-          setIsAddSubMarketsModalOpen(false);
-          setSubMarketPresets({
-              btts: false,
-              ou05: false,
-              ou15: false,
-              ou25: false,
-              ou35: false,
-              ou45: false,
-              doubleChance: false,
-              drawNoBet: false,
-              exactGoals: false,
-              halftimeResult: false,
-              bttsFirstHalf: false,
-              firstTeamToScore: false,
-          });
-          setCustomSubMarketName('');
-          setCustomSubMarketOptions('');
-      }
-  }, [isCreateBatchSuccess, isAddSubMarketsModalOpen]);
-
-  if (!isMounted) return null;
-
-  // AUTH CHECK REMOVED
-  /*
-  const isAuthorized = address && adminAddress && address.toLowerCase() === adminAddress.toLowerCase();
-  if (!isAuthorized) { ... }
-  */
-
-  const handleCreateSubmit = () => {
-     if (!question || !deadline) {
-         toast({
-             title: "Error",
-             description: "Please fill in the Event/Question and Deadline fields",
-             variant: "destructive"
-         });
-         return;
-     }
-
-     const deadlineDate = new Date(deadline);
-     const now = new Date();
-     const durationSeconds = Math.floor((deadlineDate.getTime() - now.getTime()) / 1000);
-
-     if (durationSeconds <= 0) {
-         toast({
-             title: "Error",
-             description: "Deadline must be in the future",
-             variant: "destructive"
-         });
-         return;
-     }
-
-     let formattedQuestion = question;
-     if (category && category !== 'Sports') {
-        const tag = `[${category.toUpperCase()}]`;
-        if (!formattedQuestion.includes(tag)) {
-            formattedQuestion = `${tag} ${formattedQuestion}`;
-        }
-     }
-
-     // Check if we are using presets or custom options
-     const usePresets = presets.matchWinner || presets.btts || presets.overUnder25;
-
-     if (usePresets) {
-         const questions: string[] = [];
-         const optionsArr: string[][] = [];
-         const durations: bigint[] = [];
-
-         if (presets.matchWinner) {
-             questions.push(`${formattedQuestion} (Match Winner)`);
-             optionsArr.push(["Home Win", "Away Win", "Draw"]);
-             durations.push(BigInt(durationSeconds));
-         }
-         if (presets.btts) {
-             questions.push(`${formattedQuestion} (BTTS)`);
-             optionsArr.push(["Yes", "No"]);
-             durations.push(BigInt(durationSeconds));
-         }
-         if (presets.overUnder25) {
-             questions.push(`${formattedQuestion} (Over/Under 2.5 Goals)`);
-             optionsArr.push(["Over 2.5", "Under 2.5"]);
-             durations.push(BigInt(durationSeconds));
-         }
-
-         // For general creation, parentId is 0
-         const parentIds = Array(questions.length).fill(BigInt(0));
-
-         createMarketBatch({
-             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-             abi: TRUTH_MARKET_ABI,
-             functionName: 'createMarketBatch',
-             args: [questions, optionsArr, durations, parentIds],
-             ...SAFE_AMOY_GAS,
-         });
-     } else {
-         const optionsArray = options.split(',').map(o => o.trim()).filter(o => o.length > 0);
-         if (optionsArray.length < 2) {
-             toast({
-                 title: "Error",
-                 description: "At least 2 options are required for a Custom Market",
-                 variant: "destructive"
-             });
-             return;
-         }
-
-         createMarket({
-             address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-             abi: TRUTH_MARKET_ABI,
-             functionName: 'createMarket',
-             args: [formattedQuestion, optionsArray, BigInt(durationSeconds), BigInt(0)],
-             ...SAFE_AMOY_GAS,
-         });
-     }
-  };
-
-  const handleAddSubMarketsSubmit = () => {
-      if (!selectedParentId || !selectedParentQuestion || !selectedParentDeadline) return;
-
-      const durationSeconds = Math.floor(Number(selectedParentDeadline) - (Date.now() / 1000));
-      if (durationSeconds <= 0) {
-          toast({ title: "Error", description: "Parent market is already expired.", variant: "destructive" });
-          return;
-      }
-
-      const questions: string[] = [];
-      const optionsArr: string[][] = [];
-      const durations: bigint[] = [];
-      const parentIds: bigint[] = [];
-
-      const pId = BigInt(selectedParentId);
-      const dur = BigInt(durationSeconds);
-
-      if (subMarketPresets.btts) {
-          questions.push(`${selectedParentQuestion} (BTTS)`);
-          optionsArr.push(["Yes", "No"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.ou05) {
-          questions.push(`${selectedParentQuestion} (Over/Under 0.5 Goals)`);
-          optionsArr.push(["Over 0.5", "Under 0.5"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.ou15) {
-          questions.push(`${selectedParentQuestion} (Over/Under 1.5 Goals)`);
-          optionsArr.push(["Over 1.5", "Under 1.5"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.ou25) {
-          questions.push(`${selectedParentQuestion} (Over/Under 2.5 Goals)`);
-          optionsArr.push(["Over 2.5", "Under 2.5"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.ou35) {
-          questions.push(`${selectedParentQuestion} (Over/Under 3.5 Goals)`);
-          optionsArr.push(["Over 3.5", "Under 3.5"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.ou45) {
-          questions.push(`${selectedParentQuestion} (Over/Under 4.5 Goals)`);
-          optionsArr.push(["Over 4.5", "Under 4.5"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.doubleChance) {
-          questions.push(`${selectedParentQuestion} (Double Chance)`);
-          optionsArr.push(["Home or Draw", "Away or Draw", "Home or Away"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.drawNoBet) {
-          questions.push(`${selectedParentQuestion} (Draw No Bet)`);
-          optionsArr.push(["Home", "Away"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.exactGoals) {
-          questions.push(`${selectedParentQuestion} (Exact Goals)`);
-          optionsArr.push(["0", "1", "2", "3", "4+"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.halftimeResult) {
-          questions.push(`${selectedParentQuestion} (Half-Time Result)`);
-          optionsArr.push(["Home", "Draw", "Away"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.bttsFirstHalf) {
-          questions.push(`${selectedParentQuestion} (BTTS - 1st Half)`);
-          optionsArr.push(["Yes", "No"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-      if (subMarketPresets.firstTeamToScore) {
-          questions.push(`${selectedParentQuestion} (First Team to Score)`);
-          optionsArr.push(["Home", "Away", "None"]);
-          durations.push(dur);
-          parentIds.push(pId);
-      }
-
-      if (customSubMarketName && customSubMarketOptions) {
-          const opts = customSubMarketOptions.split(',').map(o => o.trim()).filter(o => o.length > 0);
-          if (opts.length >= 2) {
-              questions.push(`${selectedParentQuestion} (${customSubMarketName})`);
-              optionsArr.push(opts);
-              durations.push(dur);
-              parentIds.push(pId);
-          }
-      }
-
-      if (questions.length === 0) {
-          toast({ title: "Error", description: "Select at least one sub-market to add.", variant: "destructive" });
-          return;
-      }
-
-      // Dynamic gas estimation to support batching 10+ markets safely
-      const estimatedGasLimit = BigInt(1000000 + (questions.length * 300000));
-
-      createMarketBatch({
-          address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-          abi: TRUTH_MARKET_ABI,
-          functionName: 'createMarketBatch',
-          args: [questions, optionsArr, durations, parentIds],
-          gas: estimatedGasLimit,
-          maxFeePerGas: SAFE_AMOY_GAS.maxFeePerGas,
-          maxPriorityFeePerGas: SAFE_AMOY_GAS.maxPriorityFeePerGas,
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/market', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({
+          question,
+          category,
+          options,
+          closesAt: new Date(closesAt).toISOString(),
+          fixtureId: fixtureId ? parseInt(fixtureId) : null,
+        }),
       });
-  };
 
-  const handleResolveSubmit = (marketIdToResolve: string) => {
-      if (!marketIdToResolve || !winningOptionIndex) {
-          toast({
-              title: "Error",
-              description: "Please enter the winning option index",
-              variant: "destructive"
-          });
-          return;
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
 
-      resolveMarket({
-          address: TRUTH_MARKET_ADDRESS as `0x${string}`,
-          abi: TRUTH_MARKET_ABI,
-          functionName: 'resolveMarket',
-          args: [BigInt(marketIdToResolve), BigInt(winningOptionIndex)],
-          ...SAFE_AMOY_GAS,
-      });
+      toast({ title: `Market created! ID: ${data.market.id}` });
+      setQuestion('');
+      setClosesAt('');
+      setFixtureId('');
+    } catch (err: any) {
+      toast({ title: 'Failed to create market', description: err.message, variant: 'destructive' });
+    } finally { setIsSubmitting(false); }
   };
 
   return (
-    <div className="container mx-auto p-8 space-y-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-        <div className="text-sm text-muted-foreground bg-secondary px-4 py-2 rounded-md">
-           Connected: <span className="font-mono text-foreground">{address || 'Not Connected'}</span>
+    <Card>
+      <CardHeader><CardTitle className="text-base">Create Market</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>Category</Label>
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sports">Sports</SelectItem>
+              <SelectItem value="politics">Politics</SelectItem>
+              <SelectItem value="economics">Economics</SelectItem>
+              <SelectItem value="entertainment">Entertainment</SelectItem>
+              <SelectItem value="finance">Finance / Crypto</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      </div>
 
-      {/* CREATE MARKET FORM */}
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>Create New Market</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>Question</Label>
+          <Input
+            value={question}
+            onChange={e => setQuestion(e.target.value)}
+            placeholder="e.g. [PL] Arsenal vs Chelsea — Match Winner"
+          />
+          <p className="text-xs text-muted-foreground">Use [PL], [CL], etc. tags for sports leagues</p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Options (comma-separated)</Label>
+          <Input value={optionsText} onChange={e => setOptionsText(e.target.value)} />
+          <div className="flex flex-wrap gap-1">
+            {PRESETS.map(p => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setOptionsText(p.options)}
+                className="text-xs px-2 py-1 bg-muted/50 rounded-md hover:bg-muted transition-colors"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Category</label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a category" />
+            <Label>Closes At</Label>
+            <Input type="datetime-local" value={closesAt} onChange={e => setClosesAt(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Fixture ID (sports only)</Label>
+            <Input
+              type="number"
+              placeholder="football-data.org ID"
+              value={fixtureId}
+              onChange={e => setFixtureId(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <Button onClick={handleCreate} disabled={isSubmitting} className="w-full">
+          {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : 'Create Market'}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Manual Override Panel ─────────────────────────────────────────────────
+function ManualOverridePanel() {
+  const { toast } = useToast();
+  const [lockMarketId, setLockMarketId] = useState('');
+  const [resolveMarketId, setResolveMarketId] = useState('');
+  const [winningOutcome, setWinningOutcome] = useState('');
+  const [isLocking, setIsLocking] = useState(false);
+  const [isResolving, setIsResolving] = useState(false);
+  const [isFiringHeartbeat, setIsFiringHeartbeat] = useState(false);
+  const [markets, setMarkets] = useState<any[]>([]);
+  const [selectedMarket, setSelectedMarket] = useState<any>(null);
+
+  useEffect(() => {
+    supabase
+      .from('markets')
+      .select('id, question, options, status, closes_at')
+      .in('status', ['open', 'locked'])
+      .order('closes_at', { ascending: true })
+      .limit(30)
+      .then(({ data }) => setMarkets(data || []));
+  }, []);
+
+  useEffect(() => {
+    if (resolveMarketId) {
+      const m = markets.find(m => m.id.toString() === resolveMarketId);
+      setSelectedMarket(m || null);
+    }
+  }, [resolveMarketId, markets]);
+
+  const forceLock = async () => {
+    if (!lockMarketId) return;
+    setIsLocking(true);
+    try {
+      const res = await fetch('/api/markets/lock', {
+        method: 'POST',
+        headers: cronHeaders(),
+        body: JSON.stringify({ marketId: parseInt(lockMarketId) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: `Market ${lockMarketId} locked! ${data.betCount} bets committed.` });
+      setLockMarketId('');
+    } catch (err: any) {
+      toast({ title: 'Lock failed', description: err.message, variant: 'destructive' });
+    } finally { setIsLocking(false); }
+  };
+
+  const forceResolve = async () => {
+    if (!resolveMarketId || winningOutcome === '') return;
+    setIsResolving(true);
+    try {
+      const res = await fetch('/api/markets/resolve', {
+        method: 'POST',
+        headers: cronHeaders(),
+        body: JSON.stringify({
+          marketId: parseInt(resolveMarketId),
+          winningOutcomeIndex: parseInt(winningOutcome),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: `Market ${resolveMarketId} resolved! ${data.winnersCount} winners paid.` });
+      setResolveMarketId('');
+      setWinningOutcome('');
+      setSelectedMarket(null);
+    } catch (err: any) {
+      toast({ title: 'Resolve failed', description: err.message, variant: 'destructive' });
+    } finally { setIsResolving(false); }
+  };
+
+  const fireHeartbeat = async () => {
+    setIsFiringHeartbeat(true);
+    try {
+      const res = await fetch('/api/admin/heartbeat', {
+        method: 'POST',
+        headers: cronHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: '❤️ Heartbeat fired! Escape hatch clock reset.' });
+    } catch (err: any) {
+      toast({ title: 'Heartbeat failed', description: err.message, variant: 'destructive' });
+    } finally { setIsFiringHeartbeat(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Force Lock */}
+      <Card className="border-amber-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-400" />
+            Force Lock Market
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">Use when Inngest missed the kickoff. Computes Merkle root and seals the bet book.</p>
+          <div className="flex gap-2">
+            <Select value={lockMarketId} onValueChange={setLockMarketId}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Select market..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Sports">Sports</SelectItem>
-                <SelectItem value="Politics">Politics</SelectItem>
-                <SelectItem value="Crypto">Crypto</SelectItem>
-                <SelectItem value="Custom">Custom</SelectItem>
+                {markets.filter(m => m.status === 'open').map(m => (
+                  <SelectItem key={m.id} value={m.id.toString()}>
+                    {m.id}: {m.question.slice(0, 50)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            <Button onClick={forceLock} disabled={!lockMarketId || isLocking} variant="outline" className="border-amber-500/30">
+              {isLocking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+            </Button>
           </div>
+        </CardContent>
+      </Card>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Question / Event</label>
-            <Input
-              placeholder="Arsenal vs Chelsea"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-            />
-          </div>
+      {/* Force Resolve */}
+      <Card className="border-emerald-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            Force Resolve Market
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">Use when the oracle failed or for non-sports markets (Pulse).</p>
+          <Select value={resolveMarketId} onValueChange={setResolveMarketId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select locked market..." />
+            </SelectTrigger>
+            <SelectContent>
+              {markets.filter(m => m.status === 'locked').map(m => (
+                <SelectItem key={m.id} value={m.id.toString()}>
+                  {m.id}: {m.question.slice(0, 50)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          <div className="space-y-4 border rounded-md p-4">
-            <label className="text-sm font-medium">Market Presets (Select one or more)</label>
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="preset-match-winner"
-                  checked={presets.matchWinner}
-                  onCheckedChange={(checked) => setPresets({...presets, matchWinner: checked === true})}
-                />
-                <label htmlFor="preset-match-winner" className="text-sm">Match Winner (Home/Draw/Away)</label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="preset-btts"
-                  checked={presets.btts}
-                  onCheckedChange={(checked) => setPresets({...presets, btts: checked === true})}
-                />
-                <label htmlFor="preset-btts" className="text-sm">Both Teams to Score (BTTS) (Yes/No)</label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="preset-ou25"
-                  checked={presets.overUnder25}
-                  onCheckedChange={(checked) => setPresets({...presets, overUnder25: checked === true})}
-                />
-                <label htmlFor="preset-ou25" className="text-sm">Over/Under 2.5 Goals (Over/Under)</label>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t mt-4">
-              <label className="text-sm font-medium block mb-2">Or Custom Options (comma-separated, leave presets unchecked)</label>
-              <Input
-                placeholder="Candidate A, Candidate B"
-                value={options}
-                onChange={(e) => setOptions(e.target.value)}
-                disabled={presets.matchWinner || presets.btts || presets.overUnder25}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Betting Deadline</label>
-            <Input
-              type="datetime-local"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-            />
-          </div>
+          {selectedMarket && (
+            <Select value={winningOutcome} onValueChange={setWinningOutcome}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select winning outcome..." />
+              </SelectTrigger>
+              <SelectContent>
+                {(selectedMarket.options as string[]).map((opt: string, i: number) => (
+                  <SelectItem key={i} value={i.toString()}>
+                    {i}: {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           <Button
-            className="w-full"
-            onClick={handleCreateSubmit}
-            disabled={isCreatePending || isCreateConfirming || isCreateBatchPending || isCreateBatchConfirming}
+            onClick={forceResolve}
+            disabled={!resolveMarketId || winningOutcome === '' || isResolving}
+            className="w-full bg-emerald-600 hover:bg-emerald-500"
           >
-            {isCreatePending || isCreateConfirming || isCreateBatchPending || isCreateBatchConfirming ? 'Creating...' : 'Create Market'}
+            {isResolving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Resolving...</> : 'Resolve & Pay Winners'}
           </Button>
         </CardContent>
       </Card>
 
-
-      {/* ADMIN MASTER TABLE */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Active & Recent Markets</CardTitle>
+      {/* Heartbeat */}
+      <Card className="border-blue-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-blue-400" />
+            Emergency Heartbeat
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          {isMarketsLoading ? (
-            <div className="text-center p-4">Loading markets...</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Event / Question</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Pool Vol (USDC)</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(marketsData || []).map((result, index) => {
-                  if (result.status !== 'success' || !result.result) return null;
-                  const marketId = marketIds[index];
-                  const [question, resolved, , voided, totalPool, bettingEndsAt, creator, parentMarketId] = result.result as unknown as [string, boolean, bigint, boolean, bigint, bigint, string, bigint];
-
-                  const isExpired = Number(bettingEndsAt) * 1000 < Date.now();
-                  let status = "Active";
-                  if (voided) status = "Voided";
-                  else if (resolved) status = "Closed";
-                  else if (isExpired) status = "Resolving";
-
-                  let categoryLabel = "Custom";
-                  if (question.includes('[SPORTS]') || question.match(/\[[A-Z0-9]{2,}\]/)) categoryLabel = "Sports";
-                  if (question.includes('[POLITICS]') || question.includes('[US]') || question.includes('[NG]')) categoryLabel = "Politics";
-                  if (question.includes('[CRYPTO]')) categoryLabel = "Crypto";
-
-                  const source = creator.toLowerCase() === BOT_WALLET_ADDRESS ? "Bot" : "Admin";
-                  const isParent = Number(parentMarketId) === 0;
-                  const isLive = liveStatuses[marketId.toString()] || false;
-
-                  return (
-                    <Fragment key={marketId.toString()}>
-                        <TableRow className={!isParent ? "bg-muted/30" : ""}>
-                          <TableCell className="font-mono">
-                              {marketId.toString()}
-                              {!isParent && <div className="text-xs text-muted-foreground mt-1">↳ Parent: {parentMarketId.toString()}</div>}
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate" title={question}>{question}</TableCell>
-                          <TableCell>{categoryLabel}</TableCell>
-                          <TableCell>{formatUnits(totalPool, 18)} tNGN</TableCell>
-                          <TableCell className="space-y-1">
-                            <Badge variant={status === "Active" ? (isLive ? "live" : "open") : status === "Resolving" ? "secondary" : status === "Voided" ? "destructive" : "outline"}>
-                              {status === "Active" ? (isLive ? "LIVE" : "OPEN") : status}
-                            </Badge>
-                            {status === "Active" && (
-                                <div className="mt-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="text-[10px] h-6 px-2"
-                                        onClick={() => toggleLiveStatus(marketId.toString(), isLive)}
-                                    >
-                                        Toggle {isLive ? 'OFF' : 'ON'}
-                                    </Button>
-                                </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                             <Badge variant={source === "Bot" ? "outline" : "default"}>{source}</Badge>
-                          </TableCell>
-                          <TableCell className="space-x-2 flex flex-wrap gap-2">
-                            {isParent && status === "Active" && (
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => {
-                                    setSelectedParentId(marketId.toString());
-                                    setSelectedParentQuestion(question);
-                                    setSelectedParentDeadline(bettingEndsAt);
-                                    setIsAddSubMarketsModalOpen(true);
-                                }}
-                              >
-                                Add Sub-Markets
-                              </Button>
-                            )}
-                            {(status === "Active" || status === "Resolving") && !resolved && !voided && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setResolvingMarketId(resolvingMarketId === marketId.toString() ? null : marketId.toString())}
-                              >
-                                {resolvingMarketId === marketId.toString() ? 'Cancel' : 'Resolve'}
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-
-                        {/* INLINE RESOLVE ROW */}
-                        {resolvingMarketId === marketId.toString() && (
-                            <TableRow>
-                                <TableCell colSpan={7} className="bg-muted/50 p-4">
-                                    <div className="flex items-end gap-4 max-w-lg">
-                                        <div className="space-y-2 flex-1">
-                                            <label className="text-sm font-medium">Winning Option Index</label>
-                                            <Input
-                                                type="number"
-                                                placeholder="e.g. 0 for first option, 1 for second..."
-                                                value={winningOptionIndex}
-                                                onChange={(e) => setWinningOptionIndex(e.target.value)}
-                                            />
-                                        </div>
-                                        <Button
-                                            variant="destructive"
-                                            onClick={() => handleResolveSubmit(marketId.toString())}
-                                            disabled={isResolvePending || isResolveConfirming}
-                                        >
-                                            {isResolvePending || isResolveConfirming ? 'Resolving...' : 'Confirm Resolution'}
-                                        </Button>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
-                        )}
-                    </Fragment>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Resets the 30-day escape hatch clock. Fire immediately if the weekly Inngest job missed a run.
+          </p>
+          <Button
+            onClick={fireHeartbeat}
+            disabled={isFiringHeartbeat}
+            variant="outline"
+            className="w-full border-blue-500/30"
+          >
+            {isFiringHeartbeat ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Firing...</> : '❤️ Fire Heartbeat Now'}
+          </Button>
         </CardContent>
       </Card>
+    </div>
+  );
+}
 
-      {/* ADD SUB-MARKETS MODAL (PRESET GRID) */}
-      <Dialog open={isAddSubMarketsModalOpen} onOpenChange={setIsAddSubMarketsModalOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Add Sub-Markets to #{selectedParentId}</DialogTitle>
-            <DialogDescription>
-              Select popular sub-markets to attach to: <strong>{selectedParentQuestion}</strong>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-6 py-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-btts" checked={subMarketPresets.btts} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, btts: c === true})} />
-                    <label htmlFor="sm-btts" className="text-sm cursor-pointer select-none flex-1">BTTS (Yes/No)</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-ou05" checked={subMarketPresets.ou05} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou05: c === true})} />
-                    <label htmlFor="sm-ou05" className="text-sm cursor-pointer select-none flex-1">O/U 0.5 Goals</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-ou15" checked={subMarketPresets.ou15} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou15: c === true})} />
-                    <label htmlFor="sm-ou15" className="text-sm cursor-pointer select-none flex-1">O/U 1.5 Goals</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-ou25" checked={subMarketPresets.ou25} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou25: c === true})} />
-                    <label htmlFor="sm-ou25" className="text-sm cursor-pointer select-none flex-1">O/U 2.5 Goals</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-ou35" checked={subMarketPresets.ou35} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou35: c === true})} />
-                    <label htmlFor="sm-ou35" className="text-sm cursor-pointer select-none flex-1">O/U 3.5 Goals</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-ou45" checked={subMarketPresets.ou45} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, ou45: c === true})} />
-                    <label htmlFor="sm-ou45" className="text-sm cursor-pointer select-none flex-1">O/U 4.5 Goals</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-dc" checked={subMarketPresets.doubleChance} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, doubleChance: c === true})} />
-                    <label htmlFor="sm-dc" className="text-sm cursor-pointer select-none flex-1">Double Chance</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-dnb" checked={subMarketPresets.drawNoBet} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, drawNoBet: c === true})} />
-                    <label htmlFor="sm-dnb" className="text-sm cursor-pointer select-none flex-1">Draw No Bet</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-eg" checked={subMarketPresets.exactGoals} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, exactGoals: c === true})} />
-                    <label htmlFor="sm-eg" className="text-sm cursor-pointer select-none flex-1">Exact Goals</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-ht" checked={subMarketPresets.halftimeResult} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, halftimeResult: c === true})} />
-                    <label htmlFor="sm-ht" className="text-sm cursor-pointer select-none flex-1">Half-Time Result</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-btts1" checked={subMarketPresets.bttsFirstHalf} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, bttsFirstHalf: c === true})} />
-                    <label htmlFor="sm-btts1" className="text-sm cursor-pointer select-none flex-1">BTTS - 1st Half</label>
-                </div>
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-muted/50 transition-colors">
-                    <Checkbox id="sm-f2s" checked={subMarketPresets.firstTeamToScore} onCheckedChange={(c) => setSubMarketPresets({...subMarketPresets, firstTeamToScore: c === true})} />
-                    <label htmlFor="sm-f2s" className="text-sm cursor-pointer select-none flex-1">First to Score</label>
-                </div>
-            </div>
+// ── Withdrawal Approvals ──────────────────────────────────────────────────
+function WithdrawalPanel() {
+  const { toast } = useToast();
+  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
-            <div className="pt-4 border-t">
-              <h4 className="text-sm font-medium mb-3">Custom Sub-Market</h4>
-              <div className="grid grid-cols-2 gap-4">
-                  <div>
-                      <label className="text-xs mb-1 block">Market Name (e.g. &quot;Total Corners&quot;)</label>
-                      <Input value={customSubMarketName} onChange={(e) => setCustomSubMarketName(e.target.value)} />
-                  </div>
-                  <div>
-                      <label className="text-xs mb-1 block">Options (Comma separated)</label>
-                      <Input value={customSubMarketOptions} onChange={(e) => setCustomSubMarketOptions(e.target.value)} placeholder="Over 10, Under 10" />
-                  </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddSubMarketsModalOpen(false)}>Cancel</Button>
-            <Button
-              onClick={handleAddSubMarketsSubmit}
-              disabled={isCreateBatchPending || isCreateBatchConfirming}
-            >
-              {isCreateBatchPending || isCreateBatchConfirming ? 'Adding...' : 'Add Selected Sub-Markets'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+  const fetchWithdrawals = useCallback(async () => {
+    const res = await fetch('/api/admin/withdrawals', { headers: adminHeaders() });
+    const data = await res.json();
+    setWithdrawals(data.withdrawals || []);
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => { fetchWithdrawals(); }, [fetchWithdrawals]);
+
+  const handleAction = async (withdrawalId: string, action: 'approve' | 'reject', reason?: string) => {
+    setProcessingId(withdrawalId);
+    try {
+      const res = await fetch('/api/admin/withdrawals', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ withdrawalId, action, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: action === 'approve' ? 'Withdrawal approved ✅' : 'Withdrawal rejected' });
+      fetchWithdrawals();
+    } catch (err: any) {
+      toast({ title: 'Action failed', description: err.message, variant: 'destructive' });
+    } finally { setProcessingId(null); }
+  };
+
+  if (isLoading) return <div className="h-24 bg-muted/30 rounded-xl animate-pulse" />;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center justify-between">
+          Pending Large Withdrawals
+          <Badge variant="outline">{withdrawals.length}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {withdrawals.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">No pending approvals</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>User</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Naira to send</TableHead>
+                <TableHead>Bank</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {withdrawals.map((w: any) => (
+                <TableRow key={w.id}>
+                  <TableCell className="text-xs font-mono">{w.users?.email || w.user_id.slice(0, 8)}</TableCell>
+                  <TableCell className="font-medium">₦{w.amount_tngn.toLocaleString()}</TableCell>
+                  <TableCell>₦{w.naira_to_send.toLocaleString()}</TableCell>
+                  <TableCell className="text-xs">{w.bank_code}/{w.account_number}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500"
+                        disabled={processingId === w.id}
+                        onClick={() => handleAction(w.id, 'approve')}
+                      >
+                        {processingId === w.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Approve'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-red-500/30 text-red-400"
+                        disabled={processingId === w.id}
+                        onClick={() => handleAction(w.id, 'reject', 'Rejected by admin')}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Main Admin Page ───────────────────────────────────────────────────────
+export default function AdminPage() {
+  const [session, setSession] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminInput, setAdminInput] = useState('');
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setIsChecking(false);
+    });
+  }, []);
+
+  const handleAdminLogin = () => {
+    if (adminInput === ADMIN_SECRET || adminInput === process.env.NEXT_PUBLIC_ADMIN_SECRET) {
+      setIsAdmin(true);
+      localStorage.setItem('tm_admin', adminInput);
+    }
+  };
+
+  useEffect(() => {
+    const stored = localStorage.getItem('tm_admin');
+    if (stored && (stored === ADMIN_SECRET || stored === process.env.NEXT_PUBLIC_ADMIN_SECRET)) {
+      setIsAdmin(true);
+    }
+  }, []);
+
+  if (isChecking) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Card className="w-80">
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4" /> Admin Access</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              type="password"
+              placeholder="Admin secret"
+              value={adminInput}
+              onChange={e => setAdminInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdminLogin()}
+            />
+            <Button className="w-full" onClick={handleAdminLogin}>Enter</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto p-4 sm:p-8 pb-24 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <Shield className="w-6 h-6 text-amber-400" /> TruthMarket Admin
+        </h1>
+        <Badge variant="outline" className="text-emerald-400 border-emerald-400/30">Live</Badge>
+      </div>
+
+      <Tabs defaultValue="treasury">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="treasury">Treasury</TabsTrigger>
+          <TabsTrigger value="create">Create</TabsTrigger>
+          <TabsTrigger value="override">Override</TabsTrigger>
+          <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
+        <TabsContent value="create" className="pt-4"><CreateMarketPanel /></TabsContent>
+        <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
+        <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>
+      </Tabs>
     </div>
   );
 }

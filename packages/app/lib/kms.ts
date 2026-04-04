@@ -1,96 +1,128 @@
-import { KMSClient, GenerateDataKeyCommand, GenerateDataKeyCommandInput } from '@aws-sdk/client-kms';
-import { Wallet } from 'ethers';
+/**
+ * lib/kms.ts
+ * AWS KMS-based deterministic EVM wallet derivation.
+ * Private keys are NEVER stored. Derived on-demand from the KMS master secret,
+ * used for ~200ms, then garbage collected.
+ *
+ * Setup:
+ *   1. Create an HMAC_SHA_256 Customer Master Key in AWS KMS
+ *   2. Set AWS_KMS_KEY_ID, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY in env
+ *   3. IAM policy must include kms:GenerateMac on the CMK
+ */
 
-// Environment variables
-const KMS_KEY_ID = process.env.KMS_KEY_ID || 'alias/truthmarket-master-key';
-// Explicitly check for AWS credentials. If they don't exist, force the mock to prevent crashes.
-const hasAwsCredentials = !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY;
-const USE_MOCK_KMS = process.env.USE_MOCK_KMS === 'true' || !hasAwsCredentials;
+import { privateKeyToAccount } from 'viem/accounts';
+import { createWalletClient, http } from 'viem';
+import { polygon, polygonAmoy } from 'viem/chains';
 
-let kmsClient: KMSClient | null = null;
-
-if (!USE_MOCK_KMS) {
-  kmsClient = new KMSClient({
-    region: process.env.AWS_REGION || 'us-east-1',
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
-    },
-  });
-}
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const CHAIN = IS_PRODUCTION ? polygon : polygonAmoy;
+const RPC_URL = IS_PRODUCTION
+  ? `https://polygon-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`
+  : `https://polygon-amoy.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY || ''}`;
 
 /**
- * Generates an EVM wallet for a given user.
- * In production, it uses AWS KMS to generate a data key which acts as the master secret,
- * then derives a deterministic private key using HMAC-SHA256(master_secret, user_id).
- * The master secret and private key are kept only in memory and garbage collected.
- *
- * @param userId - The user's ID string (e.g. UUID)
- * @returns { walletAddress: string } - The derived wallet address
+ * Derive a deterministic EVM wallet address for a given userId.
+ * Returns ONLY the address — never the private key.
  */
-export async function generateUserWallet(userId: string): Promise<{ walletAddress: string }> {
-  if (USE_MOCK_KMS || !kmsClient) {
-    // Local dev mock: generate a random wallet and just return the address
-    // We only need the public address to store in Supabase
-    const wallet = Wallet.createRandom();
-    return { walletAddress: wallet.address };
+export async function deriveWalletAddress(userId: string): Promise<string> {
+  if (!process.env.AWS_KMS_KEY_ID) {
+    // Development fallback — mock address deterministic from userId
+    const mockAddr = `0x${Buffer.from(userId.replace(/-/g, '')).slice(0, 20).toString('hex').padStart(40, '0')}`;
+    console.warn('[KMS] AWS_KMS_KEY_ID not set — using mock address:', mockAddr);
+    return mockAddr;
   }
-
-  // Production: generate a data key via AWS KMS to use as the base secret for the user
-  const params: GenerateDataKeyCommandInput = {
-    KeyId: KMS_KEY_ID,
-    KeySpec: 'AES_256', // 32 bytes
-  };
 
   try {
-    const command = new GenerateDataKeyCommand(params);
-    const response = await kmsClient.send(command);
+    const { KMSClient, GenerateMacCommand } = await import('@aws-sdk/client-kms');
 
-    if (!response.Plaintext) {
-      throw new Error('KMS failed to return plaintext key');
-    }
+    const kms = new KMSClient({
+      region: process.env.AWS_REGION || 'eu-west-1',
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+    });
 
-    const masterSecret = Buffer.from(response.Plaintext);
+    const result = await kms.send(new GenerateMacCommand({
+      KeyId: process.env.AWS_KMS_KEY_ID,
+      Message: Buffer.from(userId),
+      MacAlgorithm: 'HMAC_SHA_256',
+    }));
 
-    // Use Web Crypto API for HMAC-SHA256 derivation instead of Node 'crypto'
-    const crypto = globalThis.crypto;
-    const key = await crypto.subtle.importKey(
-        'raw',
-        masterSecret,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-    );
-    const signature = await crypto.subtle.sign(
-        'HMAC',
-        key,
-        new TextEncoder().encode(userId)
-    );
-    const privateKeyHex = Array.from(new Uint8Array(signature))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
+    if (!result.Mac) throw new Error('KMS GenerateMac returned no data');
 
-    const wallet = new Wallet('0x' + privateKeyHex);
+    // Use the 32-byte MAC as the private key
+    const privateKeyHex = `0x${Buffer.from(result.Mac).slice(0, 32).toString('hex')}` as `0x${string}`;
+    const account = privateKeyToAccount(privateKeyHex);
 
-    // Overwrite memory containing the sensitive data to help with garbage collection
-    masterSecret.fill(0);
-
-    return { walletAddress: wallet.address };
+    // Return address only — private key is GC'd when this function returns
+    return account.address;
   } catch (error) {
-    console.error('Error generating user wallet with KMS:', error);
-    throw new Error('Failed to generate user wallet');
+    console.error('[KMS] Failed to derive wallet address:', error);
+    throw new Error('Wallet derivation failed. Check AWS KMS configuration.');
   }
 }
 
 /**
- * Retrieves the Master Protocol Wallet for backend transaction signing.
- * In a fully KMS-managed setup, this could use KMS for signing directly,
- * but for this pivot, we use a KMS-managed master key to derive it or an ENV var.
+ * Sign and send a contract transaction using the KMS-derived admin wallet.
+ * Used for: commitBetState, resolveMarket (on-chain), heartbeat.
+ *
+ * The admin wallet is derived from the special key 'admin_protocol_wallet'.
+ * This is the Master Protocol Wallet that holds all tNGN on-chain.
  */
-export function getMasterProtocolWallet(): Wallet {
-  const MASTER_PRIVATE_KEY = process.env.MASTER_PRIVATE_KEY;
-  if (!MASTER_PRIVATE_KEY) {
-    throw new Error('MASTER_PRIVATE_KEY is not configured in the environment variables.');
+export async function signAdminTransaction(
+  contractAddress: string,
+  abi: any[],
+  functionName: string,
+  args: any[]
+): Promise<string> {
+  if (!process.env.AWS_KMS_KEY_ID) {
+    console.warn('[KMS] Skipping on-chain tx — no AWS_KMS_KEY_ID set');
+    return '0x_mock_tx_hash_no_kms_configured';
   }
-  return new Wallet(MASTER_PRIVATE_KEY);
+
+  try {
+    const { KMSClient, GenerateMacCommand } = await import('@aws-sdk/client-kms');
+
+    const kms = new KMSClient({
+      region: process.env.AWS_REGION || 'eu-west-1',
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+    });
+
+    // Derive the admin signing key from a fixed seed
+    const result = await kms.send(new GenerateMacCommand({
+      KeyId: process.env.AWS_KMS_KEY_ID,
+      Message: Buffer.from('truthmarket_admin_protocol_wallet_v1'),
+      MacAlgorithm: 'HMAC_SHA_256',
+    }));
+
+    if (!result.Mac) throw new Error('KMS GenerateMac returned no data');
+
+    const privateKeyHex = `0x${Buffer.from(result.Mac).slice(0, 32).toString('hex')}` as `0x${string}`;
+    const account = privateKeyToAccount(privateKeyHex);
+
+    const walletClient = createWalletClient({
+      account,
+      chain: CHAIN,
+      transport: http(RPC_URL || undefined),
+    });
+
+    const txHash = await walletClient.writeContract({
+      address: contractAddress as `0x${string}`,
+      abi,
+      functionName,
+      args,
+    });
+
+    console.log(`[KMS] ${functionName} tx submitted: ${txHash}`);
+
+    // Private key is GC'd here
+    return txHash;
+  } catch (error) {
+    console.error(`[KMS] Failed to sign ${functionName} transaction:`, error);
+    throw error;
+  }
 }

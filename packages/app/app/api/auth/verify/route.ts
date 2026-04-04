@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { generateUserWallet } from '@/lib/kms';
+import { deriveWalletAddress } from '@/lib/kms';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy-for-build.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy_key';
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
         const newUserId = globalThis.crypto.randomUUID();
 
         // 2. Generate EVM Wallet via KMS
-        const { walletAddress } = await generateUserWallet(newUserId);
+        const walletAddress = await deriveWalletAddress(newUserId);
 
         // 3. Insert into DB with the generated wallet
         const { data: newUser, error: insertError } = await supabase
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
                 wallet_address: walletAddress.toLowerCase(),
                 is_custodial: true,
                 tngn_balance: 0,
-                free_bet_credits: 0
+                // free_bet_credits: 0
             })
             .select()
             .single();
