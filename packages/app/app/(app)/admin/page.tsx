@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity, Sparkles, Upload, Trash2, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
+const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '59e198be55679596463b702bba86925a6267d2a79368ecf421aa0436a54b685c';
 
 function adminHeaders() {
   return {
@@ -777,15 +777,17 @@ export default function AdminPage() {
   }, []);
 
   const handleAdminLogin = () => {
-    if (adminInput === ADMIN_SECRET || adminInput === process.env.NEXT_PUBLIC_ADMIN_SECRET) {
+    if (adminInput === ADMIN_SECRET) {
       setIsAdmin(true);
       localStorage.setItem('tm_admin', adminInput);
+    } else {
+      alert("Invalid key. Check NEXT_PUBLIC_ADMIN_SECRET or hardcoded fallback.");
     }
   };
 
   useEffect(() => {
     const stored = localStorage.getItem('tm_admin');
-    if (stored && (stored === ADMIN_SECRET || stored === process.env.NEXT_PUBLIC_ADMIN_SECRET)) {
+    if (stored && stored === ADMIN_SECRET) {
       setIsAdmin(true);
     }
   }, []);
