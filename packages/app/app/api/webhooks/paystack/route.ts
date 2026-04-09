@@ -88,7 +88,7 @@ export async function POST(req: Request) {
     // via the treasury dashboard (Phase 3 admin panel).
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('tngn_balance')
+      .select('tngn_balance, bonus_balance')
       .eq('id', userId)
       .single();
 
@@ -103,10 +103,14 @@ export async function POST(req: Request) {
     }
 
     const newBalance = (userData.tngn_balance || 0) + tNGNToCredit;
+    const betCredit = amountInNGN * 0.01;
 
     const { error: updateError } = await supabaseAdmin
       .from('users')
-      .update({ tngn_balance: newBalance })
+      .update({
+        tngn_balance: newBalance,
+        bonus_balance: (userData.bonus_balance || 0) + betCredit,
+      })
       .eq('id', userId);
 
     if (updateError) {
@@ -124,12 +128,28 @@ export async function POST(req: Request) {
       .update({ status: 'completed' })
       .eq('reference', reference);
 
-    console.log(`Deposit complete: user=${userId}, NGN=${amountInNGN}, tNGN credited=${tNGNToCredit}, spread=${spreadAmount}`);
+    // 6. Log Treasury Activities
+    await supabaseAdmin.from('treasury_log').insert({
+      type: 'deposit_spread',
+      amount_tngn: spreadAmount,
+      user_id: userId,
+      created_at: new Date().toISOString(),
+    });
+
+    await supabaseAdmin.from('treasury_log').insert({
+      type: 'deposit_bet_credit',
+      amount_tngn: -betCredit, // negative = cost to platform
+      user_id: userId,
+      created_at: new Date().toISOString(),
+    });
+
+    console.log(`Deposit complete: user=${userId}, NGN=${amountInNGN}, tNGN credited=${tNGNToCredit}, bet credit=${betCredit}, spread=${spreadAmount}`);
 
     return NextResponse.json({
       status: 'success',
       tNGNcredited: tNGNToCredit,
       spreadCaptured: spreadAmount,
+      betCredit: betCredit,
     }, { status: 200 });
 
   } catch (error: unknown) {

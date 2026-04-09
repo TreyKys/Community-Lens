@@ -180,7 +180,7 @@ contract TruthMarket is Ownable, ReentrancyGuard {
     function emergencyWithdraw() external nonReentrant {
         require(
             block.timestamp > lastHeartbeat + HEARTBEAT_TIMEOUT,
-            unicode"Heartbeat active — platform is running"
+            "Heartbeat active - platform is running"
         );
         require(!hasEmergencyWithdrawn[msg.sender], "Already withdrawn");
         require(escrowBalances[msg.sender] > 0, "No balance to withdraw");
