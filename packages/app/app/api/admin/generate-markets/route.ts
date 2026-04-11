@@ -68,31 +68,41 @@ Generate prediction markets from this document. Focus on:
 
 Remember: output ONLY the JSON array.`;
 
-    // Call Claude API
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Call Gemini API
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      console.error('Missing GEMINI_API_KEY');
+      return NextResponse.json({ error: 'AI API key not configured' }, { status: 500 });
+    }
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        // API key is injected by the platform when running in claude.ai
-        // For standalone deployment, set ANTHROPIC_API_KEY env var
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userPrompt }],
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }]
+        },
+        contents: [{
+          parts: [{ text: userPrompt }]
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 4000,
+          responseMimeType: "application/json"
+        }
       }),
     });
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('Claude API error:', err);
+      console.error('Gemini API error:', err);
       return NextResponse.json({ error: 'AI generation failed. Try again.' }, { status: 500 });
     }
 
     const data = await response.json();
-    const rawText = data.content?.[0]?.text || '';
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     // Parse the JSON array from the response
     let markets: any[] = [];
