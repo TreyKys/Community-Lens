@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -40,13 +39,13 @@ interface MarketCardProps {
 function getOptionStyle(opt: string) {
   const o = opt.toLowerCase();
   if (o.includes('yes') || o.includes('home') || o.includes('win') || o.includes('over')) {
-    return 'peer-data-[state=checked]:bg-blue-500/15 peer-data-[state=checked]:border-blue-500/60 hover:border-blue-500/30 hover:bg-blue-500/5';
+    return 'hover:border-blue-500/30 hover:bg-blue-500/5 aria-[selected=true]:bg-blue-500/15 aria-[selected=true]:border-blue-500/60';
   }
   if (o.includes('no') || o.includes('away') || o.includes('lose') || o.includes('under')) {
-    return 'peer-data-[state=checked]:bg-red-500/15 peer-data-[state=checked]:border-red-500/60 hover:border-red-500/30 hover:bg-red-500/5';
+    return 'hover:border-red-500/30 hover:bg-red-500/5 aria-[selected=true]:bg-red-500/15 aria-[selected=true]:border-red-500/60';
   }
   // Draw / neutral
-  return 'peer-data-[state=checked]:bg-amber-500/15 peer-data-[state=checked]:border-amber-500/60 hover:border-amber-500/30 hover:bg-amber-500/5';
+  return 'hover:border-amber-500/30 hover:bg-amber-500/5 aria-[selected=true]:bg-amber-500/15 aria-[selected=true]:border-amber-500/60';
 }
 
 function BettingInterface({
@@ -139,10 +138,6 @@ function BettingInterface({
     }
   };
 
-  const stakeNum = Number(amount);
-  const rake = stakeNum * 0.015;
-  const netStake = stakeNum - rake;
-
   return (
     <div className="space-y-4 pt-2">
       {/* Real bet distribution bars */}
@@ -167,22 +162,24 @@ function BettingInterface({
       )}
 
       {/* Option selector */}
-      <RadioGroup value={selectedOption} onValueChange={setSelectedOption} className="grid grid-cols-3 gap-2">
-        {market.options.map((opt, idx) => (
-          <div key={idx}>
-            <RadioGroupItem value={idx.toString()} id={`m${market.id}-opt${idx}`} className="peer sr-only" />
-            <Label
-              htmlFor={`m${market.id}-opt${idx}`}
+      <div className="grid grid-cols-3 gap-2">
+        {market.options.map((opt, idx) => {
+          const isSelected = selectedOption === idx.toString();
+          return (
+            <div
+              key={idx}
+              onClick={() => setSelectedOption(idx.toString())}
+              aria-selected={isSelected}
               className={cn(
                 'flex items-center justify-center rounded-lg border border-muted bg-popover/50 p-3 cursor-pointer transition-all text-sm font-medium text-center',
                 getOptionStyle(opt)
               )}
             >
               {opt}
-            </Label>
-          </div>
-        ))}
-      </RadioGroup>
+            </div>
+          );
+        })}
+      </div>
 
       {/* Amount input */}
       <div className="relative">
@@ -197,24 +194,6 @@ function BettingInterface({
         />
       </div>
 
-      {/* Fee preview */}
-      {stakeNum >= 100 && (
-        <div className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-2.5 space-y-1">
-          <div className="flex justify-between">
-            <span>Entry rake (1.5%)</span>
-            <span>₦{rake.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between font-medium text-foreground">
-            <span>Net stake</span>
-            <span>₦{netStake.toFixed(2)}</span>
-          </div>
-          {stakeNum >= 500 && (
-            <div className="text-amber-400 flex items-center gap-1 pt-0.5 border-t border-border/50 mt-1">
-              🏆 This slip qualifies for the weekly jackpot
-            </div>
-          )}
-        </div>
-      )}
 
       {balance !== null && (
         <p className="text-xs text-right text-muted-foreground">
@@ -445,8 +424,9 @@ function buildCategoryFilter(category: string, subcategory: string | null) {
     base.value = 'politics';
   } else if (category === 'crypto') {
     base.value = 'finance';
-  } else if (category === 'pop') {
+  } else if (category === 'entertainment') {
     base.value = 'entertainment';
+    // Optionally subcategory matching can be added here if questions have tags like [POP] or [MUSIC]
   } else if (category === 'economy') {
     base.value = 'economics';
   } else if (category === 'tech') {
