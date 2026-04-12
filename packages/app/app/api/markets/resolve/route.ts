@@ -118,15 +118,16 @@ export async function POST(request: Request) {
       if (u) await supabaseAdmin.from('users').update({ tngn_balance: (u.tngn_balance || 0) + payout }).eq('id', bet.user_id);
       await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
       // Win notification
-      // non-critical
-      Promise.resolve(
-        supabaseAdmin.from('notifications').insert({
+      try {
+        await supabaseAdmin.from('notifications').insert({
           user_id: bet.user_id,
           type: 'bet_won',
           message: `You won! ₦${payout.toLocaleString()} has been credited to your account. 🎉`,
           amount: payout,
-        })
-      ).catch(() => {});
+        });
+      } catch (err) {
+        // non-critical
+      }
     }
 
     // Mark losers + apply First Bet Insurance

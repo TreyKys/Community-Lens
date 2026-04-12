@@ -160,6 +160,14 @@ export async function POST(request: Request) {
       .update({ status: 'queued_for_paystack' })
       .eq('id', withdrawal.id);
 
+    // 8. Log Treasury Activities
+    await supabaseAdmin.from('treasury_log').insert({
+      type: 'withdrawal_fee',
+      amount_tngn: spreadAmount + WITHDRAWAL_FLAT_FEE,
+      user_id: user.id,
+      created_at: new Date().toISOString(),
+    });
+
     console.log(`Withdrawal queued: user=${user.id}, tNGN=${amountTNGN}, NGN to send=${nairaToSend}`);
 
     return NextResponse.json({

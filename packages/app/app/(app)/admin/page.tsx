@@ -11,10 +11,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity } from 'lucide-react';
+import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity, Sparkles, Upload, Trash2, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
+const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '59e198be55679596463b702bba86925a6267d2a79368ecf421aa0436a54b685c';
 
 function adminHeaders() {
   return {
@@ -519,6 +519,249 @@ function WithdrawalPanel() {
   );
 }
 
+// ── AI Market Generator ───────────────────────────────────────────────────
+function AIMarketGenerator() {
+  const { toast } = useToast();
+  const [docText, setDocText] = useState('');
+  const [docName, setDocName] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDocName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => setDocText(ev.target?.result as string || '');
+    reader.readAsText(file);
+  };
+
+  const handleGenerate = async () => {
+    if (!docText.trim()) {
+      toast({ title: 'Paste or upload a document first', variant: 'destructive' });
+      return;
+    }
+    setIsGenerating(true);
+    try {
+      const res = await fetch('/api/admin/generate-markets', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ documentContent: docText, documentName: docName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDrafts(data.markets);
+      toast({ title: `${data.markets.length} markets generated. Review and submit.` });
+    } catch (err: any) {
+      toast({ title: 'Generation failed', description: err.message, variant: 'destructive' });
+    } finally { setIsGenerating(false); }
+  };
+
+  const updateDraft = (id: string, field: string, value: any) => {
+    setDrafts(prev => prev.map(d => d.id === id ? { ...d, [field]: value } : d));
+  };
+
+  const removeDraft = (id: string) => {
+    setDrafts(prev => prev.filter(d => d.id !== id));
+  };
+
+  const toggleApprove = (id: string) => {
+    setDrafts(prev => prev.map(d => d.id === id ? { ...d, approved: !d.approved } : d));
+  };
+
+  const approveAll = () => setDrafts(prev => prev.map(d => ({ ...d, approved: true })));
+
+  const handleSubmitApproved = async () => {
+    const approved = drafts.filter(d => d.approved);
+    if (approved.length === 0) {
+      toast({ title: 'Approve at least one market first', variant: 'destructive' });
+      return;
+    }
+    setIsSubmitting(true);
+    let created = 0;
+    let failed = 0;
+    for (const draft of approved) {
+      try {
+        const res = await fetch('/api/admin/market', {
+          method: 'POST',
+          headers: adminHeaders(),
+          body: JSON.stringify({
+            question: draft.question,
+            category: draft.category,
+            sport: draft.sport,
+            options: draft.options,
+            closesAt: draft.closes_at,
+            fixtureId: draft.fixture_id,
+            homeTeam: draft.home_team,
+            awayTeam: draft.away_team,
+          }),
+        });
+        if (res.ok) { created++; } else { failed++; }
+      } catch { failed++; }
+    }
+    setDrafts(prev => prev.filter(d => !d.approved));
+    toast({
+      title: `${created} market${created !== 1 ? 's' : ''} created${failed > 0 ? `, ${failed} failed` : ''}`,
+    });
+    setIsSubmitting(false);
+  };
+
+  const approvedCount = drafts.filter(d => d.approved).length;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-400" />
+            AI Market Generator
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Paste a document (fixture list, news article, event schedule) or upload a text file.
+            AI will generate prediction markets. You review and approve before anything goes live.
+          </p>
+
+          <div className="flex gap-2">
+            <label className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg cursor-pointer hover:bg-muted/30 transition-colors text-sm">
+              <Upload className="w-4 h-4" />
+              Upload .txt or .csv
+              <input type="file" accept=".txt,.csv,.md" className="sr-only" onChange={handleFileUpload} />
+            </label>
+            {docName && <span className="text-xs text-muted-foreground self-center truncate max-w-48">{docName}</span>}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Or paste document content directly</Label>
+            <textarea
+              className="w-full h-40 bg-muted/30 border border-border rounded-lg p-3 text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Paste fixture lists, news, schedules, event briefs here..."
+              value={docText}
+              onChange={e => setDocText(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground text-right">{docText.length.toLocaleString()} / 50,000 chars</p>
+          </div>
+
+          <Button onClick={handleGenerate} disabled={isGenerating || !docText.trim()} className="w-full gap-2">
+            {isGenerating
+              ? <><Loader2 className="w-4 h-4 animate-spin" />Generating markets...</>
+              : <><Sparkles className="w-4 h-4" />Generate Markets with AI</>
+            }
+          </Button>
+        </CardContent>
+      </Card>
+
+      {drafts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">
+                Review Drafts ({drafts.length} generated, {approvedCount} approved)
+              </CardTitle>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={approveAll}>
+                  Approve All
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-7 text-xs gap-1 bg-emerald-600 hover:bg-emerald-500"
+                  disabled={approvedCount === 0 || isSubmitting}
+                  onClick={handleSubmitApproved}
+                >
+                  {isSubmitting
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Send className="w-3 h-3" />
+                  }
+                  Submit {approvedCount} Approved
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+              {drafts.map(draft => (
+                <div
+                  key={draft.id}
+                  className={cn(
+                    'border rounded-xl p-4 space-y-3 transition-all',
+                    draft.approved ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={draft.approved}
+                        onChange={() => toggleApprove(draft.id)}
+                        className="mt-1 w-4 h-4 cursor-pointer accent-emerald-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <input
+                          type="text"
+                          value={draft.question}
+                          onChange={e => updateDraft(draft.id, 'question', e.target.value)}
+                          className="w-full bg-transparent text-sm font-medium border-b border-transparent hover:border-border focus:border-primary focus:outline-none pb-0.5"
+                        />
+                        {draft.notes && (
+                          <p className="text-xs text-muted-foreground mt-1 italic">{draft.notes}</p>
+                        )}
+                      </div>
+                    </div>
+                    <button onClick={() => removeDraft(draft.id)} className="text-muted-foreground hover:text-red-400 transition-colors shrink-0">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pl-7">
+                    <div>
+                      <Label className="text-xs">Category</Label>
+                      <Select value={draft.category} onValueChange={v => updateDraft(draft.id, 'category', v)}>
+                        <SelectTrigger className="h-7 text-xs mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sports">Sports</SelectItem>
+                          <SelectItem value="politics">Politics</SelectItem>
+                          <SelectItem value="economics">Economics</SelectItem>
+                          <SelectItem value="entertainment">Entertainment</SelectItem>
+                          <SelectItem value="finance">Finance</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Closes At</Label>
+                      <Input
+                        type="datetime-local"
+                        value={draft.closes_at ? draft.closes_at.slice(0, 16) : ''}
+                        onChange={e => updateDraft(draft.id, 'closes_at', new Date(e.target.value).toISOString())}
+                        className="h-7 text-xs mt-1"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-xs">Options (comma-separated)</Label>
+                      <Input
+                        value={(draft.options as string[]).join(', ')}
+                        onChange={e => updateDraft(draft.id, 'options', e.target.value.split(',').map((o: string) => o.trim()).filter(Boolean))}
+                        className="h-7 text-xs mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pl-7 flex flex-wrap gap-1">
+                    {(draft.options as string[]).map((opt: string, i: number) => (
+                      <Badge key={i} variant="outline" className="text-xs">{opt}</Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ── Main Admin Page ───────────────────────────────────────────────────────
 export default function AdminPage() {
   const [session, setSession] = useState<any>(null);
@@ -534,15 +777,17 @@ export default function AdminPage() {
   }, []);
 
   const handleAdminLogin = () => {
-    if (adminInput === ADMIN_SECRET || adminInput === process.env.NEXT_PUBLIC_ADMIN_SECRET) {
+    if (adminInput === ADMIN_SECRET) {
       setIsAdmin(true);
       localStorage.setItem('tm_admin', adminInput);
+    } else {
+      alert("Invalid key. Check NEXT_PUBLIC_ADMIN_SECRET or hardcoded fallback.");
     }
   };
 
   useEffect(() => {
     const stored = localStorage.getItem('tm_admin');
-    if (stored && (stored === ADMIN_SECRET || stored === process.env.NEXT_PUBLIC_ADMIN_SECRET)) {
+    if (stored && stored === ADMIN_SECRET) {
       setIsAdmin(true);
     }
   }, []);
@@ -579,14 +824,16 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
+          <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
           <TabsTrigger value="override">Override</TabsTrigger>
           <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
         </TabsList>
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
+        <TabsContent value="ai" className="pt-4"><AIMarketGenerator /></TabsContent>
         <TabsContent value="create" className="pt-4"><CreateMarketPanel /></TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
         <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>

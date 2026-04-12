@@ -86,7 +86,7 @@ export function WalletModal() {
     setIsDepositLoading(true);
 
     const handler = window.PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || 'pk_test_e315d890cc4f59e3596b602f4f1b2ae17c064ec3',
       email: session.user.email,
       amount: totalCharge,
       currency: 'NGN',

@@ -166,7 +166,7 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
                     <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={v => `₦${(v/1000).toFixed(0)}k`} dx={-4} width={40} />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(v: any, name: any) => [`₦${Number(v).toLocaleString()}`, String(name)]}
+                      formatter={(v: any, name: any) => [`₦${Number(v).toLocaleString()}`, name as string]}
                     />
                     {chartOptions.map((opt, i) => (
                       <Area

@@ -6,9 +6,6 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// POST /api/admin/market — create a market in Supabase
-// This is the new off-chain market creation. No gas. No blockchain transaction.
-// The smart contract only learns about the market when commitBetState is called at lock time.
 export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization');
@@ -18,14 +15,9 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const {
-      title,
-      question,
-      category,
-      options,
-      closesAt,
-      parentMarketId,
-      fixtureId,        // football-data.org match ID (sports only)
-      isJackpotEligible, // mark for jackpot engine
+      title, question, category, options, closesAt,
+      parentMarketId, fixtureId, isJackpotEligible,
+      sport, homeTeam, awayTeam, leagueCode,
     } = body;
 
     if (!question || !category || !options || !closesAt) {
@@ -48,10 +40,14 @@ export async function POST(request: Request) {
         parent_market_id: parentMarketId || null,
         fixture_id: fixtureId || null,
         is_jackpot_eligible: isJackpotEligible || false,
+        sport: sport || 'football',
+        home_team: homeTeam || null,
+        away_team: awayTeam || null,
+        league_code: leagueCode || null,
         total_pool: 0,
         created_at: new Date().toISOString(),
       })
-      .select('id, title, question, category, closes_at, status')
+      .select('id, title, question, category, closes_at, status, sport')
       .single();
 
     if (error) {
@@ -66,26 +62,18 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH /api/admin/market — update market status or metadata
 export async function PATCH(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Bearer ${process.env.ADMIN_SECRET}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
     const { marketId, updates } = await request.json();
     if (!marketId || !updates) {
       return NextResponse.json({ error: 'Missing marketId or updates' }, { status: 400 });
     }
-
-    const { error } = await supabaseAdmin
-      .from('markets')
-      .update(updates)
-      .eq('id', marketId);
-
+    const { error } = await supabaseAdmin.from('markets').update(updates).eq('id', marketId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
