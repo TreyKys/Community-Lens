@@ -7,7 +7,7 @@ export default function Home() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-65px)] p-8 text-center bg-gradient-to-b from-background to-muted/20">
       <main className="flex flex-col gap-6 max-w-2xl items-center">
-        <h1 className="text-6xl font-extrabold tracking-tight font-saira">
+        <h1 className="text-6xl font-extrabold tracking-tight">
           TruthMarket
         </h1>
         <p className="text-2xl text-muted-foreground font-light">

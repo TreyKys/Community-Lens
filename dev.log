@@ -201,3 +201,154 @@ WalletConnect Core is already initialized. This is probably a mistake and can le
     url: 'https://api.web3modal.org/appkit/v1/config?projectId=your-walletconnect-project-id&st=appkit&sv=html-core-1.7.8'
   }
 }
+ ✓ Compiled in 65.3s (11175 modules)
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 5 times.
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 5 times.
+ GET / 200 in 2904ms
+[Reown Config] Failed to fetch remote project configuration. Using local/default values. Error: HTTP status code: 403
+    at fetchData (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:9:21)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async FetchUtil.get (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:24:26)
+    at async Object.fetchProjectConfig (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/controllers/ApiController.js:118:26)
+    at async Object.fetchRemoteFeatures (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/utils/ConfigUtil.js:186:32)
+    at async AppKit.initialize (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/client/appkit-base-client.js:237:31) {
+  [cause]: Response {
+    status: 403,
+    statusText: 'Forbidden',
+    headers: Headers {
+      date: 'Mon, 13 Apr 2026 09:21:04 GMT',
+      'content-type': 'text/plain; charset=UTF-8',
+      'content-length': '9',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=300, s-maxage=300',
+      server: 'cloudflare',
+      'cf-ray': '9eb966035c3c2300-ORD',
+      'alt-svc': 'h3=":443"; ma=86400'
+    },
+    body: ReadableStream { locked: false, state: 'readable', supportsBYOB: true },
+    bodyUsed: false,
+    ok: false,
+    redirected: false,
+    type: 'default',
+    url: 'https://api.web3modal.org/appkit/v1/config?projectId=your-walletconnect-project-id&st=appkit&sv=html-core-1.7.8'
+  }
+}
+ HEAD / 200 in 60ms
+ GET /markets 200 in 139ms
+ ○ Compiling /api/jackpot ...
+ ✓ Compiled /api/jackpot in 2.3s (5968 modules)
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 6 times.
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 6 times.
+[Reown Config] Failed to fetch remote project configuration. Using local/default values. Error: HTTP status code: 403
+    at fetchData (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:9:21)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async FetchUtil.get (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:24:26)
+    at async Object.fetchProjectConfig (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/controllers/ApiController.js:118:26)
+    at async Object.fetchRemoteFeatures (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/utils/ConfigUtil.js:186:32)
+    at async AppKit.initialize (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/client/appkit-base-client.js:237:31) {
+  [cause]: Response {
+    status: 403,
+    statusText: 'Forbidden',
+    headers: Headers {
+      date: 'Mon, 13 Apr 2026 09:21:21 GMT',
+      'content-type': 'text/plain; charset=UTF-8',
+      'content-length': '9',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=300, s-maxage=300',
+      server: 'cloudflare',
+      'cf-ray': '9eb9666e0c2be810-ORD',
+      'alt-svc': 'h3=":443"; ma=86400'
+    },
+    body: ReadableStream { locked: false, state: 'readable', supportsBYOB: true },
+    bodyUsed: false,
+    ok: false,
+    redirected: false,
+    type: 'default',
+    url: 'https://api.web3modal.org/appkit/v1/config?projectId=your-walletconnect-project-id&st=appkit&sv=html-core-1.7.8'
+  }
+}
+ ✓ Compiled in 5.4s (11230 modules)
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 7 times.
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 7 times.
+ GET / 200 in 1458ms
+[Reown Config] Failed to fetch remote project configuration. Using local/default values. Error: HTTP status code: 403
+    at fetchData (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:9:21)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async FetchUtil.get (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:24:26)
+    at async Object.fetchProjectConfig (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/controllers/ApiController.js:118:26)
+    at async Object.fetchRemoteFeatures (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/utils/ConfigUtil.js:186:32)
+    at async AppKit.initialize (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/client/appkit-base-client.js:237:31) {
+  [cause]: Response {
+    status: 403,
+    statusText: 'Forbidden',
+    headers: Headers {
+      date: 'Mon, 13 Apr 2026 09:28:01 GMT',
+      'content-type': 'text/plain; charset=UTF-8',
+      'content-length': '9',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=300, s-maxage=300',
+      server: 'cloudflare',
+      'cf-ray': '9eb970328e3e2300-ORD',
+      'alt-svc': 'h3=":443"; ma=86400'
+    },
+    body: ReadableStream { locked: false, state: 'readable', supportsBYOB: true },
+    bodyUsed: false,
+    ok: false,
+    redirected: false,
+    type: 'default',
+    url: 'https://api.web3modal.org/appkit/v1/config?projectId=your-walletconnect-project-id&st=appkit&sv=html-core-1.7.8'
+  }
+}
+ HEAD / 200 in 58ms
+ GET /markets 200 in 123ms
+ GET /api/jackpot 200 in 152ms
+ GET /api/jackpot 200 in 45ms
+ HEAD /markets 200 in 82ms
+ ✓ Compiled in 8.8s (5262 modules)
+ ✓ Compiled in 5.1s (5262 modules)
+ ✓ Compiled in 3.8s (5262 modules)
+ ✓ Compiled in 1640ms (5262 modules)
+ ✓ Compiled in 2.9s (5262 modules)
+ ✓ Compiled in 1308ms (5262 modules)
+ ✓ Compiled in 3s (5262 modules)
+ ✓ Compiled in 6.7s (11148 modules)
+ ○ Compiling /admin ...
+ ✓ Compiled /admin in 22.1s (11186 modules)
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 8 times.
+WalletConnect Core is already initialized. This is probably a mistake and can lead to unexpected behavior. Init() was called 8 times.
+ GET /admin 200 in 23314ms
+[Reown Config] Failed to fetch remote project configuration. Using local/default values. Error: HTTP status code: 403
+    at fetchData (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:9:21)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async FetchUtil.get (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/utils/FetchUtil.js:24:26)
+    at async Object.fetchProjectConfig (webpack-internal:///(ssr)/../../node_modules/@reown/appkit-controllers/dist/esm/src/controllers/ApiController.js:118:26)
+    at async Object.fetchRemoteFeatures (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/utils/ConfigUtil.js:186:32)
+    at async AppKit.initialize (webpack-internal:///(ssr)/../../node_modules/@reown/appkit/dist/esm/src/client/appkit-base-client.js:237:31) {
+  [cause]: Response {
+    status: 403,
+    statusText: 'Forbidden',
+    headers: Headers {
+      date: 'Mon, 13 Apr 2026 10:03:11 GMT',
+      'content-type': 'text/plain; charset=UTF-8',
+      'content-length': '9',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=300, s-maxage=300',
+      server: 'cloudflare',
+      'cf-ray': '9eb9a3b2d8f12300-ORD',
+      'alt-svc': 'h3=":443"; ma=86400'
+    },
+    body: ReadableStream { locked: false, state: 'readable', supportsBYOB: true },
+    bodyUsed: false,
+    ok: false,
+    redirected: false,
+    type: 'default',
+    url: 'https://api.web3modal.org/appkit/v1/config?projectId=your-walletconnect-project-id&st=appkit&sv=html-core-1.7.8'
+  }
+}
+ HEAD /admin 200 in 61ms
+ GET /admin 200 in 173ms
+ HEAD /admin 200 in 82ms

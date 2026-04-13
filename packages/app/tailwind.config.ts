@@ -11,7 +11,6 @@ const config: Config = {
 	extend: {
 		fontFamily: {
 			saira: ['"Saira Stencil"', 'sans-serif'],
-			rufina: ['"Rufina"', 'serif'],
 		},
 		colors: {
 			background: 'hsl(var(--background))',

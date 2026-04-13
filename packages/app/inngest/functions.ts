@@ -126,7 +126,7 @@ async function createMarketIfNotExists(params: {
 // ═══════════════════════════════════════════════════════════
 export const dailyMarketCreation = inngest.createFunction(
   { id: 'daily-market-creation', name: 'Daily Market Creation' },
-  { cron: '0 6 * * *' },
+  { event: 'admin/trigger.daily.market.creation' },
   async ({ step }) => {
     const results: any[] = [];
 
@@ -213,7 +213,7 @@ export const dailyMarketCreation = inngest.createFunction(
 // ═══════════════════════════════════════════════════════════
 export const marketLockCron = inngest.createFunction(
   { id: 'market-lock-cron', name: 'Market Lock Cron' },
-  { cron: '*/5 * * * *' },
+  { event: 'admin/trigger.market.lock.cron' },
   async ({ step }) => {
     const supabaseAdmin = getSupabaseAdmin();
     const { data: markets } = await supabaseAdmin
@@ -241,7 +241,7 @@ export const marketLockCron = inngest.createFunction(
 // ═══════════════════════════════════════════════════════════
 export const oracleWorker = inngest.createFunction(
   { id: 'oracle-worker', name: 'Multi-Sport Oracle Worker' },
-  { cron: '*/5 * * * *' },
+  { event: 'admin/trigger.oracle.worker' },
   async ({ step }) => {
     const supabaseAdmin = getSupabaseAdmin();
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
@@ -336,7 +336,7 @@ export const oracleWorker = inngest.createFunction(
 // ═══════════════════════════════════════════════════════════
 export const weeklyHeartbeat = inngest.createFunction(
   { id: 'weekly-heartbeat', name: 'Weekly Escape Hatch Heartbeat' },
-  { cron: '0 0 * * 0' },
+  { event: 'admin/trigger.weekly.heartbeat' },
   async ({ step }) => {
     await step.run('fire-heartbeat', async () => {
       const res = await fetch(`${getBaseUrl()}/api/admin/heartbeat`, {
