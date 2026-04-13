@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-export function AuthModal() {
+export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -111,9 +111,16 @@ export function AuthModal() {
       }}
     >
       <DialogTrigger asChild>
-        <Button size="lg" className="font-semibold px-6">
-          Sign In / Sign Up
-        </Button>
+        {variant === 'icon' ? (
+          <button className="flex flex-col items-center justify-center w-full h-full gap-1 text-muted-foreground transition-colors hover:text-foreground">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span className="text-[10px] font-medium">Log In</span>
+          </button>
+        ) : (
+          <Button size="lg" className="font-semibold px-6">
+            Sign In / Sign Up
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>

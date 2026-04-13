@@ -6,6 +6,7 @@ import { WalletModal } from '@/components/WalletModal';
 import { AuthModal } from '@/components/AuthModal';
 import { NotificationBell } from '@/components/NotificationBell';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import Link from 'next/link';
 
 export function Navbar() {
@@ -52,6 +53,8 @@ export function Navbar() {
             {bonusBalance.toLocaleString()} Bonus tNGN
           </div>
         )}
+
+        <ThemeToggle />
 
         {session && <NotificationBell />}
         {session && <WalletModal />}

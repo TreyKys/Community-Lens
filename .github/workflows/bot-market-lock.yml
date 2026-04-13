@@ -1,0 +1,16 @@
+name: Market Lock Bot
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit market lock API
+        run: |
+          curl -X POST ${{ secrets.API_BASE_URL }}/api/markets/lock-all \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" || true

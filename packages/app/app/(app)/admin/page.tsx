@@ -11,8 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity, Sparkles, Upload, Trash2, Send } from 'lucide-react';
+import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 
 const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '59e198be55679596463b702bba86925a6267d2a79368ecf421aa0436a54b685c';
 
@@ -104,6 +105,22 @@ function TreasuryPanel() {
           </Badge>
         </CardContent>
       </Card>
+
+      {/* Quick link to resolution dashboard */}
+      <Link href="/admin/resolve">
+        <div className="flex items-center justify-between p-4 bg-card border border-amber-500/20 rounded-xl hover:border-amber-500/40 transition-colors cursor-pointer">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-amber-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Resolve Markets</p>
+              <p className="text-xs text-muted-foreground">Politics, Economics, Entertainment, Finance</p>
+            </div>
+          </div>
+          <ExternalLink className="w-4 h-4 text-muted-foreground" />
+        </div>
+      </Link>
     </div>
   );
 }
@@ -359,13 +376,13 @@ function ManualOverridePanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">Use when the oracle failed or for non-sports markets (Pulse).</p>
+          <p className="text-xs text-muted-foreground">Select any market — open markets will be locked automatically before resolution.</p>
           <Select value={resolveMarketId} onValueChange={setResolveMarketId}>
             <SelectTrigger>
-              <SelectValue placeholder="Select locked market..." />
+              <SelectValue placeholder="Select market to resolve..." />
             </SelectTrigger>
             <SelectContent>
-              {markets.filter(m => m.status === 'locked').map(m => (
+              {markets.map(m => (
                 <SelectItem key={m.id} value={m.id.toString()}>
                   {m.id}: {m.question.slice(0, 50)}
                 </SelectItem>

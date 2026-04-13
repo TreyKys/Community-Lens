@@ -64,7 +64,10 @@ async function applyFirstBetInsurance(userId: string, bet: any) {
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
-    if (cronSecret !== process.env.CRON_SECRET) {
+    const adminAuth = request.headers.get('Authorization');
+    const isValidCron = cronSecret === process.env.CRON_SECRET;
+    const isValidAdmin = adminAuth === `Bearer ${process.env.ADMIN_SECRET}`;
+    if (!isValidCron && !isValidAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

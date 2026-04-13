@@ -79,7 +79,7 @@ export function BottomTabBar() {
         </button>
       ) : (
         <div className="flex flex-col items-center justify-center w-16 h-full gap-1">
-          <AuthModal />
+          <AuthModal variant="icon" />
         </div>
       )}
     </div>
