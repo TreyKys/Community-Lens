@@ -10,7 +10,7 @@ import { ThemeProvider as NextThemesProvider } from 'next-themes';
 import '@rainbow-me/rainbowkit/styles.css';
 
 const config = getDefaultConfig({
-  appName: 'TruthMarket',
+  appName: 'Odds.ng',
   projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || "1234567890abcdef1234567890abcdef",
   chains: [polygonAmoy],
   transports: {

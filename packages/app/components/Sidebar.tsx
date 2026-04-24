@@ -44,7 +44,10 @@ const CATEGORIES = [
     color: 'text-pink-500',
     subcategories: [
       { id: 'pop', label: '🍿 Pop Culture' },
-      { id: 'music', label: '🎵 Music' }
+      { id: 'reality', label: '🎬 Reality TV' },
+      { id: 'nollywood', label: '🎥 Nollywood' },
+      { id: 'afrobeats', label: '🎶 Afrobeats' },
+      { id: 'music', label: '🎵 Music' },
     ]
   },
   { id: 'geo', label: 'Geopolitics', icon: Globe, color: 'text-blue-500' },
@@ -130,7 +133,7 @@ export function Sidebar() {
                                   variant={currentSubcategory === item.id ? "secondary" : "ghost"}
                                   size="sm"
                                   className={cn("w-full justify-start text-xs text-muted-foreground hover:text-foreground h-7", currentSubcategory === item.id && "text-foreground bg-muted")}
-                                  onClick={() => handleNavigation(category.id, item.id)}
+                                  onClick={() => router.push(`/league/${item.id}`)}
                                 >
                                   {item.label}
                                 </Button>

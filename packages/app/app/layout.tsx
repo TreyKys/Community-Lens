@@ -21,12 +21,12 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "TruthMarket — Nigeria's Prediction Market",
-  description: "Bet on football, politics, economics and more. Community-set odds, on-chain transparency, instant Naira payouts.",
+  title: "Odds.ng — Nigeria's Event-Derivative Market",
+  description: "Take positions on football, politics, pop culture and crypto. Smart-money traders. Instant Naira settlement. Cryptographically sealed on Polygon.",
   openGraph: {
-    title: "TruthMarket",
-    description: "Nigeria's first decentralised prediction market. Bet on anything. Get paid instantly.",
-    siteName: "TruthMarket",
+    title: "Odds.ng",
+    description: "Nigeria's first cryptographically transparent event-derivative market. Trade positions. Earn yield.",
+    siteName: "Odds.ng",
   },
 };
 

@@ -9,9 +9,10 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Zap, Lock, CheckCircle2, AlertTriangle, TrendingUp, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink } from 'lucide-react';
+import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -442,11 +443,24 @@ function ManualOverridePanel() {
 }
 
 // ── Withdrawal Approvals ──────────────────────────────────────────────────
+type Withdrawal = {
+  id: string;
+  user_id: string;
+  amount_tngn: number;
+  naira_to_send: number;
+  bank_code: string;
+  account_number: string;
+  created_at?: string;
+  users?: { email?: string };
+};
+
 function WithdrawalPanel() {
   const { toast } = useToast();
-  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<Withdrawal[] | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const fetchWithdrawals = useCallback(async () => {
     const res = await fetch('/api/admin/withdrawals', { headers: adminHeaders() });
@@ -457,82 +471,309 @@ function WithdrawalPanel() {
 
   useEffect(() => { fetchWithdrawals(); }, [fetchWithdrawals]);
 
-  const handleAction = async (withdrawalId: string, action: 'approve' | 'reject', reason?: string) => {
-    setProcessingId(withdrawalId);
-    try {
-      const res = await fetch('/api/admin/withdrawals', {
-        method: 'POST',
-        headers: adminHeaders(),
-        body: JSON.stringify({ withdrawalId, action, reason }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast({ title: action === 'approve' ? 'Withdrawal approved ✅' : 'Withdrawal rejected' });
-      fetchWithdrawals();
-    } catch (err: any) {
-      toast({ title: 'Action failed', description: err.message, variant: 'destructive' });
-    } finally { setProcessingId(null); }
+  const callAction = async (withdrawalId: string, action: 'approve' | 'reject', reason?: string) => {
+    const res = await fetch('/api/admin/withdrawals', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ withdrawalId, action, reason }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data;
   };
+
+  const handleApprove = async (rows: Withdrawal[]) => {
+    setIsProcessing(true);
+    let ok = 0;
+    for (const w of rows) {
+      try { await callAction(w.id, 'approve'); ok++; } catch { /* continue */ }
+    }
+    toast({ title: `${ok} of ${rows.length} approved` });
+    setIsProcessing(false);
+    fetchWithdrawals();
+  };
+
+  const submitReject = async () => {
+    if (!rejectTarget) return;
+    setIsProcessing(true);
+    let ok = 0;
+    for (const w of rejectTarget) {
+      try {
+        await callAction(w.id, 'reject', rejectReason.trim() || 'Rejected by admin');
+        ok++;
+      } catch { /* continue */ }
+    }
+    toast({ title: `${ok} of ${rejectTarget.length} rejected` });
+    setRejectTarget(null);
+    setRejectReason('');
+    setIsProcessing(false);
+    fetchWithdrawals();
+  };
+
+  const columns: Column<Withdrawal>[] = [
+    {
+      key: 'user',
+      label: 'User',
+      sortable: true,
+      sortValue: (w) => w.users?.email || w.user_id,
+      render: (w) => (
+        <span className="text-xs font-mono">
+          {w.users?.email || `${w.user_id.slice(0, 8)}…`}
+        </span>
+      ),
+    },
+    {
+      key: 'amount_tngn',
+      label: 'Amount (tNGN)',
+      sortable: true,
+      sortValue: (w) => w.amount_tngn,
+      render: (w) => <span className="font-medium">₦{w.amount_tngn.toLocaleString()}</span>,
+    },
+    {
+      key: 'naira_to_send',
+      label: 'Naira to send',
+      sortable: true,
+      sortValue: (w) => w.naira_to_send,
+      render: (w) => `₦${w.naira_to_send.toLocaleString()}`,
+    },
+    {
+      key: 'bank',
+      label: 'Bank / Account',
+      render: (w) => <span className="text-xs">{w.bank_code} / {w.account_number}</span>,
+    },
+    {
+      key: 'created_at',
+      label: 'Requested',
+      sortable: true,
+      sortValue: (w) => new Date(w.created_at || 0).getTime(),
+      render: (w) =>
+        w.created_at ? (
+          <span className="text-xs text-muted-foreground">
+            {new Date(w.created_at).toLocaleString('en-NG', {
+              day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+            })}
+          </span>
+        ) : '—',
+    },
+    {
+      key: 'actions',
+      label: '',
+      render: (w) => (
+        <div className="flex gap-1 justify-end">
+          <Button
+            size="sm"
+            className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500"
+            onClick={(e) => { e.stopPropagation(); handleApprove([w]); }}
+            disabled={isProcessing}
+          >
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs border-red-500/30 text-red-400"
+            onClick={(e) => { e.stopPropagation(); setRejectTarget([w]); }}
+            disabled={isProcessing}
+          >
+            Reject
+          </Button>
+        </div>
+      ),
+      className: 'text-right',
+    },
+  ];
 
   if (isLoading) return <div className="h-24 bg-muted/30 rounded-xl animate-pulse" />;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center justify-between">
-          Pending Large Withdrawals
-          <Badge variant="outline">{withdrawals.length}</Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {withdrawals.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">No pending approvals</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Naira to send</TableHead>
-                <TableHead>Bank</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {withdrawals.map((w: any) => (
-                <TableRow key={w.id}>
-                  <TableCell className="text-xs font-mono">{w.users?.email || w.user_id.slice(0, 8)}</TableCell>
-                  <TableCell className="font-medium">₦{w.amount_tngn.toLocaleString()}</TableCell>
-                  <TableCell>₦{w.naira_to_send.toLocaleString()}</TableCell>
-                  <TableCell className="text-xs">{w.bank_code}/{w.account_number}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500"
-                        disabled={processingId === w.id}
-                        onClick={() => handleAction(w.id, 'approve')}
-                      >
-                        {processingId === w.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Approve'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs border-red-500/30 text-red-400"
-                        disabled={processingId === w.id}
-                        onClick={() => handleAction(w.id, 'reject', 'Rejected by admin')}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            Pending Large Withdrawals
+            <Badge variant="outline">{withdrawals.length}</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DataTable
+            rows={withdrawals}
+            columns={columns}
+            rowKey={(w) => w.id}
+            searchFields={(w) => `${w.users?.email || ''} ${w.user_id} ${w.bank_code} ${w.account_number}`}
+            pageSize={10}
+            emptyMessage="No pending approvals"
+            bulkActions={[
+              {
+                label: 'Approve selected',
+                variant: 'default',
+                onClick: handleApprove,
+                disabled: () => isProcessing,
+              },
+              {
+                label: 'Reject selected',
+                variant: 'destructive',
+                onClick: (rows) => { setRejectTarget(rows); },
+                disabled: () => isProcessing,
+              },
+            ]}
+          />
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!rejectTarget} onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject {rejectTarget?.length === 1 ? 'withdrawal' : `${rejectTarget?.length} withdrawals`}</DialogTitle>
+            <DialogDescription>
+              Balance will be refunded. Reason is sent to the user&apos;s notification feed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Reason (optional)</Label>
+            <Input
+              placeholder="e.g. Account name mismatch"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectTarget(null)} disabled={isProcessing}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={submitReject}
+              disabled={isProcessing}
+            >
+              {isProcessing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Confirm reject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Credits Issuance ──────────────────────────────────────────────────────
+function CreditsPanel() {
+  const { toast } = useToast();
+  const [userLookup, setUserLookup] = useState('');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [isIssuing, setIsIssuing] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    const { data } = await supabase
+      .from('treasury_log')
+      .select('amount_tngn, user_id, created_at, metadata')
+      .eq('type', 'manual_credit')
+      .order('created_at', { ascending: false })
+      .limit(50);
+    setHistory(data || []);
+  }, []);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  const handleIssue = async () => {
+    const amt = Number(amount);
+    if (!userLookup.trim() || !amt || amt <= 0) {
+      toast({ title: 'Need a user and a positive amount', variant: 'destructive' });
+      return;
+    }
+    setIsIssuing(true);
+    try {
+      const res = await fetch('/api/admin/credits', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ userLookup: userLookup.trim(), amount: amt, reason: reason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({
+        title: `Credited ₦${amt.toLocaleString()}`,
+        description: `New bonus balance: ₦${(data.newBonusBalance || 0).toLocaleString()}`,
+      });
+      setUserLookup('');
+      setAmount('');
+      setReason('');
+      loadHistory();
+    } catch (err: any) {
+      toast({ title: 'Failed to issue credit', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsIssuing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-pink-500/20">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Gift className="w-4 h-4 text-pink-400" />
+            Issue Bonus Credits
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Credits go into <code className="text-xs bg-muted/40 px-1 py-0.5 rounded">bonus_balance</code>
+            {' '}— usable for bets, not withdrawable. Logged as <code className="text-xs bg-muted/40 px-1 py-0.5 rounded">manual_credit</code>.
+          </p>
+
+          <div className="space-y-2">
+            <Label>User (email or UUID)</Label>
+            <Input
+              placeholder="user@example.com or 2a4b…"
+              value={userLookup}
+              onChange={(e) => setUserLookup(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Amount (₦)</Label>
+              <Input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" />
+            </div>
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Referral, goodwill, comp…" />
+            </div>
+          </div>
+
+          <Button onClick={handleIssue} disabled={isIssuing} className="w-full gap-2">
+            {isIssuing ? <><Loader2 className="w-4 h-4 animate-spin" />Issuing...</> : <><Gift className="w-4 h-4" />Issue Credit</>}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Recent manual credits</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {history.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">No credits issued yet</p>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {history.map((h: any, i: number) => (
+                <div key={i} className="flex items-center justify-between text-xs p-2 bg-muted/20 rounded-lg">
+                  <div>
+                    <span className="font-mono">{h.user_id?.slice(0, 8)}…</span>
+                    {h.metadata?.reason && <span className="text-muted-foreground ml-2">— {h.metadata.reason}</span>}
+                  </div>
+                  <div className="flex gap-3">
+                    <span className="font-semibold text-emerald-400">+₦{h.amount_tngn.toLocaleString()}</span>
+                    <span className="text-muted-foreground">
+                      {new Date(h.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
+                    </span>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -832,21 +1073,22 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-8 pb-24 space-y-6">
+    <div className="max-w-6xl mx-auto p-4 sm:p-8 pb-24 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <Shield className="w-6 h-6 text-amber-400" /> TruthMarket Admin
+          <Shield className="w-6 h-6 text-amber-400" /> Odds.ng Admin
         </h1>
         <Badge variant="outline" className="text-emerald-400 border-emerald-400/30">Live</Badge>
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
           <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
           <TabsTrigger value="override">Override</TabsTrigger>
           <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
+          <TabsTrigger value="credits">Credits</TabsTrigger>
         </TabsList>
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
@@ -854,6 +1096,7 @@ export default function AdminPage() {
         <TabsContent value="create" className="pt-4"><CreateMarketPanel /></TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
         <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>
+        <TabsContent value="credits" className="pt-4"><CreditsPanel /></TabsContent>
       </Tabs>
     </div>
   );

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 // Accepts a document (text content) and uses Claude to generate
 // structured prediction market objects for TreyKy to review before submission.
 
-const SYSTEM_PROMPT = `You are a prediction market curator for TruthMarket, Nigeria's leading prediction platform.
+const SYSTEM_PROMPT = `You are a prediction market curator for Odds.ng, Nigeria's leading event-derivative market.
 
 Your job is to read a document and generate high-quality prediction markets from it.
 

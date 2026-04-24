@@ -5,7 +5,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 export function Footer() {
   return (
     <footer className="w-full py-6 mt-12 border-t flex flex-col items-center gap-4 text-sm text-muted-foreground pb-24 md:pb-6">
-      <p>© {new Date().getFullYear()} TruthMarket. All rights reserved.</p>
+      <p>© {new Date().getFullYear()} Odds.ng. All rights reserved.</p>
 
       {/* Hidden RainbowKit integration for crypto-natives */}
       <div className="opacity-40 hover:opacity-100 transition-opacity flex flex-col items-center gap-2">

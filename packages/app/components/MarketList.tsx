@@ -201,6 +201,14 @@ function BettingInterface({
         </p>
       )}
 
+      {(!selectedOption || !amount || Number(amount) < 100) && (
+        <p className="text-[11px] text-center text-muted-foreground/70 -mb-1">
+          {!selectedOption ? 'Pick an outcome' : !amount ? 'Enter an amount' : 'Minimum ₦100'}
+          <span className="mx-1">→</span>
+          <span className="text-foreground/80">Lock Prediction</span>
+        </p>
+      )}
+
       <div className="flex gap-2">
         {onCancel && (
           <Button variant="outline" onClick={onCancel} className="flex-1">
@@ -209,7 +217,7 @@ function BettingInterface({
         )}
         <Button
           onClick={handlePlaceBet}
-          disabled={isLoading || !selectedOption || !amount || Number(amount) < 100}
+          disabled={isLoading}
           className="flex-1 bg-foreground text-background hover:bg-foreground/90 font-semibold"
         >
           {isLoading ? (
@@ -426,7 +434,16 @@ function buildCategoryFilter(category: string, subcategory: string | null) {
     base.value = 'finance';
   } else if (category === 'entertainment') {
     base.value = 'entertainment';
-    // Optionally subcategory matching can be added here if questions have tags like [POP] or [MUSIC]
+    const ENTERTAINMENT_TAG_MAP: Record<string, string> = {
+      pop: '[POP]',
+      reality: '[REALITY]',
+      nollywood: '[NOLLY]',
+      afrobeats: '[AFRO]',
+      music: '[MUSIC]',
+    };
+    if (subcategory && ENTERTAINMENT_TAG_MAP[subcategory]) {
+      base.questionFilter = ENTERTAINMENT_TAG_MAP[subcategory];
+    }
   } else if (category === 'economy') {
     base.value = 'economics';
   } else if (category === 'tech') {
@@ -443,9 +460,10 @@ function buildCategoryFilter(category: string, subcategory: string | null) {
 interface MarketListProps {
   filterExactMarketId?: number;
   filterChildrenOfParentId?: number;
+  leagueCode?: string;
 }
 
-export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: MarketListProps) {
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode }: MarketListProps) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'trending';
   const subcategory = searchParams.get('subcategory') || null;
@@ -473,6 +491,11 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: Ma
         query = query.eq('id', filterExactMarketId);
       } else if (filterChildrenOfParentId !== undefined) {
         query = query.eq('parent_market_id', filterChildrenOfParentId);
+      } else if (leagueCode) {
+        query = query
+          .is('parent_market_id', null)
+          .eq('category', 'sports')
+          .ilike('question', `%${leagueCode}%`);
       } else {
         // General market list — top-level only
         query = query.is('parent_market_id', null);
@@ -490,7 +513,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: Ma
     } finally {
       setIsLoading(false);
     }
-  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory]);
+  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory, leagueCode]);
 
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 
@@ -498,7 +521,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId }: Ma
     return (
       <div className="space-y-3">
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-36 bg-muted/30 rounded-xl animate-pulse" />
+          <div key={i} className="h-36 rounded-xl shimmer" />
         ))}
       </div>
     );

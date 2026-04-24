@@ -139,7 +139,7 @@ export function OnboardingIntercept() {
       }
 
       toast({
-        title: 'Welcome to TruthMarket! 🎉',
+        title: 'Welcome to Odds.ng! 🎉',
         description: `Your account is ready. Let's make some predictions, @${username}.`,
       });
       setIsOpen(false);
@@ -257,7 +257,7 @@ export function OnboardingIntercept() {
                 required
                 max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
               />
-              <p className="text-xs text-muted-foreground">You must be 18+ to use TruthMarket.</p>
+              <p className="text-xs text-muted-foreground">You must be 18+ to use Odds.ng.</p>
             </div>
 
             <Button

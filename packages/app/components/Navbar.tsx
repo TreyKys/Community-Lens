@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { WalletModal } from '@/components/WalletModal';
 import { AuthModal } from '@/components/AuthModal';
 import { NotificationBell } from '@/components/NotificationBell';
+import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import Link from 'next/link';
@@ -21,12 +22,29 @@ export function Navbar() {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    supabase
-      .from('users')
-      .select('bonus_balance')
-      .eq('id', session.user.id)
-      .single()
-      .then(({ data }) => { if (data?.bonus_balance) setBonusBalance(data.bonus_balance); });
+
+    const fetchBonus = async () => {
+      const { data } = await supabase
+        .from('users')
+        .select('bonus_balance')
+        .eq('id', session.user.id)
+        .single();
+      if (data?.bonus_balance !== undefined) setBonusBalance(data.bonus_balance || 0);
+    };
+
+    fetchBonus();
+
+    const channel = supabase
+      .channel(`users:${session.user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'users',
+        filter: `id=eq.${session.user.id}`,
+      }, () => fetchBonus())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [session]);
 
   const handleSignOut = async () => {
@@ -37,10 +55,10 @@ export function Navbar() {
   return (
     <nav className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur-sm sticky top-0 z-40">
       <Link href="/" className="text-xl font-bold flex items-center gap-3 hover:opacity-80 transition-opacity">
-        <div className="flex items-center justify-center w-9 h-9 bg-gradient-to-br from-white to-zinc-500 text-black font-extrabold rounded-md shadow-lg shadow-white/10 tracking-tighter text-sm">
-          T/M
+        <div className="flex items-center justify-center w-9 h-9 bg-gradient-to-br from-emerald-400 to-emerald-600 text-black font-extrabold rounded-md shadow-lg shadow-emerald-500/20 tracking-tighter text-[11px]">
+          O/N
         </div>
-        <span className="hidden md:inline tracking-tight">TruthMarket</span>
+        <span className="hidden md:inline tracking-tight">Odds.ng</span>
       </Link>
 
       <div className="flex items-center gap-2">
@@ -50,7 +68,7 @@ export function Navbar() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
             </span>
-            {bonusBalance.toLocaleString()} Bonus tNGN
+            <AnimatedNumber value={bonusBalance} /> Bonus tNGN
           </div>
         )}
 

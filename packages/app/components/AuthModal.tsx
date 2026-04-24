@@ -125,7 +125,7 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
           <DialogTitle>
-            {step === 'request' ? 'Welcome to TruthMarket' : 'Enter Your Code'}
+            {step === 'request' ? 'Welcome to Odds.ng' : 'Enter Your Code'}
           </DialogTitle>
           <DialogDescription>
             {step === 'request'

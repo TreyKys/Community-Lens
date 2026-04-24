@@ -1,0 +1,16 @@
+name: Cron — Weekly Heartbeat
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fire escape-hatch heartbeat
+        run: |
+          curl -sSf -X POST "${{ secrets.API_BASE_URL }}/api/admin/heartbeat" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

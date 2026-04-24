@@ -94,7 +94,7 @@ export function WalletModal() {
       metadata: {
         userId: session.user.id,
         custom_fields: [
-          { display_name: 'Platform', variable_name: 'platform', value: 'TruthMarket' }
+          { display_name: 'Platform', variable_name: 'platform', value: 'Odds.ng' }
         ]
       },
       callback: (_response: any) => {

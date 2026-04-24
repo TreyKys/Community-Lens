@@ -67,7 +67,7 @@ export async function initiateTransfer(params: {
     source: 'balance',
     amount: Math.round(params.amountNGN * 100), // convert to kobo
     recipient: params.recipientCode,
-    reason: params.reason || 'TruthMarket withdrawal',
+    reason: params.reason || 'Odds.ng withdrawal',
     reference: params.reference,
   });
 

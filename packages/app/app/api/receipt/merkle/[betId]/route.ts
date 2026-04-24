@@ -119,7 +119,7 @@ export async function GET(
       },
       contract_address: process.env.NEXT_PUBLIC_TRUTH_MARKET_ADDRESS || null,
       instructions:
-        'If TruthMarket is unreachable, visit polygonscan.com, find the contract address above, ' +
+        'If Odds.ng is unreachable, visit polygonscan.com, find the contract address above, ' +
         'call emergencyWithdraw() with your merkle_proof and net_stake_tngn value. ' +
         'This is cryptographically guaranteed — no human approval needed.',
     };

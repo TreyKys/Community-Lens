@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { motion, AnimatePresence } from 'framer-motion';
+import { fireWinConfetti } from '@/lib/confetti';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import {
   Download, Share2, TrendingUp, TrendingDown,
-  Clock, CheckCircle2, XCircle, Shield, Loader2,
+  Clock, CheckCircle2, XCircle, Shield,
   Trophy, AlertCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -35,11 +37,10 @@ interface Bet {
   };
 }
 
-function BetCard({ bet, onDownloadReceipt, onShareCard, session }: {
+function BetCard({ bet, onDownloadReceipt, onShareCard }: {
   bet: Bet;
   onDownloadReceipt: (betId: string) => void;
   onShareCard: (bet: Bet) => void;
-  session: any;
 }) {
   const options = bet.markets?.options as string[] || [];
   const predicted = options[bet.outcome_index] || `Option ${bet.outcome_index}`;
@@ -59,7 +60,12 @@ function BetCard({ bet, onDownloadReceipt, onShareCard, session }: {
   const Icon = cfg.icon;
 
   return (
-    <div className={cn('bg-card border rounded-xl overflow-hidden transition-all', cfg.border)}>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+      className={cn('bg-card border rounded-xl overflow-hidden transition-all', cfg.border)}
+    >
       <div className={cn('px-4 py-2 flex items-center justify-between', cfg.bg)}>
         <div className="flex items-center gap-2">
           <Icon className={cn('w-3.5 h-3.5', cfg.color)} />
@@ -138,7 +144,7 @@ function BetCard({ bet, onDownloadReceipt, onShareCard, session }: {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -161,10 +167,10 @@ async function generateTraderCard(bet: Bet, username: string): Promise<string> {
   ctx.fillStyle = '#10b981';
   ctx.fillRect(0, 0, 4, 340);
 
-  // TruthMarket logo text
+  // Odds.ng logo text
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 14px monospace';
-  ctx.fillText('TRUTHMARKET', 24, 36);
+  ctx.fillText('ODDS.NG', 24, 36);
   ctx.fillStyle = '#6b7280';
   ctx.font = '11px monospace';
   ctx.fillText('VERIFIED PREDICTION RECEIPT', 24, 54);
@@ -247,6 +253,8 @@ export default function BetsPage() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const prevStatusRef = useRef<Map<string, Bet['status']>>(new Map());
+
   const fetchBets = useCallback(async () => {
     if (!session?.user?.id) return;
     setIsLoading(true);
@@ -258,13 +266,45 @@ export default function BetsPage() {
         .order('placed_at', { ascending: false });
 
       if (error) throw error;
-      setBets((data || []) as Bet[]);
+      const next = (data || []) as Bet[];
+
+      // Detect any active → won transitions and celebrate
+      let newlyWon = 0;
+      for (const bet of next) {
+        const prev = prevStatusRef.current.get(bet.id);
+        if (prev && prev !== 'won' && bet.status === 'won') newlyWon++;
+        prevStatusRef.current.set(bet.id, bet.status);
+      }
+      if (newlyWon > 0) {
+        fireWinConfetti();
+        toast({
+          title: newlyWon === 1 ? '🎉 You won!' : `🎉 ${newlyWon} wins just landed!`,
+          description: 'Head to the Won tab to generate your trader card.',
+        });
+      }
+
+      setBets(next);
     } catch {
       toast({ title: 'Failed to load bets', variant: 'destructive' });
     } finally { setIsLoading(false); }
   }, [session?.user?.id, toast]);
 
   useEffect(() => { fetchBets(); }, [fetchBets]);
+
+  // Realtime subscription to the user's bet updates — fires confetti on wins
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const channel = supabase
+      .channel(`bets:${session.user.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'user_bets',
+        filter: `user_id=eq.${session.user.id}`,
+      }, () => { fetchBets(); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [session?.user?.id, fetchBets]);
 
   const handleDownloadReceipt = async (betId: string) => {
     if (!session?.access_token) return;
@@ -282,7 +322,7 @@ export default function BetsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `truthmarket-receipt-${betId.slice(0, 8)}.json`;
+      a.download = `oddsng-receipt-${betId.slice(0, 8)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast({ title: 'Receipt downloaded', description: 'Keep this file safe — it proves your balance on-chain.' });
@@ -298,7 +338,7 @@ export default function BetsPage() {
       const dataUrl = await generateTraderCard(bet, username);
       const a = document.createElement('a');
       a.href = dataUrl;
-      a.download = `truthmarket-win-${bet.id.slice(0, 8)}.png`;
+      a.download = `oddsng-win-${bet.id.slice(0, 8)}.png`;
       a.click();
       toast({ title: 'Trader card saved!', description: 'Share it on Twitter or WhatsApp. Make them feel it.' });
     } catch {
@@ -375,7 +415,6 @@ export default function BetsPage() {
                   <BetCard
                     key={bet.id}
                     bet={bet}
-                    session={session}
                     onDownloadReceipt={handleDownloadReceipt}
                     onShareCard={handleShareCard}
                   />

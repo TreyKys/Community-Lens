@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Trophy, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AnimatedNumber } from '@/components/AnimatedNumber';
 
 interface JackpotState {
   totalPool: number;
@@ -85,7 +86,7 @@ export function JackpotBanner() {
               isAnimating ? 'scale-105' : 'scale-100',
               hasCarryover ? 'text-amber-300' : 'text-foreground'
             )}>
-              ₦{jackpot.totalPool.toLocaleString()}
+              ₦<AnimatedNumber value={jackpot.totalPool} duration={900} />
             </div>
             {hasCarryover && (
               <p className="text-xs text-amber-400/70">

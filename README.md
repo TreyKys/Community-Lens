@@ -1,44 +1,51 @@
-# TruthMarket
+# Odds.ng
 
-Decentralized Prediction Market on Polygon Amoy.
+Nigeria's cryptographically transparent event-derivative market.
+Built on Next.js + Supabase hot path, Polygon cold vault.
 
 ## Monorepo Structure
 
-*   `packages/contract`: Hardhat project for Smart Contracts.
-*   `packages/app`: Next.js 14 Frontend.
-*   `packages/bot`: Automation script for fetching fixtures and creating markets.
+*   `packages/app`: Next.js 14 frontend + API routes (the primary app).
+*   `packages/contract`: Hardhat project for the on-chain Merkle-commit vault.
+*   `packages/bot`: Legacy on-chain automation scripts (superseded by cron routes).
 
-## Bot Automation & Deployment
+## Automation — GitHub Actions
 
-The market creation process is automated using a daily job on GitHub Actions.
+All recurring jobs hit authenticated Next.js API routes. Inngest is scaffolded
+but not wired to the managed platform; GitHub Actions is the live automation layer.
 
-### 1. GitHub Secrets Configuration
-
-For the automation to work, you **MUST** add the following secrets in your GitHub Repository under **Settings > Secrets and variables > Actions > New repository secret**:
-
-| Secret Name | Description | Value (Example) |
+| Workflow | Schedule | Hits |
 | :--- | :--- | :--- |
-| `PRIVATE_KEY` | The private key of the Bot Wallet (Burner) | `fb4b...` |
-| `FOOTBALL_DATA_KEY` | API Key from football-data.org | `0c2a...` |
-| `RPC_URL` | Polygon Amoy RPC URL (Alchemy/Infura) | `https://polygon-amoy.g.alchemy.com...` |
+| `cron-market-lock.yml` | every 5 min | `POST /api/markets/lock-all` |
+| `cron-oracle-resolve.yml` | every 5 min | `POST /api/markets/resolve-due` |
+| `cron-daily-seed.yml` | 10:00 UTC daily | `POST /api/markets/seed-daily` |
+| `cron-heartbeat.yml` | Sun 00:00 UTC | `POST /api/admin/heartbeat` |
 
-### 2. Manual Execution
+### Required GitHub Secrets
 
-To run the bot locally:
+| Secret | Description |
+| :--- | :--- |
+| `API_BASE_URL` | Your production URL, e.g. `https://odds.ng` |
+| `CRON_SECRET` | Shared secret used by the `x-cron-secret` header |
 
-1.  Navigate to `packages/bot`.
-2.  Ensure `.env` is set up (see `.env.example`).
-3.  Run:
-    ```bash
-    npm run bot
-    ```
+### Required server env vars
 
-### 3. Frontend Deployment (Netlify)
+These live on the deployed app (Netlify/Vercel/etc.):
 
-Ensure the following Environment Variables are set in Netlify:
-
-*   `NEXT_PUBLIC_WALLET_CONNECT_ID`: `8b5f5a8b24622cd4bcdbe2a1f50b8d8a`
-*   `NEXT_PUBLIC_ALCHEMY_KEY`: `acKkFgzIHOQy_OK7cDR60`
+| Env | Purpose |
+| :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public Supabase keys |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role, server only |
+| `CRON_SECRET` | Same value as the GitHub secret above |
+| `ADMIN_SECRET` | Used by admin API routes |
+| `NEXT_PUBLIC_APP_URL` | Base URL the app calls itself on |
+| `FOOTBALL_DATA_API_KEY` | football-data.org |
+| `API_SPORTS_KEY` | RapidAPI — Basketball/Tennis |
+| `PANDASCORE_API_KEY` | PandaScore — eSports |
+| `GEMINI_API_KEY` | AI Market Maker |
+| `PAYSTACK_SECRET_KEY` | Paystack gateway |
+| `NEXT_PUBLIC_WALLET_CONNECT_ID` | RainbowKit fallback |
+| `NEXT_PUBLIC_ALCHEMY_KEY` | Polygon RPC |
 
 ## Development
 
