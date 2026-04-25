@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Wallet, Loader2, Shield, AlertTriangle } from 'lucide-react';
+import { Wallet, Loader2, Shield, AlertTriangle, Copy, Check, Building2, CreditCard } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -28,6 +28,10 @@ export function WalletModal() {
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
   const [paystackReady, setPaystackReady] = useState(false);
+  const [nuban, setNuban] = useState<{ accountNumber: string; accountName: string; bankName: string | null } | null>(null);
+  const [nubanLoading, setNubanLoading] = useState(false);
+  const [nubanError, setNubanError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
   // Load Paystack inline script
@@ -64,6 +68,49 @@ export function WalletModal() {
       setBonusBalance(data.bonus_balance || 0);
     }
   }, []);
+
+  const provisionNuban = useCallback(async () => {
+    if (nuban || nubanLoading) return;
+    setNubanLoading(true);
+    setNubanError(null);
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (!s?.access_token) throw new Error('Sign in to get a deposit account');
+      const res = await fetch('/api/squad/provision-account', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${s.access_token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Failed to provision account');
+      setNuban({
+        accountNumber: body.accountNumber,
+        accountName: body.accountName,
+        bankName: body.bankName,
+      });
+    } catch (e: any) {
+      setNubanError(e.message || 'Could not load bank details');
+    } finally {
+      setNubanLoading(false);
+    }
+  }, [nuban, nubanLoading]);
+
+  // Lazy-provision the user's virtual NUBAN once the wallet opens.
+  useEffect(() => {
+    if (isOpen && session?.user && !nuban && !nubanLoading && !nubanError) {
+      provisionNuban();
+    }
+  }, [isOpen, session, nuban, nubanLoading, nubanError, provisionNuban]);
+
+  const copyAccountNumber = async () => {
+    if (!nuban) return;
+    try {
+      await navigator.clipboard.writeText(nuban.accountNumber);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  };
 
   const handleDeposit = () => {
     const amount = Number(depositAmount);
@@ -208,42 +255,96 @@ export function WalletModal() {
           </TabsList>
 
           <TabsContent value="deposit" className="space-y-4 py-4">
-            <p className="text-sm text-muted-foreground">Deposit Naira via Paystack. Funds credit instantly.</p>
-            <div className="space-y-2">
-              <Label>Amount (₦)</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                <Input
-                  type="number"
-                  placeholder="Min ₦500"
-                  value={depositAmount}
-                  onChange={e => setDepositAmount(e.target.value)}
-                  min={500}
-                  className="pl-8"
-                />
-              </div>
-            </div>
+            <Tabs defaultValue="transfer" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="transfer" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Bank Transfer</TabsTrigger>
+                <TabsTrigger value="card" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Card</TabsTrigger>
+              </TabsList>
 
-            {dp && (
-              <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                <div className="flex justify-between"><span>Paystack fee</span><span>₦{dp.fee}</span></div>
-                <div className="flex justify-between"><span>Total billed</span><span>₦{dp.total}</span></div>
-                <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
-                  <span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span>
+              <TabsContent value="transfer" className="space-y-3 pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Send any amount to your dedicated account below. Credit lands in seconds.
+                </p>
+
+                {nubanLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Generating your account…
+                  </div>
+                )}
+
+                {nubanError && (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive space-y-2">
+                    <div>{nubanError}</div>
+                    <Button size="sm" variant="outline" onClick={() => { setNubanError(null); provisionNuban(); }}>
+                      Try again
+                    </Button>
+                  </div>
+                )}
+
+                {nuban && (
+                  <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Account number</div>
+                        <div className="text-2xl font-mono font-bold tracking-wider">{nuban.accountNumber}</div>
+                      </div>
+                      <Button size="icon" variant="ghost" onClick={copyAccountNumber} aria-label="Copy account number">
+                        {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground border-t border-border/50 pt-2">
+                      <span>Bank</span><span className="text-foreground">{nuban.bankName || '—'}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Account name</span><span className="text-foreground">{nuban.accountName}</span>
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
+                  <Shield className="w-3 h-3" /> Powered by Squad
+                </p>
+              </TabsContent>
+
+              <TabsContent value="card" className="space-y-4 pt-4">
+                <p className="text-sm text-muted-foreground">Pay with card via Paystack.</p>
+                <div className="space-y-2">
+                  <Label>Amount (₦)</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                    <Input
+                      type="number"
+                      placeholder="Min ₦500"
+                      value={depositAmount}
+                      onChange={e => setDepositAmount(e.target.value)}
+                      min={500}
+                      className="pl-8"
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
 
-            <Button
-              onClick={handleDeposit}
-              disabled={isDepositLoading || !depositAmount}
-              className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
-            >
-              {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Deposit Naira'}
-            </Button>
-            <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-              <Shield className="w-3 h-3" /> Secured by Paystack
-            </p>
+                {dp && (
+                  <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
+                    <div className="flex justify-between"><span>Paystack fee</span><span>₦{dp.fee}</span></div>
+                    <div className="flex justify-between"><span>Total billed</span><span>₦{dp.total}</span></div>
+                    <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
+                      <span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span>
+                    </div>
+                  </div>
+                )}
+
+                <Button
+                  onClick={handleDeposit}
+                  disabled={isDepositLoading || !depositAmount}
+                  className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
+                >
+                  {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Deposit Naira'}
+                </Button>
+                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
+                  <Shield className="w-3 h-3" /> Secured by Paystack
+                </p>
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           <TabsContent value="withdraw" className="space-y-4 py-4">

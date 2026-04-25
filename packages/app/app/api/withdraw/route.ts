@@ -143,7 +143,7 @@ export async function POST(request: Request) {
     //     source: 'balance',
     //     amount: nairaToSend * 100, // Paystack uses kobo
     //     recipient: recipient.recipient_code,
-    //     reason: `TruthMarket withdrawal - ${withdrawal.id}`,
+    //     reason: `Odds.ng withdrawal - ${withdrawal.id}`,
     //   }),
     // });
     // const { data: transfer } = await transferRes.json();

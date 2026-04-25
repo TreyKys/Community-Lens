@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { isAdminRequest } from '@/lib/adminAuth';
 
 // POST /api/admin/generate-markets
 // Accepts a document (text content) and uses Claude to generate
@@ -35,8 +36,7 @@ Each market object must have exactly these fields:
 
 export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader !== `Bearer ${process.env.ADMIN_SECRET}`) {
+    if (!isAdminRequest(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

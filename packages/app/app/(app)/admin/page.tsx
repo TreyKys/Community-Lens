@@ -16,13 +16,10 @@ import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, 
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 
-const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '59e198be55679596463b702bba86925a6267d2a79368ecf421aa0436a54b685c';
-
+// Admin auth is now cookie-based: POST /api/admin/auth sets an httpOnly cookie
+// after server-side validation. The secret never touches the client bundle.
 function adminHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${ADMIN_SECRET}`,
-  };
+  return { 'Content-Type': 'application/json' };
 }
 
 function cronHeaders() {
@@ -347,7 +344,7 @@ function ManualOverridePanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">Use when Inngest missed the kickoff. Computes Merkle root and seals the bet book.</p>
+          <p className="text-xs text-muted-foreground">Use when the cron job missed the kickoff. Computes Merkle root and seals the bet book.</p>
           <div className="flex gap-2">
             <Select value={lockMarketId} onValueChange={setLockMarketId}>
               <SelectTrigger className="flex-1">
@@ -426,7 +423,7 @@ function ManualOverridePanel() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Resets the 30-day escape hatch clock. Fire immediately if the weekly Inngest job missed a run.
+            Resets the 30-day escape hatch clock. Fire immediately if the weekly cron job missed a run.
           </p>
           <Button
             onClick={fireHeartbeat}
@@ -646,6 +643,216 @@ function WithdrawalPanel() {
               disabled={isProcessing}
             >
               {isProcessing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Confirm reject'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Users (per-user credits monitor) ──────────────────────────────────────
+type UserRow = {
+  id: string;
+  email: string | null;
+  username: string | null;
+  tngn_balance: number;
+  bonus_balance: number;
+  lifetime_credits: number;
+  created_at: string | null;
+};
+
+function UsersPanel() {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<UserRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'last_active', dir: 'desc' });
+  const [isLoading, setIsLoading] = useState(true);
+  const [issueTarget, setIssueTarget] = useState<UserRow | null>(null);
+  const [issueAmount, setIssueAmount] = useState('');
+  const [issueReason, setIssueReason] = useState('');
+  const [isIssuing, setIsIssuing] = useState(false);
+  const pageSize = 25;
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    const params = new URLSearchParams({
+      search,
+      sort: sort.key,
+      dir: sort.dir,
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    const res = await fetch(`/api/admin/users?${params.toString()}`);
+    const data = await res.json();
+    setRows(data.users || []);
+    setTotal(data.total || 0);
+    setIsLoading(false);
+  }, [search, sort, page]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const exportCsv = () => {
+    const header = ['id', 'email', 'username', 'tngn_balance', 'bonus_balance', 'lifetime_credits', 'created_at'];
+    const lines = rows.map((r) =>
+      [r.id, r.email ?? '', r.username ?? '', r.tngn_balance, r.bonus_balance, r.lifetime_credits, r.created_at ?? '']
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+        .join(',')
+    );
+    const csv = [header.join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `odds-users-page${page}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const issueCredit = async () => {
+    if (!issueTarget || !issueAmount) return;
+    const amt = Number(issueAmount);
+    if (!amt || amt <= 0) {
+      toast({ title: 'Enter a positive amount', variant: 'destructive' });
+      return;
+    }
+    setIsIssuing(true);
+    try {
+      const res = await fetch('/api/admin/credits', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ userLookup: issueTarget.id, amount: amt, reason: issueReason }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast({ title: `Credited ₦${amt.toLocaleString()} to ${issueTarget.email || issueTarget.id.slice(0, 8)}` });
+      setIssueTarget(null);
+      setIssueAmount('');
+      setIssueReason('');
+      load();
+    } catch (e: any) {
+      toast({ title: 'Issue failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsIssuing(false);
+    }
+  };
+
+  const columns: Column<UserRow>[] = [
+    {
+      key: 'email', label: 'User', sortable: true,
+      sortValue: (u) => u.email || u.id,
+      render: (u) => (
+        <div className="flex flex-col">
+          <span className="text-sm">{u.email || <span className="text-muted-foreground italic">no email</span>}</span>
+          {u.username && <span className="text-[10px] text-muted-foreground">@{u.username}</span>}
+        </div>
+      ),
+    },
+    {
+      key: 'tngn_balance', label: 'Wallet', sortable: true,
+      sortValue: (u) => u.tngn_balance,
+      render: (u) => <span className="font-medium">₦{u.tngn_balance.toLocaleString()}</span>,
+    },
+    {
+      key: 'bonus_balance', label: 'Bonus', sortable: true,
+      sortValue: (u) => u.bonus_balance,
+      render: (u) => <span className="text-amber-400 font-medium">₦{u.bonus_balance.toLocaleString()}</span>,
+    },
+    {
+      key: 'lifetime_credits', label: 'Lifetime credits', sortable: true,
+      sortValue: (u) => u.lifetime_credits,
+      render: (u) => <span className="text-emerald-400">₦{u.lifetime_credits.toLocaleString()}</span>,
+    },
+    {
+      key: 'created_at', label: 'Joined', sortable: true,
+      sortValue: (u) => new Date(u.created_at || 0).getTime(),
+      render: (u) => u.created_at
+        ? <span className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+        : '—',
+    },
+    {
+      key: 'actions', label: '',
+      render: (u) => (
+        <div className="flex justify-end">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setIssueTarget(u)}>
+            <Gift className="w-3 h-3" /> Issue
+          </Button>
+        </div>
+      ),
+      className: 'text-right',
+    },
+  ];
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="w-4 h-4 text-blue-400" /> Users
+              <Badge variant="outline">{total}</Badge>
+            </CardTitle>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Search email or username…"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className="h-8 w-56"
+              />
+              <Button size="sm" variant="outline" className="h-8" onClick={exportCsv}>Export CSV</Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="h-32 bg-muted/30 rounded-xl animate-pulse" />
+          ) : (
+            <>
+              <DataTable
+                rows={rows}
+                columns={columns}
+                rowKey={(u) => u.id}
+                pageSize={pageSize}
+                emptyMessage="No users match"
+              />
+              <div className="flex items-center justify-between pt-3 text-xs text-muted-foreground">
+                <span>Page {page} of {totalPages}</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
+                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!issueTarget} onOpenChange={(open) => { if (!open) { setIssueTarget(null); setIssueAmount(''); setIssueReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Issue bonus credit</DialogTitle>
+            <DialogDescription>
+              Crediting <strong>{issueTarget?.email || issueTarget?.id.slice(0, 8)}</strong>. Funds land in <code className="text-xs">bonus_balance</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Amount (₦)</Label>
+              <Input type="number" min={1} value={issueAmount} onChange={(e) => setIssueAmount(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Input value={issueReason} onChange={(e) => setIssueReason(e.target.value)} placeholder="goodwill, referral, comp…" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIssueTarget(null)} disabled={isIssuing}>Cancel</Button>
+            <Button onClick={issueCredit} disabled={isIssuing || !issueAmount}>
+              {isIssuing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Issuing…</> : 'Issue credit'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1026,29 +1233,40 @@ export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminInput, setAdminInput] = useState('');
   const [isChecking, setIsChecking] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setIsChecking(false);
     });
+    // Check for an existing admin cookie set by /api/admin/auth.
+    fetch('/api/admin/auth')
+      .then((res) => { if (res.ok) setIsAdmin(true); })
+      .finally(() => setIsChecking(false));
   }, []);
 
-  const handleAdminLogin = () => {
-    if (adminInput === ADMIN_SECRET) {
-      setIsAdmin(true);
-      localStorage.setItem('tm_admin', adminInput);
-    } else {
-      alert("Invalid key. Check NEXT_PUBLIC_ADMIN_SECRET or hardcoded fallback.");
+  const handleAdminLogin = async () => {
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret: adminInput }),
+      });
+      if (res.ok) {
+        setIsAdmin(true);
+        setAdminInput('');
+      } else {
+        setLoginError('Invalid admin secret');
+      }
+    } catch {
+      setLoginError('Network error');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
-
-  useEffect(() => {
-    const stored = localStorage.getItem('tm_admin');
-    if (stored && stored === ADMIN_SECRET) {
-      setIsAdmin(true);
-    }
-  }, []);
 
   if (isChecking) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-6 h-6 animate-spin" /></div>;
 
@@ -1065,7 +1283,10 @@ export default function AdminPage() {
               onChange={e => setAdminInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAdminLogin()}
             />
-            <Button className="w-full" onClick={handleAdminLogin}>Enter</Button>
+            {loginError && <p className="text-xs text-destructive">{loginError}</p>}
+            <Button className="w-full" onClick={handleAdminLogin} disabled={isLoggingIn || !adminInput}>
+              {isLoggingIn ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Verifying…</> : 'Enter'}
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -1082,8 +1303,9 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6">
+        <TabsList className="grid w-full grid-cols-4 md:grid-cols-7">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
+          <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
           <TabsTrigger value="override">Override</TabsTrigger>
@@ -1092,6 +1314,7 @@ export default function AdminPage() {
         </TabsList>
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
+        <TabsContent value="users" className="pt-4"><UsersPanel /></TabsContent>
         <TabsContent value="ai" className="pt-4"><AIMarketGenerator /></TabsContent>
         <TabsContent value="create" className="pt-4"><CreateMarketPanel /></TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>

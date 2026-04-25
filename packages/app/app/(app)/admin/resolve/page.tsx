@@ -12,10 +12,9 @@ import { Loader2, CheckCircle2, ChevronLeft, AlertTriangle } from 'lucide-react'
 import Link from 'next/link';
 import { DataTable, Column } from '@/components/admin/DataTable';
 
-const ADMIN_SECRET = process.env.NEXT_PUBLIC_ADMIN_SECRET || '';
-
+// Admin auth is cookie-based: see /api/admin/auth. The secret never reaches the client.
 function adminHeaders() {
-  return { 'Content-Type': 'application/json', Authorization: `Bearer ${ADMIN_SECRET}` };
+  return { 'Content-Type': 'application/json' };
 }
 
 type MarketRow = {

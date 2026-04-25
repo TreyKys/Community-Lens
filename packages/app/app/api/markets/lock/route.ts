@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { isAdminRequest } from '@/lib/adminAuth';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,7 +37,7 @@ function buildMerkleRoot(bets: any[]): string {
   return leaves[0];
 }
 
-// This endpoint is called by an Inngest job (or cron) exactly when a market's
+// This endpoint is called by the GitHub Actions cron job exactly when a market's
 // closes_at time is reached. It:
 // 1. Fetches all bets for the market
 // 2. Computes the Merkle root
@@ -44,11 +45,10 @@ function buildMerkleRoot(bets: any[]): string {
 // 4. TODO: Publishes to Polygon via the admin wallet (KMS signing)
 export async function POST(request: Request) {
   try {
-    // Secure this endpoint — only callable by internal cron / Inngest or Admin
+    // Secure this endpoint — only callable by internal cron or admin
     const cronSecret = request.headers.get('x-cron-secret');
-    const adminAuth = request.headers.get('Authorization');
     const isValidCron = cronSecret === process.env.CRON_SECRET;
-    const isValidAdmin = adminAuth === `Bearer ${process.env.ADMIN_SECRET}`;
+    const isValidAdmin = isAdminRequest(request);
     if (!isValidCron && !isValidAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

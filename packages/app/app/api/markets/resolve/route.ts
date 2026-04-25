@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { isAdminRequest } from '@/lib/adminAuth';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,10 +33,10 @@ async function applyFirstBetInsurance(userId: string, bet: any) {
 
   const refundAmount = Math.min(bet.stake_tngn, FIRST_BET_INSURANCE_CAP);
 
-  // Credit free_bet_credits
-  const { data: user } = await supabaseAdmin.from('users').select('free_bet_credits').eq('id', userId).single();
+  // Credit bonus_balance (the spendable bonus column).
+  const { data: user } = await supabaseAdmin.from('users').select('bonus_balance').eq('id', userId).single();
   await supabaseAdmin.from('users').update({
-    free_bet_credits: (user?.free_bet_credits || 0) + refundAmount,
+    bonus_balance: (user?.bonus_balance || 0) + refundAmount,
   }).eq('id', userId);
 
   // Flag the bet
@@ -45,7 +46,7 @@ async function applyFirstBetInsurance(userId: string, bet: any) {
   await supabaseAdmin.from('notifications').insert({
     user_id: userId,
     type: 'first_bet_refund',
-    message: `Tough break! Your first bet is insured. ₦${refundAmount.toLocaleString()} has been added to your Free Bet Credits. 🛡`,
+    message: `Tough break! Your first bet is insured. ₦${refundAmount.toLocaleString()} has been added to your bonus balance. 🛡`,
     amount: refundAmount,
   });
 
@@ -55,6 +56,7 @@ async function applyFirstBetInsurance(userId: string, bet: any) {
     amount_tngn: refundAmount,
     bet_id: bet.id,
     user_id: userId,
+    metadata: { source: 'first_bet_insurance' },
     created_at: new Date().toISOString(),
   });
 
@@ -64,9 +66,8 @@ async function applyFirstBetInsurance(userId: string, bet: any) {
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
-    const adminAuth = request.headers.get('Authorization');
     const isValidCron = cronSecret === process.env.CRON_SECRET;
-    const isValidAdmin = adminAuth === `Bearer ${process.env.ADMIN_SECRET}`;
+    const isValidAdmin = isAdminRequest(request);
     if (!isValidCron && !isValidAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

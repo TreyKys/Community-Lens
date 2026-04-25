@@ -8,7 +8,7 @@ export interface UserState {
   id: string;
   wallet_address: string;
   tngn_balance: number;
-  free_bet_credits: number;
+  bonus_balance: number;
   is_custodial: boolean;
 }
 
@@ -35,7 +35,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, wallet_address, tngn_balance, free_bet_credits, is_custodial')
+        .select('id, wallet_address, tngn_balance, bonus_balance, is_custodial')
         .eq(queryColumn, queryValue)
         .single();
 
@@ -79,7 +79,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
               wallet_address: address.toLowerCase(),
               is_custodial: false,
               tngn_balance: 0,
-              free_bet_credits: 0
+              bonus_balance: 0,
           }).select().single();
 
           if (data && !error) {

@@ -19,7 +19,32 @@ export function cronHeaders() {
 }
 
 // ── SPORT DATA PROVIDERS ──────────────────────────────────────────────────
-export const FOOTBALL_LEAGUES = ['PL', 'CL', 'PD', 'SA', 'BL1', 'FL1', 'DED', 'PPL', 'BSA', 'EC', 'WC'];
+export const FOOTBALL_LEAGUES = ['PL', 'CL', 'PD', 'SA', 'BL1', 'FL1', 'DED', 'PPL', 'BSA', 'EC', 'WC', 'ELC'];
+
+export const BASKETBALL_LEAGUES: { code: string; apiSportsId: number }[] = [
+  { code: 'NBA', apiSportsId: 12 },
+  { code: 'EUROLEAGUE', apiSportsId: 120 },
+];
+
+// PandaScore videogame slug → short code we render and filter on.
+export const ESPORTS_GAME_CODES: Record<string, string> = {
+  'league-of-legends': 'LOL',
+  'lol': 'LOL',
+  'cs-go': 'CSGO',
+  'csgo': 'CSGO',
+  'cs2': 'CSGO',
+  'dota-2': 'DOTA2',
+  'dota2': 'DOTA2',
+  'valorant': 'VAL',
+  'rainbow-six-siege': 'R6S',
+  'r6-siege': 'R6S',
+};
+
+export function esportsGameCode(slug: string | undefined | null, fallbackName?: string | null): string {
+  if (slug && ESPORTS_GAME_CODES[slug]) return ESPORTS_GAME_CODES[slug];
+  const name = (fallbackName || slug || 'ESPORTS').toString().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  return name || 'ESPORTS';
+}
 
 export async function fetchFootballFixtures(competitionCode: string): Promise<any[]> {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;

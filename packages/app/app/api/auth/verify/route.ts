@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
                 wallet_address: walletAddress.toLowerCase(),
                 is_custodial: true,
                 tngn_balance: 0,
-                // free_bet_credits: 0
+                bonus_balance: 0,
             })
             .select()
             .single();

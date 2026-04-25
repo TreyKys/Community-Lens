@@ -52,7 +52,6 @@ export async function POST(request: Request) {
           wallet_address: walletAddress,
           tngn_balance: 0,
           bonus_balance: 0,
-          free_bet_credits: 0,
           avatar_id: Math.floor(Math.random() * 50), // Random starter avatar
           profile_complete: false,
         }]);

@@ -3,11 +3,21 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Trophy, Flame, Bitcoin, Globe, BarChart3, Cpu, Star, ChevronDown, User, Receipt, Menu } from 'lucide-react';
+import { Trophy, Flame, Bitcoin, Globe, BarChart3, Cpu, Star, ChevronDown, User, Receipt } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-const CATEGORIES = [
+type SubItem = { label: string; id: string };
+type Subcategory = { id: string; label: string; subItems?: SubItem[] };
+type Category = {
+  id: string;
+  label: string;
+  icon: any;
+  color: string;
+  subcategories?: Subcategory[];
+};
+
+const CATEGORIES: Category[] = [
   { id: 'trending', label: 'Trending', icon: Flame, color: 'text-orange-500' },
   {
     id: 'sports',
@@ -27,13 +37,22 @@ const CATEGORIES = [
         { label: 'Eredivisie', id: 'ded' },
         { label: 'Brasileirao', id: 'bsa' },
         { label: 'Primeira Liga', id: 'ppl' },
-        { label: 'Championship', id: 'elc' }
+        { label: 'Championship', id: 'elc' },
       ] },
-      { id: 'basketball', label: '🏀 Basketball' },
+      { id: 'basketball', label: '🏀 Basketball', subItems: [
+        { label: 'NBA', id: 'nba' },
+        { label: 'EuroLeague', id: 'euroleague' },
+      ] },
       { id: 'fight', label: '🥊 Fight Night' },
       { id: 'motorsport', label: '🏎️ Motorsport' },
-      { id: 'esports', label: '🎮 eSports' }
-    ]
+      { id: 'esports', label: '🎮 eSports', subItems: [
+        { label: 'League of Legends', id: 'lol' },
+        { label: 'CS:GO', id: 'csgo' },
+        { label: 'Dota 2', id: 'dota2' },
+        { label: 'Valorant', id: 'valorant' },
+        { label: 'Rainbow Six Siege', id: 'r6s' },
+      ] },
+    ],
   },
   { id: 'politics', label: '🗳️ Naija Politics', icon: null, color: 'text-green-500' },
   { id: 'crypto', label: 'Crypto', icon: Bitcoin, color: 'text-yellow-600' },
@@ -48,7 +67,7 @@ const CATEGORIES = [
       { id: 'nollywood', label: '🎥 Nollywood' },
       { id: 'afrobeats', label: '🎶 Afrobeats' },
       { id: 'music', label: '🎵 Music' },
-    ]
+    ],
   },
   { id: 'geo', label: 'Geopolitics', icon: Globe, color: 'text-blue-500' },
   { id: 'economy', label: 'Economy', icon: BarChart3, color: 'text-emerald-500' },
@@ -62,8 +81,13 @@ export function Sidebar() {
   const currentSubcategory = searchParams.get('subcategory');
 
   const [isSportsOpen, setIsSportsOpen] = useState(currentCategory === 'sports');
-  const [isFootballOpen, setIsFootballOpen] = useState(currentSubcategory === 'football');
   const [isEntertainmentOpen, setIsEntertainmentOpen] = useState(currentCategory === 'entertainment');
+  const [openSubs, setOpenSubs] = useState<Record<string, boolean>>(() => ({
+    [currentSubcategory ?? '']: true,
+  }));
+
+  const toggleSub = (id: string, value?: boolean) =>
+    setOpenSubs((prev) => ({ ...prev, [id]: value ?? !prev[id] }));
 
   const handleNavigation = (category: string, subcategory?: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -113,34 +137,40 @@ export function Sidebar() {
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4 pr-2 py-1 space-y-1">
                 {category.subcategories?.map(sub => {
-                  if (sub.id === 'football') {
+                  if (sub.subItems && sub.subItems.length) {
+                    const subOpen = !!openSubs[sub.id];
+                    const useLeagueRoute = sub.id === 'football';
                     return (
-                      <Collapsible key={sub.id} open={isFootballOpen} onOpenChange={setIsFootballOpen} className="w-full">
-                         <CollapsibleTrigger asChild>
+                      <Collapsible key={sub.id} open={subOpen} onOpenChange={(v) => toggleSub(sub.id, v)} className="w-full">
+                        <CollapsibleTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-between text-muted-foreground hover:text-foreground"
+                          >
+                            {sub.label}
+                            <ChevronDown className={cn("h-3 w-3 transition-transform", subOpen && "rotate-180")} />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="pl-6 py-1 space-y-1 border-l ml-2 mt-1">
+                          {sub.subItems.map(item => (
                             <Button
-                              variant="ghost"
+                              key={item.id}
+                              variant={currentSubcategory === item.id ? "secondary" : "ghost"}
                               size="sm"
-                              className="w-full justify-between text-muted-foreground hover:text-foreground"
+                              className={cn("w-full justify-start text-xs text-muted-foreground hover:text-foreground h-7", currentSubcategory === item.id && "text-foreground bg-muted")}
+                              onClick={() =>
+                                useLeagueRoute
+                                  ? router.push(`/league/${item.id}`)
+                                  : handleNavigation(category.id, item.id)
+                              }
                             >
-                               {sub.label}
-                               <ChevronDown className={cn("h-3 w-3 transition-transform", isFootballOpen && "rotate-180")} />
+                              {item.label}
                             </Button>
-                         </CollapsibleTrigger>
-                         <CollapsibleContent className="pl-6 py-1 space-y-1 border-l ml-2 mt-1">
-                            {sub.subItems?.map(item => (
-                                <Button
-                                  key={item.id}
-                                  variant={currentSubcategory === item.id ? "secondary" : "ghost"}
-                                  size="sm"
-                                  className={cn("w-full justify-start text-xs text-muted-foreground hover:text-foreground h-7", currentSubcategory === item.id && "text-foreground bg-muted")}
-                                  onClick={() => router.push(`/league/${item.id}`)}
-                                >
-                                  {item.label}
-                                </Button>
-                            ))}
-                         </CollapsibleContent>
+                          ))}
+                        </CollapsibleContent>
                       </Collapsible>
-                    )
+                    );
                   }
 
                   return (
@@ -153,7 +183,7 @@ export function Sidebar() {
                     >
                       {sub.label}
                     </Button>
-                  )
+                  );
                 })}
               </CollapsibleContent>
             </Collapsible>

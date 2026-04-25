@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { isAdminRequest } from '@/lib/adminAuth';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -12,8 +13,7 @@ function supabaseAdmin() {
 
 export async function POST(request: Request) {
   try {
-    const auth = request.headers.get('Authorization');
-    if (auth !== `Bearer ${process.env.ADMIN_SECRET}`) {
+    if (!isAdminRequest(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

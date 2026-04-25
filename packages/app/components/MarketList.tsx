@@ -408,32 +408,47 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
   );
 }
 
-// Category → Supabase query mapping
-function buildCategoryFilter(category: string, subcategory: string | null) {
-  const base = {
-    column: 'category',
-    value: '',
-    questionFilter: null as string | null,
+type CategoryFilter = {
+  category: string | null;
+  sport: string | null;
+  leagueCode: string | null;
+  questionFilter: string | null;
+};
+
+function buildCategoryFilter(category: string, subcategory: string | null): CategoryFilter {
+  const base: CategoryFilter = { category: null, sport: null, leagueCode: null, questionFilter: null };
+
+  const LEAGUE_CODE_MAP: Record<string, string> = {
+    pl: 'PL', pd: 'PD', sa: 'SA', bl1: 'BL1', fl1: 'FL1',
+    cl: 'CL', wc: 'WC', ec: 'EC', ded: 'DED', bsa: 'BSA',
+    ppl: 'PPL', elc: 'ELC',
+    nba: 'NBA', euroleague: 'EUROLEAGUE',
+    lol: 'LOL', csgo: 'CSGO', dota2: 'DOTA2', valorant: 'VAL', r6s: 'R6S',
   };
 
-  const SPORTS_LEAGUE_MAP: Record<string, string> = {
-    pl: '[PL]', pd: '[PD]', sa: '[SA]', bl1: '[BL1]', fl1: '[FL1]',
-    cl: '[CL]', wc: '[WC]', ec: '[EC]', ded: '[DED]', bsa: '[BSA]',
-    ppl: '[PPL]', elc: '[ELC]', nba: '[NBA]',
+  const SUBCATEGORY_TO_SPORT: Record<string, string> = {
+    football: 'football',
+    basketball: 'basketball',
+    esports: 'esports',
+    fight: 'fight',
+    motorsport: 'motorsport',
   };
 
   if (category === 'sports' || category === 'trending') {
-    base.column = 'category';
-    base.value = 'sports';
-    if (subcategory && SPORTS_LEAGUE_MAP[subcategory]) {
-      base.questionFilter = SPORTS_LEAGUE_MAP[subcategory];
+    base.category = 'sports';
+    if (subcategory) {
+      if (LEAGUE_CODE_MAP[subcategory]) {
+        base.leagueCode = LEAGUE_CODE_MAP[subcategory];
+      } else if (SUBCATEGORY_TO_SPORT[subcategory]) {
+        base.sport = SUBCATEGORY_TO_SPORT[subcategory];
+      }
     }
   } else if (category === 'politics') {
-    base.value = 'politics';
+    base.category = 'politics';
   } else if (category === 'crypto') {
-    base.value = 'finance';
+    base.category = 'finance';
   } else if (category === 'entertainment') {
-    base.value = 'entertainment';
+    base.category = 'entertainment';
     const ENTERTAINMENT_TAG_MAP: Record<string, string> = {
       pop: '[POP]',
       reality: '[REALITY]',
@@ -445,13 +460,13 @@ function buildCategoryFilter(category: string, subcategory: string | null) {
       base.questionFilter = ENTERTAINMENT_TAG_MAP[subcategory];
     }
   } else if (category === 'economy') {
-    base.value = 'economics';
+    base.category = 'economics';
   } else if (category === 'tech') {
-    base.value = 'finance';
+    base.category = 'finance';
   } else if (category === 'geo') {
-    base.value = 'politics';
+    base.category = 'politics';
   } else {
-    base.value = category;
+    base.category = category;
   }
 
   return base;
@@ -492,17 +507,21 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       } else if (filterChildrenOfParentId !== undefined) {
         query = query.eq('parent_market_id', filterChildrenOfParentId);
       } else if (leagueCode) {
+        // leagueCode prop passes League.code (e.g. "[PL]"). Strip brackets to match league_code column.
+        const stripped = leagueCode.replace(/[\[\]]/g, '');
         query = query
           .is('parent_market_id', null)
           .eq('category', 'sports')
-          .ilike('question', `%${leagueCode}%`);
+          .eq('league_code', stripped);
       } else {
         // General market list — top-level only
         query = query.is('parent_market_id', null);
 
-        const { column, value, questionFilter } = buildCategoryFilter(category, subcategory);
-        if (value) query = query.eq(column, value);
-        if (questionFilter) query = query.ilike('question', `%${questionFilter}%`);
+        const filter = buildCategoryFilter(category, subcategory);
+        if (filter.category) query = query.eq('category', filter.category);
+        if (filter.sport) query = query.eq('sport', filter.sport);
+        if (filter.leagueCode) query = query.eq('league_code', filter.leagueCode);
+        if (filter.questionFilter) query = query.ilike('question', `%${filter.questionFilter}%`);
       }
 
       const { data, error } = await query.limit(50);

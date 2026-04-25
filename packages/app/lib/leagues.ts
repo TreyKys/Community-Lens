@@ -90,6 +90,33 @@ export const LEAGUES: Record<string, League> = {
     accent: '#006633',
     tagline: 'Portugal’s top-tier drama.',
   },
+  wc: {
+    id: 'wc',
+    code: '[WC]',
+    label: 'World Cup',
+    shortLabel: 'World Cup',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/2026_FIFA_World_Cup_emblem.svg/1024px-2026_FIFA_World_Cup_emblem.svg.png',
+    accent: '#0a2240',
+    tagline: 'The world stops to watch.',
+  },
+  ec: {
+    id: 'ec',
+    code: '[EC]',
+    label: 'Euros',
+    shortLabel: 'Euros',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/0/04/UEFA_Euro_2024_Logo.svg/1024px-UEFA_Euro_2024_Logo.svg.png',
+    accent: '#003399',
+    tagline: 'Europe’s grand stage.',
+  },
+  elc: {
+    id: 'elc',
+    code: '[ELC]',
+    label: 'Championship',
+    shortLabel: 'EFL',
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/5/5d/EFL_Championship.svg/1024px-EFL_Championship.svg.png',
+    accent: '#172983',
+    tagline: 'The road to the Premier League.',
+  },
 };
 
 export const LEAGUE_IDS = Object.keys(LEAGUES);

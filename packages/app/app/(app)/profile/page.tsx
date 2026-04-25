@@ -201,10 +201,7 @@ export default function ProfilePage() {
             <span className="text-base text-muted-foreground mb-1">tNGN</span>
           </div>
           {(profile?.bonus_balance || 0) > 0 && (
-            <p className="text-sm text-amber-400 mb-4">+₦{profile.bonus_balance.toLocaleString()} bonus credit</p>
-          )}
-          {(profile?.free_bet_credits || 0) > 0 && (
-            <p className="text-sm text-emerald-400 mb-4">+₦{profile.free_bet_credits.toLocaleString()} free bet credit 🛡</p>
+            <p className="text-sm text-amber-400 mb-4">+₦{profile.bonus_balance.toLocaleString()} bonus credit 🛡</p>
           )}
           <div className="mt-4"><WalletModal /></div>
         </div>

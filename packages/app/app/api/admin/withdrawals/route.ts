@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { isAdminRequest } from '@/lib/adminAuth';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,8 +10,7 @@ const supabaseAdmin = createClient(
 // GET: List all withdrawals pending admin approval
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader !== `Bearer ${process.env.ADMIN_SECRET}`) {
+    if (!isAdminRequest(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -32,8 +32,7 @@ export async function GET(request: Request) {
 // POST: Approve or reject a large withdrawal
 export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader !== `Bearer ${process.env.ADMIN_SECRET}`) {
+    if (!isAdminRequest(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

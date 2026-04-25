@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   FOOTBALL_LEAGUES,
+  BASKETBALL_LEAGUES,
   fetchFootballFixtures,
   fetchApiSportsFixtures,
   fetchEsportsFixtures,
   createMarketIfNotExists,
+  esportsGameCode,
 } from '@/lib/oracle';
 
 export const dynamic = 'force-dynamic';
@@ -55,40 +57,42 @@ export async function POST(request: Request) {
     }
   }
 
-  // Basketball (NBA)
-  const nba = await fetchApiSportsFixtures('basketball', 12);
-  for (const g of nba.slice(0, 10)) {
-    try {
-      const home = g.teams?.home?.name || 'Home';
-      const away = g.teams?.away?.name || 'Away';
-      const r = await createMarketIfNotExists({
-        question: `[NBA] ${away} @ ${home} — Winner`,
-        category: 'sports', sport: 'basketball',
-        options: [`${home} Win`, `${away} Win`],
-        closesAt: new Date(g.date).toISOString(),
-        fixtureId: g.id, homeTeam: home, awayTeam: away, leagueCode: 'NBA',
-      });
-      results.push(r);
-    } catch (err: any) {
-      results.push({ success: false, error: err.message });
+  // Basketball
+  for (const { code, apiSportsId } of BASKETBALL_LEAGUES) {
+    const games = await fetchApiSportsFixtures('basketball', apiSportsId);
+    for (const g of games.slice(0, 10)) {
+      try {
+        const home = g.teams?.home?.name || 'Home';
+        const away = g.teams?.away?.name || 'Away';
+        const r = await createMarketIfNotExists({
+          question: `[${code}] ${away} @ ${home} — Winner`,
+          category: 'sports', sport: 'basketball',
+          options: [`${home} Win`, `${away} Win`],
+          closesAt: new Date(g.date).toISOString(),
+          fixtureId: g.id, homeTeam: home, awayTeam: away, leagueCode: code,
+        });
+        results.push(r);
+      } catch (err: any) {
+        results.push({ success: false, error: err.message });
+      }
     }
   }
 
   // eSports
   const es = await fetchEsportsFixtures();
-  for (const m of es.slice(0, 5)) {
+  for (const m of es.slice(0, 8)) {
     try {
       if (!m.opponents || m.opponents.length < 2) continue;
       const t1 = m.opponents[0]?.opponent?.name || 'Team 1';
       const t2 = m.opponents[1]?.opponent?.name || 'Team 2';
-      const game = m.videogame?.name || 'eSports';
+      const code = esportsGameCode(m.videogame?.slug, m.videogame?.name);
       const r = await createMarketIfNotExists({
-        question: `[${game}] ${t1} vs ${t2} — Winner`,
+        question: `[${code}] ${t1} vs ${t2} — Winner`,
         category: 'sports', sport: 'esports',
         options: [`${t1} Win`, `${t2} Win`],
         closesAt: new Date(m.begin_at || m.scheduled_at).toISOString(),
         fixtureId: m.id, homeTeam: t1, awayTeam: t2,
-        leagueCode: (game as string).slice(0, 5).toUpperCase(),
+        leagueCode: code,
       });
       results.push(r);
     } catch (err: any) {
