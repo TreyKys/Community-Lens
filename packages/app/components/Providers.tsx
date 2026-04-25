@@ -4,11 +4,14 @@ import * as React from 'react';
 import { polygonAmoy } from 'wagmi/chains';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, fallback, cookieStorage, createStorage } from 'wagmi';
-import { PrivyProvider } from '@privy-io/react-auth';
-import { WagmiProvider as PrivyWagmiProvider } from '@privy-io/wagmi';
-import { createConfig } from 'wagmi';
+import { WagmiProvider } from 'wagmi';
+import { getDefaultConfig, RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
+import { ThemeProvider as NextThemesProvider } from 'next-themes';
+import '@rainbow-me/rainbowkit/styles.css';
 
-const config = createConfig({
+const config = getDefaultConfig({
+  appName: 'Odds.ng',
+  projectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || "1234567890abcdef1234567890abcdef",
   chains: [polygonAmoy],
   transports: {
     [polygonAmoy.id]: fallback([
@@ -32,31 +35,21 @@ const queryClient = new QueryClient({
 });
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  // Explicitly require the WALLET_CONNECT_ID fallback for Privy to compile WalletConnect under the hood
-  // Netlify environments fail without it explicitly defined or passed as a build arg.
-  const wcId = process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || "1234567890abcdef1234567890abcdef";
-
   return (
-    <PrivyProvider
-      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || "cm2o7h8m0092h0xix2l9f116a"}
-      config={{
-        loginMethods: ['sms', 'email'],
-        appearance: {
-          theme: 'dark',
-          accentColor: '#676FFF',
-          logo: '',
-          walletList: ['metamask', 'rainbow', 'wallet_connect'],
-        },
-        defaultChain: polygonAmoy,
-        supportedChains: [polygonAmoy],
-        walletConnectCloudProjectId: wcId
-      }}
-    >
-      <QueryClientProvider client={queryClient}>
-        <PrivyWagmiProvider config={config}>
-          {children}
-        </PrivyWagmiProvider>
-      </QueryClientProvider>
-    </PrivyProvider>
+    <NextThemesProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <WagmiProvider config={config}>
+        <QueryClientProvider client={queryClient}>
+          <RainbowKitProvider
+            theme={darkTheme({
+              accentColor: '#ffffff',
+              accentColorForeground: 'black',
+              borderRadius: 'medium',
+            })}
+          >
+            {children}
+          </RainbowKitProvider>
+        </QueryClientProvider>
+      </WagmiProvider>
+    </NextThemesProvider>
   );
 }

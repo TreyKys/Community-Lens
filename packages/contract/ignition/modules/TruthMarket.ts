@@ -3,7 +3,8 @@ import MockUSDCModule from "./MockUSDC";
 
 const TruthMarketModule = buildModule("TruthMarketModule", (m) => {
   const { mockUSDC } = m.useModule(MockUSDCModule);
-  const truthMarket = m.contract("TruthMarket", [mockUSDC]);
+  const feeTreasury = m.getAccount(0); // Using deployer as feeTreasury and oracleAddress placeholder
+  const truthMarket = m.contract("TruthMarket", [mockUSDC, feeTreasury, feeTreasury]);
   return { truthMarket };
 });
 

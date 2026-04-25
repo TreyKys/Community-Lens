@@ -9,6 +9,9 @@ const config: Config = {
   ],
   theme: {
 	extend: {
+		fontFamily: {
+			saira: ['"Saira Stencil"', 'sans-serif'],
+		},
 		colors: {
 			background: 'hsl(var(--background))',
 			foreground: 'hsl(var(--foreground))',
