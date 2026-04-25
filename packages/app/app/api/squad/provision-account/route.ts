@@ -20,11 +20,21 @@ async function getAuthUser(request: Request) {
  * POST /api/squad/provision-account
  * Idempotently issue a Virtual NUBAN for the authenticated user.
  * Returns the cached account if one already exists.
+ *
+ * Accepts an optional { phone } in the body. If the user has no phone on
+ * record, the supplied value is persisted to users.phone before being passed
+ * to Squad. (No SMS verification — Termii will plug in later.)
+ *
+ * If the user has no phone and none is supplied, returns 400 with code "phone_required"
+ * so the WalletModal can prompt for it inline.
  */
 export async function POST(request: Request) {
   try {
     const authUser = await getAuthUser(request);
     if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await request.json().catch(() => ({} as { phone?: string }));
+    const submittedPhone = typeof body?.phone === 'string' ? body.phone.replace(/\D/g, '') : '';
 
     const { data: existing } = await supabaseAdmin
       .from('squad_virtual_accounts')
@@ -44,7 +54,7 @@ export async function POST(request: Request) {
 
     const { data: profile } = await supabaseAdmin
       .from('users')
-      .select('email, username')
+      .select('email, username, phone')
       .eq('id', authUser.id)
       .single();
 
@@ -53,11 +63,40 @@ export async function POST(request: Request) {
     const [firstName, ...rest] = fallbackName.split(/\s+/);
     const lastName = rest.join(' ') || 'User';
 
+    // Squad requires a Nigerian mobile number. Pull it from the user record
+    // first; fall back to anything the WalletModal just collected.
+    const rawPhone = profile?.phone || authUser.phone || submittedPhone;
+    const mobileNum = String(rawPhone || '').replace(/\D/g, '');
+
+    if (!mobileNum) {
+      return NextResponse.json(
+        {
+          error: 'Phone number required to issue a bank transfer account.',
+          code: 'phone_required',
+        },
+        { status: 400 }
+      );
+    }
+
+    // Sanity-check Nigerian mobile shape: 10 digits (without leading 0) or 11 (with), or 13 (intl 234…).
+    if (mobileNum.length < 10 || mobileNum.length > 14) {
+      return NextResponse.json(
+        { error: 'Enter a valid Nigerian phone number (e.g. 08012345678).', code: 'phone_invalid' },
+        { status: 400 }
+      );
+    }
+
+    // Persist the phone to the user record on first capture so they don't have to retype it.
+    if (!profile?.phone && submittedPhone) {
+      await supabaseAdmin.from('users').update({ phone: mobileNum }).eq('id', authUser.id);
+    }
+
     const account = await createVirtualAccount({
       customerIdentifier: authUser.id,
       firstName,
       lastName,
       email,
+      mobileNum,
     });
 
     const { error: insertErr } = await supabaseAdmin.from('squad_virtual_accounts').insert({

@@ -53,7 +53,7 @@ export async function createVirtualAccount(params: {
   firstName: string;
   lastName: string;
   email: string;
-  mobileNum?: string;
+  mobileNum: string;
   bvn?: string;
 }): Promise<SquadVirtualAccount> {
   return await squadRequest('/virtual-account', 'POST', {

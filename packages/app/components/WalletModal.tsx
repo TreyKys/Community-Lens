@@ -31,6 +31,8 @@ export function WalletModal() {
   const [nuban, setNuban] = useState<{ accountNumber: string; accountName: string; bankName: string | null } | null>(null);
   const [nubanLoading, setNubanLoading] = useState(false);
   const [nubanError, setNubanError] = useState<string | null>(null);
+  const [phoneRequired, setPhoneRequired] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
@@ -69,7 +71,7 @@ export function WalletModal() {
     }
   }, []);
 
-  const provisionNuban = useCallback(async () => {
+  const provisionNuban = useCallback(async (phoneOverride?: string) => {
     if (nuban || nubanLoading) return;
     setNubanLoading(true);
     setNubanError(null);
@@ -78,10 +80,18 @@ export function WalletModal() {
       if (!s?.access_token) throw new Error('Sign in to get a deposit account');
       const res = await fetch('/api/squad/provision-account', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${s.access_token}` },
+        headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(phoneOverride ? { phone: phoneOverride } : {}),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Failed to provision account');
+      if (!res.ok) {
+        if (body.code === 'phone_required') {
+          setPhoneRequired(true);
+          return;
+        }
+        throw new Error(body.error || 'Failed to provision account');
+      }
+      setPhoneRequired(false);
       setNuban({
         accountNumber: body.accountNumber,
         accountName: body.accountName,
@@ -93,6 +103,15 @@ export function WalletModal() {
       setNubanLoading(false);
     }
   }, [nuban, nubanLoading]);
+
+  const submitPhone = async () => {
+    const cleaned = phoneInput.replace(/\D/g, '');
+    if (cleaned.length < 10) {
+      toast({ title: 'Enter a valid Nigerian phone number', variant: 'destructive' });
+      return;
+    }
+    await provisionNuban(cleaned);
+  };
 
   // Lazy-provision the user's virtual NUBAN once the wallet opens.
   useEffect(() => {
@@ -277,6 +296,30 @@ export function WalletModal() {
                     <div>{nubanError}</div>
                     <Button size="sm" variant="outline" onClick={() => { setNubanError(null); provisionNuban(); }}>
                       Try again
+                    </Button>
+                  </div>
+                )}
+
+                {phoneRequired && !nuban && (
+                  <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
+                    <Label className="text-xs">Add your phone number</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Required by our bank partner to issue your account. We'll save it to your profile.
+                    </p>
+                    <Input
+                      type="tel"
+                      placeholder="08012345678"
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                      maxLength={14}
+                    />
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      onClick={submitPhone}
+                      disabled={nubanLoading || phoneInput.replace(/\D/g, '').length < 10}
+                    >
+                      {nubanLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Generating…</> : 'Generate my account'}
                     </Button>
                   </div>
                 )}
