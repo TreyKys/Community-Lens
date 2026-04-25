@@ -304,7 +304,7 @@ export function WalletModal() {
                   <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
                     <Label className="text-xs">Add your phone number</Label>
                     <p className="text-xs text-muted-foreground">
-                      Required by our bank partner to issue your account. We'll save it to your profile.
+                      Required by our bank partner to issue your account. Saved to your profile so you only enter it once.
                     </p>
                     <Input
                       type="tel"
