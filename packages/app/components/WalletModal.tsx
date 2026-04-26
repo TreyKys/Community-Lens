@@ -114,11 +114,13 @@ export function WalletModal() {
   };
 
   // Lazy-provision the user's virtual NUBAN once the wallet opens.
+  // Stop re-firing once we know the user needs to add a phone, otherwise the
+  // effect loops forever and races the user's submitPhone call.
   useEffect(() => {
-    if (isOpen && session?.user && !nuban && !nubanLoading && !nubanError) {
+    if (isOpen && session?.user && !nuban && !nubanLoading && !nubanError && !phoneRequired) {
       provisionNuban();
     }
-  }, [isOpen, session, nuban, nubanLoading, nubanError, provisionNuban]);
+  }, [isOpen, session, nuban, nubanLoading, nubanError, phoneRequired, provisionNuban]);
 
   const copyAccountNumber = async () => {
     if (!nuban) return;
