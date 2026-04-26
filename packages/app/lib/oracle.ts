@@ -48,7 +48,10 @@ export function esportsGameCode(slug: string | undefined | null, fallbackName?: 
 
 export async function fetchFootballFixtures(competitionCode: string): Promise<any[]> {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) {
+    console.warn(`[seed] football-data: FOOTBALL_DATA_API_KEY not set, skipping ${competitionCode}`);
+    return [];
+  }
   const dateFrom = new Date().toISOString().split('T')[0];
   const dateTo = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   try {
@@ -56,15 +59,25 @@ export async function fetchFootballFixtures(competitionCode: string): Promise<an
       `https://api.football-data.org/v4/competitions/${competitionCode}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}&status=SCHEDULED`,
       { headers: { 'X-Auth-Token': apiKey } }
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[seed] football-data ${competitionCode} HTTP ${res.status}: ${body.slice(0, 200)}`);
+      return [];
+    }
     const data = await res.json();
     return data.matches || [];
-  } catch { return []; }
+  } catch (err: any) {
+    console.error(`[seed] football-data ${competitionCode} threw:`, err?.message || err);
+    return [];
+  }
 }
 
 export async function fetchApiSportsFixtures(sport: string, leagueId: number): Promise<any[]> {
   const apiKey = process.env.API_SPORTS_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) {
+    console.warn(`[seed] api-sports: API_SPORTS_KEY not set, skipping ${sport}/${leagueId}`);
+    return [];
+  }
   const host = sport === 'basketball' ? 'api-basketball.p.rapidapi.com' : 'api-tennis.p.rapidapi.com';
   const season = new Date().getFullYear();
   const endpoint = sport === 'basketball'
@@ -74,23 +87,40 @@ export async function fetchApiSportsFixtures(sport: string, leagueId: number): P
     const res = await fetch(endpoint, {
       headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': host }
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[seed] api-sports ${sport}/${leagueId} HTTP ${res.status}: ${body.slice(0, 200)}`);
+      return [];
+    }
     const data = await res.json();
     return data.response || [];
-  } catch { return []; }
+  } catch (err: any) {
+    console.error(`[seed] api-sports ${sport}/${leagueId} threw:`, err?.message || err);
+    return [];
+  }
 }
 
 export async function fetchEsportsFixtures(): Promise<any[]> {
   const apiKey = process.env.PANDASCORE_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey) {
+    console.warn('[seed] pandascore: PANDASCORE_API_KEY not set, skipping esports');
+    return [];
+  }
   try {
     const res = await fetch(
       'https://api.pandascore.co/matches/upcoming?per_page=10&sort=begin_at',
       { headers: { Authorization: `Bearer ${apiKey}` } }
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[seed] pandascore HTTP ${res.status}: ${body.slice(0, 200)}`);
+      return [];
+    }
     return await res.json();
-  } catch { return []; }
+  } catch (err: any) {
+    console.error('[seed] pandascore threw:', err?.message || err);
+    return [];
+  }
 }
 
 export async function createMarketIfNotExists(params: {
