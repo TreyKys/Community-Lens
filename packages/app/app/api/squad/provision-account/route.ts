@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { createVirtualAccount } from '@/lib/squad';
+import { createDynamicVirtualAccount } from '@/lib/squad';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const DEFAULT_TTL_SECONDS = 1800; // 30 min — Squad default
 
 async function getAuthUser(request: Request) {
   const authHeader = request.headers.get('Authorization');
@@ -18,99 +21,75 @@ async function getAuthUser(request: Request) {
 
 /**
  * POST /api/squad/provision-account
- * Idempotently issue a Virtual NUBAN for the authenticated user.
- * Returns the cached account if one already exists.
+ * Body: { amount: number }   // naira
  *
- * Accepts an optional { phone } in the body. If the user has no phone on
- * record, the supplied value is persisted to users.phone before being passed
- * to Squad. (No SMS verification — Termii will plug in later.)
+ * Mints a one-shot Dynamic Virtual Account for this deposit attempt and
+ * inserts a `squad_transactions` row with `status='awaiting_payment'`. The
+ * webhook reconciles by `transaction_ref` when the user actually pays.
  *
- * If the user has no phone and none is supplied, returns 400 with code "phone_required"
- * so the WalletModal can prompt for it inline.
+ * No BVN / KYC required — that's the whole point of using the dynamic
+ * endpoint instead of the static one.
  */
 export async function POST(request: Request) {
   try {
     const authUser = await getAuthUser(request);
     if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const body = await request.json().catch(() => ({} as { phone?: string }));
-    const submittedPhone = typeof body?.phone === 'string' ? body.phone.replace(/\D/g, '') : '';
-
-    const { data: existing } = await supabaseAdmin
-      .from('squad_virtual_accounts')
-      .select('account_number, account_name, bank_name, bank_code')
-      .eq('user_id', authUser.id)
-      .single();
-
-    if (existing) {
-      return NextResponse.json({
-        accountNumber: existing.account_number,
-        accountName: existing.account_name,
-        bankName: existing.bank_name,
-        bankCode: existing.bank_code,
-        cached: true,
-      });
+    const body = await request.json().catch(() => ({} as { amount?: number }));
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount < 100) {
+      return NextResponse.json({ error: 'Enter an amount of at least ₦100.' }, { status: 400 });
+    }
+    if (amount > 1_000_000) {
+      return NextResponse.json({ error: 'Single deposit capped at ₦1,000,000.' }, { status: 400 });
     }
 
     const { data: profile } = await supabaseAdmin
       .from('users')
-      .select('email, username, phone')
+      .select('email, username, first_name, last_name')
       .eq('id', authUser.id)
       .single();
 
     const email = profile?.email || authUser.email || `${authUser.id}@odds.ng`;
     const fallbackName = profile?.username || email.split('@')[0] || 'Odds';
-    const [firstName, ...rest] = fallbackName.split(/\s+/);
-    const lastName = rest.join(' ') || 'User';
+    const firstName = profile?.first_name || fallbackName.split(/\s+/)[0] || 'Odds';
+    const lastName = profile?.last_name || fallbackName.split(/\s+/).slice(1).join(' ') || 'Punter';
 
-    // Squad requires a Nigerian mobile number. Pull it from the user record
-    // first; fall back to anything the WalletModal just collected.
-    const rawPhone = profile?.phone || authUser.phone || submittedPhone;
-    const mobileNum = String(rawPhone || '').replace(/\D/g, '');
+    const transactionRef = `odds_${randomUUID().replace(/-/g, '')}`;
+    const amountKobo = Math.round(amount * 100);
+    const expiresAt = new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000).toISOString();
 
-    if (!mobileNum) {
+    let account;
+    try {
+      account = await createDynamicVirtualAccount({
+        customerIdentifier: authUser.id,
+        firstName,
+        lastName,
+        email,
+        amountKobo,
+        durationSeconds: DEFAULT_TTL_SECONDS,
+        transactionRef,
+      });
+    } catch (err: any) {
+      console.error('Squad dynamic VA creation failed:', err?.message || err);
       return NextResponse.json(
-        {
-          error: 'Phone number required to issue a bank transfer account.',
-          code: 'phone_required',
-        },
-        { status: 400 }
+        { error: err?.message || 'Could not create deposit account.' },
+        { status: 502 }
       );
     }
 
-    // Sanity-check Nigerian mobile shape: 10 digits (without leading 0) or 11 (with), or 13 (intl 234…).
-    if (mobileNum.length < 10 || mobileNum.length > 14) {
-      return NextResponse.json(
-        { error: 'Enter a valid Nigerian phone number (e.g. 08012345678).', code: 'phone_invalid' },
-        { status: 400 }
-      );
-    }
-
-    // Persist the phone to the user record on first capture so they don't have to retype it.
-    if (!profile?.phone && submittedPhone) {
-      await supabaseAdmin.from('users').update({ phone: mobileNum }).eq('id', authUser.id);
-    }
-
-    const account = await createVirtualAccount({
-      customerIdentifier: authUser.id,
-      firstName,
-      lastName,
-      email,
-      mobileNum,
-    });
-
-    const { error: insertErr } = await supabaseAdmin.from('squad_virtual_accounts').insert({
+    const { error: insertErr } = await supabaseAdmin.from('squad_transactions').insert({
+      transaction_ref: transactionRef,
       user_id: authUser.id,
-      customer_identifier: account.customer_identifier || authUser.id,
-      account_number: account.virtual_account_number,
-      account_name: account.account_name,
-      bank_code: account.bank_code || null,
-      bank_name: account.bank || null,
-      raw_response: account,
+      amount_ngn: amount,
+      expected_amount: amount,
+      expires_at: expiresAt,
+      status: 'awaiting_payment',
+      raw_payload: { dynamic_va: account },
     });
 
     if (insertErr) {
-      console.error('Failed to persist Squad virtual account:', insertErr);
+      console.error('Failed to record pending squad transaction:', insertErr);
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
@@ -119,10 +98,12 @@ export async function POST(request: Request) {
       accountName: account.account_name,
       bankName: account.bank,
       bankCode: account.bank_code,
-      cached: false,
+      amount,
+      expiresAt,
+      transactionRef,
     });
   } catch (e: any) {
-    console.error('Squad provision-account error:', e);
+    console.error('Squad initiate-transfer error:', e);
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });
   }
 }

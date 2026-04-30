@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -16,6 +16,15 @@ declare global {
   }
 }
 
+type TransferDetails = {
+  accountNumber: string;
+  accountName: string;
+  bankName: string | null;
+  amount: number;
+  expiresAt: string;
+  transactionRef: string;
+};
+
 export function WalletModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [session, setSession] = useState<any>(null);
@@ -28,12 +37,16 @@ export function WalletModal() {
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
   const [paystackReady, setPaystackReady] = useState(false);
-  const [nuban, setNuban] = useState<{ accountNumber: string; accountName: string; bankName: string | null } | null>(null);
-  const [nubanLoading, setNubanLoading] = useState(false);
-  const [nubanError, setNubanError] = useState<string | null>(null);
-  const [phoneRequired, setPhoneRequired] = useState(false);
-  const [phoneInput, setPhoneInput] = useState('');
+
+  // Bank transfer (Squad dynamic VA) state
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transfer, setTransfer] = useState<TransferDetails | null>(null);
+  const [isInitiating, setIsInitiating] = useState(false);
+  const [initiateError, setInitiateError] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number>(0);
+  const [paymentDetected, setPaymentDetected] = useState(false);
   const [copied, setCopied] = useState(false);
+
   const { toast } = useToast();
 
   // Load Paystack inline script
@@ -71,61 +84,83 @@ export function WalletModal() {
     }
   }, []);
 
-  const provisionNuban = useCallback(async (phoneOverride?: string) => {
-    if (nuban || nubanLoading) return;
-    setNubanLoading(true);
-    setNubanError(null);
+  // Mint a one-shot NUBAN for the entered amount.
+  const initiateBankTransfer = useCallback(async () => {
+    const amount = Number(transferAmount);
+    if (!Number.isFinite(amount) || amount < 100) {
+      toast({ title: 'Minimum bank transfer deposit is ₦100', variant: 'destructive' });
+      return;
+    }
+    setIsInitiating(true);
+    setInitiateError(null);
+    setPaymentDetected(false);
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
-      if (!s?.access_token) throw new Error('Sign in to get a deposit account');
+      if (!s?.access_token) throw new Error('Sign in to deposit');
       const res = await fetch('/api/squad/provision-account', {
         method: 'POST',
         headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(phoneOverride ? { phone: phoneOverride } : {}),
+        body: JSON.stringify({ amount }),
       });
       const body = await res.json();
-      if (!res.ok) {
-        if (body.code === 'phone_required') {
-          setPhoneRequired(true);
-          return;
-        }
-        throw new Error(body.error || 'Failed to provision account');
-      }
-      setPhoneRequired(false);
-      setNuban({
-        accountNumber: body.accountNumber,
-        accountName: body.accountName,
-        bankName: body.bankName,
-      });
+      if (!res.ok) throw new Error(body.error || 'Failed to generate transfer details');
+      setTransfer(body as TransferDetails);
     } catch (e: any) {
-      setNubanError(e.message || 'Could not load bank details');
+      setInitiateError(e.message || 'Could not generate transfer details');
     } finally {
-      setNubanLoading(false);
+      setIsInitiating(false);
     }
-  }, [nuban, nubanLoading]);
+  }, [transferAmount, toast]);
 
-  const submitPhone = async () => {
-    const cleaned = phoneInput.replace(/\D/g, '');
-    if (cleaned.length < 10) {
-      toast({ title: 'Enter a valid Nigerian phone number', variant: 'destructive' });
-      return;
-    }
-    await provisionNuban(cleaned);
+  // Countdown clock for the active transfer.
+  useEffect(() => {
+    if (!transfer) { setSecondsLeft(0); return; }
+    const tick = () => {
+      const left = Math.max(0, Math.floor((new Date(transfer.expiresAt).getTime() - Date.now()) / 1000));
+      setSecondsLeft(left);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [transfer]);
+
+  // Poll for credit completion. Switches off as soon as the deposit lands or
+  // the modal closes.
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!transfer || paymentDetected || !session?.user?.id) return;
+    const userId = session.user.id;
+    const ref = transfer.transactionRef;
+
+    pollRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .from('squad_transactions')
+        .select('status')
+        .eq('transaction_ref', ref)
+        .single();
+      if (data?.status === 'completed') {
+        setPaymentDetected(true);
+        await fetchBalance(userId);
+        toast({ title: 'Deposit received! 🎉', description: `₦${transfer.amount.toLocaleString()} credited to your wallet.` });
+      }
+    }, 4000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [transfer, paymentDetected, session?.user?.id, fetchBalance, toast]);
+
+  const resetTransfer = () => {
+    setTransfer(null);
+    setTransferAmount('');
+    setInitiateError(null);
+    setPaymentDetected(false);
+    setSecondsLeft(0);
   };
 
-  // Lazy-provision the user's virtual NUBAN once the wallet opens.
-  // Stop re-firing once we know the user needs to add a phone, otherwise the
-  // effect loops forever and races the user's submitPhone call.
-  useEffect(() => {
-    if (isOpen && session?.user && !nuban && !nubanLoading && !nubanError && !phoneRequired) {
-      provisionNuban();
-    }
-  }, [isOpen, session, nuban, nubanLoading, nubanError, phoneRequired, provisionNuban]);
-
   const copyAccountNumber = async () => {
-    if (!nuban) return;
+    if (!transfer) return;
     try {
-      await navigator.clipboard.writeText(nuban.accountNumber);
+      await navigator.clipboard.writeText(transfer.accountNumber);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -166,7 +201,6 @@ export function WalletModal() {
         ]
       },
       callback: (_response: any) => {
-        // Webhook handles the actual credit — just update UI optimistically
         toast({
           title: 'Deposit successful! 🎉',
           description: `₦${amount.toLocaleString()} depositing now. Balance updates in a moment.`,
@@ -174,7 +208,6 @@ export function WalletModal() {
         setIsOpen(false);
         setDepositAmount('');
         setIsDepositLoading(false);
-        // Refresh balance after short delay for webhook to process
         setTimeout(() => { if (session?.user?.id) fetchBalance(session.user.id); }, 3000);
       },
       onClose: () => {
@@ -213,10 +246,7 @@ export function WalletModal() {
       if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
 
       if (data.status === 'under_review') {
-        toast({
-          title: 'Withdrawal under review',
-          description: data.message,
-        });
+        toast({ title: 'Withdrawal under review', description: data.message });
       } else {
         toast({
           title: 'Withdrawal initiated ✅',
@@ -233,7 +263,6 @@ export function WalletModal() {
     } finally { setIsWithdrawLoading(false); }
   };
 
-  // Fee previews
   const depositPreview = () => {
     const n = Number(depositAmount);
     if (!n || n < 100) return null;
@@ -249,11 +278,21 @@ export function WalletModal() {
     return { fees: (spread + 100).toFixed(0), naira: naira.toFixed(0) };
   };
 
+  const transferPreview = () => {
+    const n = Number(transferAmount);
+    if (!n || n < 100) return null;
+    return { tNGN: (n * 0.985).toFixed(2), bonus: (n * 0.01).toFixed(2) };
+  };
+
   const dp = depositPreview();
   const wp = withdrawPreview();
+  const tp = transferPreview();
+  const expired = !!transfer && secondsLeft === 0 && !paymentDetected;
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) resetTransfer(); }}>
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-2 bg-muted/50 border-muted hover:bg-muted">
           <Wallet className="h-4 w-4" />
@@ -282,67 +321,107 @@ export function WalletModal() {
                 <TabsTrigger value="card" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Card</TabsTrigger>
               </TabsList>
 
+              {/* ── BANK TRANSFER ───────────────────────────────────────── */}
               <TabsContent value="transfer" className="space-y-3 pt-4">
-                <p className="text-sm text-muted-foreground">
-                  Send any amount to your dedicated account below. Credit lands in seconds.
-                </p>
-
-                {nubanLoading && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Generating your account…
-                  </div>
-                )}
-
-                {nubanError && (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive space-y-2">
-                    <div>{nubanError}</div>
-                    <Button size="sm" variant="outline" onClick={() => { setNubanError(null); provisionNuban(); }}>
-                      Try again
-                    </Button>
-                  </div>
-                )}
-
-                {phoneRequired && !nuban && (
-                  <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
-                    <Label className="text-xs">Add your phone number</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Required by our bank partner to issue your account. Saved to your profile so you only enter it once.
+                {!transfer && (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Enter how much you want to deposit. We&apos;ll generate a one-time bank account valid for 30 minutes.
                     </p>
-                    <Input
-                      type="tel"
-                      placeholder="08012345678"
-                      value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
-                      maxLength={14}
-                    />
+                    <div className="space-y-2">
+                      <Label>Amount (₦)</Label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                        <Input
+                          type="number"
+                          placeholder="Min ₦100"
+                          value={transferAmount}
+                          onChange={e => setTransferAmount(e.target.value)}
+                          min={100}
+                          className="pl-8"
+                        />
+                      </div>
+                    </div>
+
+                    {tp && (
+                      <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
+                        <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{tp.tNGN} tNGN</span></div>
+                        <div className="flex justify-between"><span>Bonus credit</span><span className="text-amber-400">+₦{tp.bonus}</span></div>
+                      </div>
+                    )}
+
+                    {initiateError && (
+                      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                        {initiateError}
+                      </div>
+                    )}
+
                     <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={submitPhone}
-                      disabled={nubanLoading || phoneInput.replace(/\D/g, '').length < 10}
+                      onClick={initiateBankTransfer}
+                      disabled={isInitiating || !transferAmount || Number(transferAmount) < 100}
+                      className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
                     >
-                      {nubanLoading ? <><Loader2 className="w-3.5 h-3.5 animate-spin mr-2" />Generating…</> : 'Generate my account'}
+                      {isInitiating ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Generating…</> : 'Generate transfer details'}
                     </Button>
+                  </>
+                )}
+
+                {transfer && !paymentDetected && (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Account number</div>
+                          <div className="text-2xl font-mono font-bold tracking-wider">{transfer.accountNumber}</div>
+                        </div>
+                        <Button size="icon" variant="ghost" onClick={copyAccountNumber} aria-label="Copy account number">
+                          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        </Button>
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground border-t border-border/50 pt-2">
+                        <span>Bank</span><span className="text-foreground">{transfer.bankName || '—'}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Account name</span><span className="text-foreground">{transfer.accountName}</span>
+                      </div>
+                      <div className="flex justify-between text-xs border-t border-border/50 pt-2">
+                        <span className="text-muted-foreground">Send exactly</span>
+                        <span className="font-semibold text-foreground">₦{transfer.amount.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-center">
+                      {expired ? (
+                        <div className="space-y-2">
+                          <p className="text-xs text-destructive flex items-center justify-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> This account expired. Generate a fresh one.
+                          </p>
+                          <Button size="sm" variant="outline" onClick={resetTransfer}>Start over</Button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-xs text-muted-foreground">
+                            Expires in <span className="font-mono text-foreground">{mins}:{secs.toString().padStart(2, '0')}</span>
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Waiting for your transfer…
+                          </p>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
 
-                {nuban && (
-                  <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Account number</div>
-                        <div className="text-2xl font-mono font-bold tracking-wider">{nuban.accountNumber}</div>
-                      </div>
-                      <Button size="icon" variant="ghost" onClick={copyAccountNumber} aria-label="Copy account number">
-                        {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                      </Button>
+                {paymentDetected && transfer && (
+                  <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4 text-center space-y-3">
+                    <Check className="w-8 h-8 text-emerald-400 mx-auto" />
+                    <div>
+                      <p className="text-sm font-semibold">Deposit received</p>
+                      <p className="text-xs text-muted-foreground">
+                        ₦{transfer.amount.toLocaleString()} credited to your wallet.
+                      </p>
                     </div>
-                    <div className="flex justify-between text-xs text-muted-foreground border-t border-border/50 pt-2">
-                      <span>Bank</span><span className="text-foreground">{nuban.bankName || '—'}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Account name</span><span className="text-foreground">{nuban.accountName}</span>
-                    </div>
+                    <Button size="sm" onClick={() => { setIsOpen(false); resetTransfer(); }}>Done</Button>
                   </div>
                 )}
 
@@ -351,6 +430,7 @@ export function WalletModal() {
                 </p>
               </TabsContent>
 
+              {/* ── CARD ────────────────────────────────────────────────── */}
               <TabsContent value="card" className="space-y-4 pt-4">
                 <p className="text-sm text-muted-foreground">Pay with card via Paystack.</p>
                 <div className="space-y-2">
