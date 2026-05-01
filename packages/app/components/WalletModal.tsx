@@ -441,42 +441,45 @@ export function WalletModal() {
 
               {/* ── CARD ────────────────────────────────────────────────── */}
               <TabsContent value="card" className="space-y-4 pt-4">
-                <p className="text-sm text-muted-foreground">Pay with card via Paystack.</p>
-                <div className="space-y-2">
-                  <Label>Amount (₦)</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                    <Input
-                      type="number"
-                      placeholder="Min ₦500"
-                      value={depositAmount}
-                      onChange={e => setDepositAmount(e.target.value)}
-                      min={500}
-                      className="pl-8"
-                    />
-                  </div>
-                </div>
-
-                {dp && (
-                  <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                    <div className="flex justify-between"><span>Paystack fee</span><span>₦{dp.fee}</span></div>
-                    <div className="flex justify-between"><span>Total billed</span><span>₦{dp.total}</span></div>
-                    <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
-                      <span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span>
+                {/* Paystack inline.js v1 requires the submit button to live inside a <form> */}
+                <form onSubmit={e => { e.preventDefault(); handleDeposit(); }} noValidate>
+                  <p className="text-sm text-muted-foreground mb-4">Pay with card via Paystack.</p>
+                  <div className="space-y-2">
+                    <Label>Amount (₦)</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                      <Input
+                        type="number"
+                        placeholder="Min ₦500"
+                        value={depositAmount}
+                        onChange={e => setDepositAmount(e.target.value)}
+                        min={500}
+                        className="pl-8"
+                      />
                     </div>
                   </div>
-                )}
 
-                <Button
-                  onClick={handleDeposit}
-                  disabled={isDepositLoading || !depositAmount}
-                  className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
-                >
-                  {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Deposit Naira'}
-                </Button>
-                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-                  <Shield className="w-3 h-3" /> Secured by Paystack
-                </p>
+                  {dp && (
+                    <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50 mt-3">
+                      <div className="flex justify-between"><span>Paystack fee</span><span>₦{dp.fee}</span></div>
+                      <div className="flex justify-between"><span>Total billed</span><span>₦{dp.total}</span></div>
+                      <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
+                        <span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    type="submit"
+                    disabled={isDepositLoading || !depositAmount}
+                    className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold mt-4"
+                  >
+                    {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Deposit Naira'}
+                  </Button>
+                  <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 mt-2">
+                    <Shield className="w-3 h-3" /> Secured by Paystack
+                  </p>
+                </form>
               </TabsContent>
             </Tabs>
           </TabsContent>
