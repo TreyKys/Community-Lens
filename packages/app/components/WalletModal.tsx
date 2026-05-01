@@ -169,6 +169,15 @@ export function WalletModal() {
   };
 
   const handleDeposit = () => {
+    const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
+    if (!publicKey) {
+      toast({
+        title: 'Card payments unavailable',
+        description: 'NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY is not configured. Use the Bank Transfer tab.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const amount = Number(depositAmount);
     if (!amount || amount < 500) {
       toast({ title: 'Minimum deposit is ₦500', variant: 'destructive' });
@@ -189,7 +198,7 @@ export function WalletModal() {
     setIsDepositLoading(true);
 
     const handler = window.PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || 'pk_test_e315d890cc4f59e3596b602f4f1b2ae17c064ec3',
+      key: publicKey,
       email: session.user.email,
       amount: totalCharge,
       currency: 'NGN',
