@@ -10,12 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Wallet, Loader2, Shield, AlertTriangle, Copy, Check, Building2, CreditCard } from 'lucide-react';
 
-declare global {
-  interface Window {
-    PaystackPop?: any;
-  }
-}
-
 type TransferDetails = {
   accountNumber: string;
   accountName: string;
@@ -36,7 +30,6 @@ export function WalletModal() {
   const [accountNumber, setAccountNumber] = useState('');
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
-  const [paystackReady, setPaystackReady] = useState(false);
 
   // Bank transfer (Squad dynamic VA) state
   const [transferAmount, setTransferAmount] = useState('');
@@ -48,17 +41,6 @@ export function WalletModal() {
   const [copied, setCopied] = useState(false);
 
   const { toast } = useToast();
-
-  // Load Paystack inline script
-  useEffect(() => {
-    if (window.PaystackPop) { setPaystackReady(true); return; }
-    const script = document.createElement('script');
-    script.src = 'https://js.paystack.co/v1/inline.js';
-    script.async = true;
-    script.onload = () => setPaystackReady(true);
-    document.head.appendChild(script);
-    return () => { document.head.removeChild(script); };
-  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -168,64 +150,35 @@ export function WalletModal() {
     }
   };
 
-  const handleDeposit = () => {
-    const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
-    if (!publicKey) {
-      toast({
-        title: 'Card payments unavailable',
-        description: 'NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY is not configured. Use the Bank Transfer tab.',
-        variant: 'destructive',
-      });
-      return;
-    }
+  const handleCardDeposit = async () => {
     const amount = Number(depositAmount);
-    if (!amount || amount < 500) {
-      toast({ title: 'Minimum deposit is ₦500', variant: 'destructive' });
+    if (!amount || amount < 100) {
+      toast({ title: 'Minimum card deposit is ₦100', variant: 'destructive' });
       return;
     }
     if (!session?.user) {
       toast({ title: 'Please sign in first', variant: 'destructive' });
       return;
     }
-    if (!paystackReady || !window.PaystackPop) {
-      toast({ title: 'Payment system loading...', description: 'Please try again in a moment.' });
-      return;
-    }
-
-    const paystackFee = Math.min((amount * 0.015) + 100, 2000);
-    const totalCharge = Math.round((amount + paystackFee) * 100); // kobo
 
     setIsDepositLoading(true);
-
-    const handler = window.PaystackPop.setup({
-      key: publicKey,
-      email: session.user.email,
-      amount: totalCharge,
-      currency: 'NGN',
-      ref: `tm_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-      metadata: {
-        userId: session.user.id,
-        custom_fields: [
-          { display_name: 'Platform', variable_name: 'platform', value: 'Odds.ng' }
-        ]
-      },
-      callback: (_response: any) => {
-        toast({
-          title: 'Deposit successful! 🎉',
-          description: `₦${amount.toLocaleString()} depositing now. Balance updates in a moment.`,
-        });
-        setIsOpen(false);
-        setDepositAmount('');
-        setIsDepositLoading(false);
-        setTimeout(() => { if (session?.user?.id) fetchBalance(session.user.id); }, 3000);
-      },
-      onClose: () => {
-        setIsDepositLoading(false);
-        toast({ title: 'Deposit cancelled', variant: 'destructive' });
-      },
-    });
-
-    handler.openIframe();
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (!s?.access_token) throw new Error('Sign in to deposit');
+      const res = await fetch('/api/squad/initiate-card', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.checkoutUrl) throw new Error(body.error || 'Could not start payment');
+      // Redirect to Squad's hosted checkout. They redirect back to /wallet/squad-callback
+      // when the payment is completed or cancelled.
+      window.location.href = body.checkoutUrl;
+    } catch (e: any) {
+      toast({ title: 'Payment failed to start', description: e.message, variant: 'destructive' });
+      setIsDepositLoading(false);
+    }
   };
 
   const handleWithdraw = async () => {
@@ -275,8 +228,7 @@ export function WalletModal() {
   const depositPreview = () => {
     const n = Number(depositAmount);
     if (!n || n < 100) return null;
-    const fee = Math.min((n * 0.015) + 100, 2000);
-    return { fee: fee.toFixed(0), total: (n + fee).toFixed(0), tNGN: (n * 0.985).toFixed(2) };
+    return { tNGN: (n * 0.985).toFixed(2), bonus: (n * 0.01).toFixed(2) };
   };
 
   const withdrawPreview = () => {
@@ -441,45 +393,41 @@ export function WalletModal() {
 
               {/* ── CARD ────────────────────────────────────────────────── */}
               <TabsContent value="card" className="space-y-4 pt-4">
-                {/* Paystack inline.js v1 requires the submit button to live inside a <form> */}
-                <form onSubmit={e => { e.preventDefault(); handleDeposit(); }} noValidate>
-                  <p className="text-sm text-muted-foreground mb-4">Pay with card via Paystack.</p>
-                  <div className="space-y-2">
-                    <Label>Amount (₦)</Label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                      <Input
-                        type="number"
-                        placeholder="Min ₦500"
-                        value={depositAmount}
-                        onChange={e => setDepositAmount(e.target.value)}
-                        min={500}
-                        className="pl-8"
-                      />
-                    </div>
+                <p className="text-sm text-muted-foreground">
+                  Pay with card on Squad&apos;s secure checkout. We&apos;ll redirect you to complete the payment.
+                </p>
+                <div className="space-y-2">
+                  <Label>Amount (₦)</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                    <Input
+                      type="number"
+                      placeholder="Min ₦100"
+                      value={depositAmount}
+                      onChange={e => setDepositAmount(e.target.value)}
+                      min={100}
+                      className="pl-8"
+                    />
                   </div>
+                </div>
 
-                  {dp && (
-                    <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50 mt-3">
-                      <div className="flex justify-between"><span>Paystack fee</span><span>₦{dp.fee}</span></div>
-                      <div className="flex justify-between"><span>Total billed</span><span>₦{dp.total}</span></div>
-                      <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
-                        <span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span>
-                      </div>
-                    </div>
-                  )}
+                {dp && (
+                  <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
+                    <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span></div>
+                    <div className="flex justify-between"><span>Bonus credit</span><span className="text-amber-400">+₦{dp.bonus}</span></div>
+                  </div>
+                )}
 
-                  <Button
-                    type="submit"
-                    disabled={isDepositLoading || !depositAmount}
-                    className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold mt-4"
-                  >
-                    {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Deposit Naira'}
-                  </Button>
-                  <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 mt-2">
-                    <Shield className="w-3 h-3" /> Secured by Paystack
-                  </p>
-                </form>
+                <Button
+                  onClick={handleCardDeposit}
+                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                  className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
+                >
+                  {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Redirecting…</> : 'Pay with card'}
+                </Button>
+                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
+                  <Shield className="w-3 h-3" /> Secured by Squad
+                </p>
               </TabsContent>
             </Tabs>
           </TabsContent>

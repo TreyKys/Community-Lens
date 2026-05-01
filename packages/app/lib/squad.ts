@@ -58,7 +58,6 @@ export type DynamicVirtualAccount = {
  * @param durationSeconds time before the NUBAN expires (default 1800 = 30 min)
  */
 export async function createDynamicVirtualAccount(params: {
-  customerIdentifier: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -66,14 +65,45 @@ export async function createDynamicVirtualAccount(params: {
   durationSeconds?: number;
   transactionRef: string;
 }): Promise<DynamicVirtualAccount> {
+  const customerName = `${params.firstName} ${params.lastName}`.trim() || 'Odds Punter';
   return await squadRequest('/virtual-account/create-dynamic-virtual-account', 'POST', {
-    customer_identifier: params.customerIdentifier,
-    first_name: params.firstName,
-    last_name: params.lastName,
+    customer_name: customerName,
     email: params.email,
     amount: params.amountKobo,
+    currency_code: 'NGN',
     duration: params.durationSeconds ?? 1800,
     transaction_ref: params.transactionRef,
+  });
+}
+
+export type CheckoutSession = {
+  checkout_url: string;
+  transaction_ref: string;
+};
+
+/**
+ * Initiate a Squad-hosted checkout for card / bank / USSD payments.
+ * Returns a checkout_url to redirect the user to. The webhook at
+ * /api/webhooks/squad reconciles the credit by transaction_ref.
+ */
+export async function initiateCheckout(params: {
+  amountKobo: number;
+  email: string;
+  transactionRef: string;
+  callbackUrl: string;
+  customerName?: string;
+  metadata?: Record<string, any>;
+}): Promise<CheckoutSession> {
+  return await squadRequest('/transaction/initiate', 'POST', {
+    amount: params.amountKobo,
+    email: params.email,
+    currency: 'NGN',
+    initiate_type: 'inline',
+    transaction_ref: params.transactionRef,
+    callback_url: params.callbackUrl,
+    payment_channels: ['card', 'ussd', 'bank', 'transfer'],
+    customer_name: params.customerName,
+    metadata: params.metadata || {},
   });
 }
 
