@@ -48,11 +48,11 @@ export async function POST(req: Request) {
     // 2. Idempotency check — prevent double-crediting on webhook replays
     const { data: existingTx } = await supabaseAdmin
       .from('paystack_transactions')
-      .select('reference')
+      .select('id, reference, status')
       .eq('reference', reference)
       .single();
 
-    if (existingTx) {
+    if (existingTx && existingTx.status === 'completed') {
       console.log(`Reference ${reference} already processed. Skipping.`);
       return NextResponse.json({ status: 'already processed' }, { status: 200 });
     }
@@ -65,21 +65,41 @@ export async function POST(req: Request) {
     const tNGNToCredit = amountInNGN - spreadAmount; // what user receives
 
     // 3. Mark transaction as pending to prevent race conditions
-    const { error: insertError } = await supabaseAdmin
-      .from('paystack_transactions')
-      .insert({
-        reference,
-        user_id: userId,
-        amount_ngn: amountInNGN,
-        tngn_credited: tNGNToCredit,
-        spread_captured: spreadAmount,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-      });
+    if (existingTx) {
+      const { error: updateTxErr } = await supabaseAdmin
+        .from('paystack_transactions')
+        .update({
+          amount_ngn: amountInNGN,
+          tngn_credited: tNGNToCredit,
+          spread_captured: spreadAmount,
+          status: 'pending',
+        })
+        .eq('id', existingTx.id);
 
-    if (insertError) {
-      console.error('Failed to insert transaction:', insertError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      if (updateTxErr) {
+        console.error('Failed to update pending paystack transaction:', updateTxErr);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      }
+    } else {
+      const { error: insertError } = await supabaseAdmin
+        .from('paystack_transactions')
+        .insert({
+          reference,
+          user_id: userId,
+          amount_ngn: amountInNGN,
+          tngn_credited: tNGNToCredit,
+          spread_captured: spreadAmount,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        });
+
+      if (insertError) {
+        if ((insertError as any)?.code === '23505') {
+          return NextResponse.json({ status: 'already processed' }, { status: 200 });
+        }
+        console.error('Failed to insert transaction:', insertError);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      }
     }
 
     // 4. Credit user's tNGN balance in Supabase (atomic increment)

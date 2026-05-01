@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { createDynamicVirtualAccount } from '@/lib/squad';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const DEFAULT_TTL_SECONDS = 1800; // 30 min — Squad default
 
 async function getAuthUser(request: Request) {
   const authHeader = request.headers.get('Authorization');
@@ -20,15 +17,12 @@ async function getAuthUser(request: Request) {
 }
 
 /**
- * POST /api/squad/provision-account
+ * POST /api/paystack/initiate-deposit
  * Body: { amount: number }   // naira
  *
- * Mints a one-shot Dynamic Virtual Account for this deposit attempt and
- * inserts a `squad_transactions` row with `status='awaiting_payment'`. The
- * webhook reconciles by `transaction_ref` when the user actually pays.
- *
- * No BVN / KYC required — that's the whole point of using the dynamic
- * endpoint instead of the static one.
+ * Creates a Paystack-hosted checkout session for card / bank payments.
+ * Inserts a `paystack_transactions` row with status='awaiting_payment' so the
+ * webhook can credit by reference when the payment lands.
  */
 export async function POST(request: Request) {
   try {
@@ -51,58 +45,67 @@ export async function POST(request: Request) {
       .single();
 
     const email = profile?.email || authUser.email || `${authUser.id}@odds.ng`;
-    const fallbackName = profile?.username || email.split('@')[0] || 'Odds';
-    const firstName = profile?.first_name || fallbackName.split(/\s+/)[0] || 'Odds';
-    const lastName = profile?.last_name || fallbackName.split(/\s+/).slice(1).join(' ') || 'Punter';
 
-    const transactionRef = `odds_${randomUUID().replace(/-/g, '')}`;
+    const reference = `odds_ps_${randomUUID().replace(/-/g, '')}`;
     const amountKobo = Math.round(amount * 100);
-    const expiresAt = new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000).toISOString();
 
-    let account;
-    try {
-      account = await createDynamicVirtualAccount({
-        firstName,
-        lastName,
+    const origin =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      request.headers.get('origin') ||
+      `https://${request.headers.get('host')}`;
+    const callbackUrl = `${origin}/wallet/paystack-callback`;
+
+    // 1. Initialize Paystack Transaction
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    if (!secret) throw new Error('PAYSTACK_SECRET_KEY not configured');
+
+    const res = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: amountKobo,
         email,
-        amountKobo,
-        durationSeconds: DEFAULT_TTL_SECONDS,
-        transactionRef,
-      });
-    } catch (err: any) {
-      console.error('Squad dynamic VA creation failed:', err?.message || err);
+        reference,
+        callback_url: callbackUrl,
+        metadata: {
+          userId: authUser.id,
+          channel: 'paystack_checkout'
+        }
+      }),
+    });
+
+    const data = await res.json();
+    if (!data.status) {
+      console.error('Paystack checkout init failed:', data.message);
       return NextResponse.json(
-        { error: err?.message || 'Could not create deposit account.' },
+        { error: data.message || 'Could not start Paystack payment.' },
         { status: 502 }
       );
     }
 
-    const { error: insertErr } = await supabaseAdmin.from('squad_transactions').insert({
-      transaction_ref: transactionRef,
+    // 2. Record pending transaction in Supabase
+    // Using stringified JSON or an empty object to avoid JSONB DB error if paystack responds oddly
+    const { error: insertErr } = await supabaseAdmin.from('paystack_transactions').insert({
+      reference,
       user_id: authUser.id,
       amount_ngn: amount,
-      expected_amount: amount,
-      expires_at: expiresAt,
       status: 'awaiting_payment',
-      raw_payload: { dynamic_va: account },
     });
 
     if (insertErr) {
-      console.error('Failed to record pending squad transaction:', insertErr);
+      console.error('Failed to record pending paystack transaction:', insertErr);
       return NextResponse.json({ error: 'Database error: ' + insertErr.message }, { status: 500 });
     }
 
     return NextResponse.json({
-      accountNumber: account.virtual_account_number,
-      accountName: account.account_name,
-      bankName: account.bank,
-      bankCode: account.bank_code,
-      amount,
-      expiresAt,
-      transactionRef,
+      checkoutUrl: data.data.authorization_url,
+      reference,
     });
   } catch (e: any) {
-    console.error('Squad initiate-transfer error:', e);
+    console.error('Paystack initiate-deposit error:', e);
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });
   }
 }

@@ -101,7 +101,7 @@ export async function POST(req: Request) {
         .eq('id', pending.id);
       if (updateTxErr) {
         console.error('Failed to update pending squad transaction:', updateTxErr);
-        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+        return NextResponse.json({ error: 'Database error: ' + updateTxErr.message }, { status: 500 });
       }
     } else {
       const { error: insertError } = await supabaseAdmin
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
           return NextResponse.json({ status: 'already processed' }, { status: 200 });
         }
         console.error('Failed to insert squad transaction:', insertError);
-        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+        return NextResponse.json({ error: 'Database error: ' + insertError.message }, { status: 500 });
       }
     }
 

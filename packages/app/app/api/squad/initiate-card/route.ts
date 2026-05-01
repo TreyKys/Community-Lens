@@ -87,11 +87,13 @@ export async function POST(request: Request) {
       amount_ngn: amount,
       expected_amount: amount,
       status: 'awaiting_payment',
+      // Using JSON stringify parsing logic internally inside PostgREST sometimes throws on deep nesting,
+      // fallback to null or empty if strict JSONB issues occur, but since we know `session` is simple:
       raw_payload: { checkout: session, channel: 'card' },
     });
     if (insertErr) {
       console.error('Failed to record pending squad card transaction:', insertErr);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return NextResponse.json({ error: 'Database error: ' + insertErr.message }, { status: 500 });
     }
 
     return NextResponse.json({
