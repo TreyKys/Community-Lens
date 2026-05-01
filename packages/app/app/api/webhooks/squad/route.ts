@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     // Lookup #1: pre-existing pending row created by /api/squad/provision-account.
     const { data: pending } = await supabaseAdmin
       .from('squad_transactions')
-      .select('id, user_id, status, expected_amount')
+      .select('id, user_id, status')
       .eq('transaction_ref', transactionRef)
       .single();
 

@@ -150,7 +150,7 @@ export function WalletModal() {
     }
   };
 
-  const handleCardDeposit = async () => {
+  const handleCardDeposit = async (gateway: 'squad' | 'paystack') => {
     const amount = Number(depositAmount);
     if (!amount || amount < 100) {
       toast({ title: 'Minimum card deposit is ₦100', variant: 'destructive' });
@@ -165,16 +165,16 @@ export function WalletModal() {
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
       if (!s?.access_token) throw new Error('Sign in to deposit');
-      const res = await fetch('/api/squad/initiate-card', {
+      const path = gateway === 'paystack' ? '/api/paystack/initiate' : '/api/squad/initiate-card';
+      const res = await fetch(path, {
         method: 'POST',
         headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
       });
       const body = await res.json();
-      if (!res.ok || !body.checkoutUrl) throw new Error(body.error || 'Could not start payment');
-      // Redirect to Squad's hosted checkout. They redirect back to /wallet/squad-callback
-      // when the payment is completed or cancelled.
-      window.location.href = body.checkoutUrl;
+      const redirectUrl = body.checkoutUrl || body.authorizationUrl;
+      if (!res.ok || !redirectUrl) throw new Error(body.error || 'Could not start payment');
+      window.location.href = redirectUrl;
     } catch (e: any) {
       toast({ title: 'Payment failed to start', description: e.message, variant: 'destructive' });
       setIsDepositLoading(false);
@@ -394,7 +394,7 @@ export function WalletModal() {
               {/* ── CARD ────────────────────────────────────────────────── */}
               <TabsContent value="card" className="space-y-4 pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Pay with card on Squad&apos;s secure checkout. We&apos;ll redirect you to complete the payment.
+                  Pay with card on a secure hosted checkout. We&apos;ll redirect you to complete the payment.
                 </p>
                 <div className="space-y-2">
                   <Label>Amount (₦)</Label>
@@ -418,15 +418,37 @@ export function WalletModal() {
                   </div>
                 )}
 
-                <Button
-                  onClick={handleCardDeposit}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
-                  className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
-                >
-                  {isDepositLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Redirecting…</> : 'Pay with card'}
-                </Button>
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Choose your payment provider</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      onClick={() => handleCardDeposit('paystack')}
+                      disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                      variant="outline"
+                      className="h-auto py-3 flex-col gap-1"
+                    >
+                      <span className="font-semibold">Paystack</span>
+                      <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
+                    </Button>
+                    <Button
+                      onClick={() => handleCardDeposit('squad')}
+                      disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                      variant="outline"
+                      className="h-auto py-3 flex-col gap-1"
+                    >
+                      <span className="font-semibold">Squad</span>
+                      <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
+                    </Button>
+                  </div>
+                  {isDepositLoading && (
+                    <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 pt-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Redirecting to checkout…
+                    </p>
+                  )}
+                </div>
+
                 <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-                  <Shield className="w-3 h-3" /> Secured by Squad
+                  <Shield className="w-3 h-3" /> Secured by Paystack &amp; Squad
                 </p>
               </TabsContent>
             </Tabs>

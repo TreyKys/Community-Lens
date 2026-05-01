@@ -77,19 +77,23 @@ export async function POST(request: Request) {
       );
     }
 
+    // expected_amount + expires_at live in raw_payload so this works whether
+    // or not migration 20240510 (which adds the dedicated columns) has been
+    // applied to the connected Supabase instance.
     const { error: insertErr } = await supabaseAdmin.from('squad_transactions').insert({
       transaction_ref: transactionRef,
       user_id: authUser.id,
       amount_ngn: amount,
-      expected_amount: amount,
-      expires_at: expiresAt,
       status: 'awaiting_payment',
-      raw_payload: { dynamic_va: account },
+      raw_payload: { dynamic_va: account, expected_amount: amount, expires_at: expiresAt },
     });
 
     if (insertErr) {
       console.error('Failed to record pending squad transaction:', insertErr);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return NextResponse.json(
+        { error: `Database error: ${insertErr.message}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({

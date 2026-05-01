@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { initiateCheckout } from '@/lib/squad';
+import { initializeTransaction } from '@/lib/paystack';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,15 +17,16 @@ async function getAuthUser(request: Request) {
 }
 
 /**
- * POST /api/squad/initiate-card
+ * POST /api/paystack/initiate
  * Body: { amount: number }   // naira
  *
- * Creates a Squad-hosted checkout session for card / USSD / bank.
- * Inserts a `squad_transactions` row with status='awaiting_payment' so the
- * webhook can credit by transaction_ref when the payment lands.
+ * Server-side initialization. Generates a unique reference, inserts a pending
+ * row in paystack_transactions, calls Paystack's /transaction/initialize, and
+ * returns an authorization_url for the client to redirect to.
  *
- * Returns { checkoutUrl, transactionRef }. Client should redirect the user
- * to checkoutUrl (or open it in a popup).
+ * After payment Paystack redirects to /wallet/paystack-callback?reference=...,
+ * which calls /api/paystack/verify to confirm the charge and credit balance.
+ * The webhook at /api/webhooks/paystack remains as an idempotent fallback.
  */
 export async function POST(request: Request) {
   try {
@@ -44,54 +44,45 @@ export async function POST(request: Request) {
 
     const { data: profile } = await supabaseAdmin
       .from('users')
-      .select('email, username, first_name, last_name')
+      .select('email')
       .eq('id', authUser.id)
       .single();
-
     const email = profile?.email || authUser.email || `${authUser.id}@odds.ng`;
-    const fallbackName = profile?.username || email.split('@')[0] || 'Odds';
-    const firstName = profile?.first_name || fallbackName.split(/\s+/)[0] || 'Odds';
-    const lastName = profile?.last_name || fallbackName.split(/\s+/).slice(1).join(' ') || 'Punter';
-    const customerName = `${firstName} ${lastName}`.trim();
 
-    const transactionRef = `odds_card_${randomUUID().replace(/-/g, '')}`;
+    const reference = `odds_ps_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const amountKobo = Math.round(amount * 100);
 
     const origin =
       process.env.NEXT_PUBLIC_APP_URL ||
       request.headers.get('origin') ||
       `https://${request.headers.get('host')}`;
-    const callbackUrl = `${origin}/wallet/squad-callback?ref=${transactionRef}`;
+    const callbackUrl = `${origin}/wallet/paystack-callback`;
 
-    let session;
+    let result;
     try {
-      session = await initiateCheckout({
-        amountKobo,
+      result = await initializeTransaction({
         email,
-        transactionRef,
+        amountKobo,
+        reference,
         callbackUrl,
-        customerName,
-        metadata: { user_id: authUser.id, channel: 'card' },
+        metadata: { userId: authUser.id, channel: 'card' },
       });
     } catch (err: any) {
-      console.error('Squad checkout init failed:', err?.message || err);
+      console.error('Paystack initialize failed:', err?.message || err);
       return NextResponse.json(
         { error: err?.message || 'Could not start payment.' },
         { status: 502 }
       );
     }
 
-    // expected_amount lives in raw_payload so this works whether or not
-    // migration 20240510 (which adds the dedicated column) has been applied.
-    const { error: insertErr } = await supabaseAdmin.from('squad_transactions').insert({
-      transaction_ref: transactionRef,
+    const { error: insertErr } = await supabaseAdmin.from('paystack_transactions').insert({
+      reference,
       user_id: authUser.id,
       amount_ngn: amount,
       status: 'awaiting_payment',
-      raw_payload: { checkout: session, channel: 'card', expected_amount: amount },
     });
     if (insertErr) {
-      console.error('Failed to record pending squad card transaction:', insertErr);
+      console.error('Failed to record pending paystack transaction:', insertErr);
       return NextResponse.json(
         { error: `Database error: ${insertErr.message}` },
         { status: 500 }
@@ -99,11 +90,11 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      checkoutUrl: session.checkout_url,
-      transactionRef,
+      authorizationUrl: result.authorizationUrl,
+      reference,
     });
   } catch (e: any) {
-    console.error('Squad initiate-card error:', e);
+    console.error('Paystack initiate error:', e);
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });
   }
 }

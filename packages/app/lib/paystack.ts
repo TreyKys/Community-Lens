@@ -1,11 +1,12 @@
 /**
  * lib/paystack.ts
- * Paystack Transfer API utilities for real NGN withdrawals.
+ * Paystack server API utilities.
  *
- * Flow:
- *   1. createTransferRecipient — register the user's bank account
- *   2. initiateTransfer — send NGN to their account
- *   3. Paystack fires a webhook to /api/webhooks/paystack on transfer.success
+ * Two flows live here:
+ *   - Inbound deposits: initializeTransaction → returns authorization_url
+ *     the client redirects to. Paystack returns to our callback page, which
+ *     calls verifyTransaction; webhook is a redundant idempotent fallback.
+ *   - Outbound withdrawals: createTransferRecipient → initiateTransfer.
  */
 
 const PAYSTACK_BASE = 'https://api.paystack.co';
@@ -30,6 +31,45 @@ async function paystackRequest(path: string, method: string, body?: any) {
   }
 
   return data.data;
+}
+
+/**
+ * Initialize a Paystack transaction. Returns an authorization_url to redirect
+ * the user to. After payment Paystack redirects to callback_url; the verify
+ * endpoint then confirms the charge server-side.
+ *
+ * @param amountKobo amount in kobo (multiply naira by 100)
+ */
+export async function initializeTransaction(params: {
+  email: string;
+  amountKobo: number;
+  reference: string;
+  callbackUrl: string;
+  metadata?: Record<string, any>;
+}): Promise<{ authorizationUrl: string; accessCode: string; reference: string }> {
+  const data = await paystackRequest('/transaction/initialize', 'POST', {
+    email: params.email,
+    amount: params.amountKobo,
+    reference: params.reference,
+    callback_url: params.callbackUrl,
+    currency: 'NGN',
+    metadata: params.metadata || {},
+  });
+  return {
+    authorizationUrl: data.authorization_url,
+    accessCode: data.access_code,
+    reference: data.reference,
+  };
+}
+
+/**
+ * Verify a Paystack transaction by reference. Returns the full data object
+ * including status ('success', 'failed', 'abandoned'), amount (kobo), and
+ * metadata. Use this in the callback handler to confirm the charge before
+ * crediting balance.
+ */
+export async function verifyTransaction(reference: string): Promise<any> {
+  return await paystackRequest(`/transaction/verify/${encodeURIComponent(reference)}`, 'GET');
 }
 
 /**
