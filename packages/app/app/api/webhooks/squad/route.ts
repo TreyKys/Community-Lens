@@ -30,8 +30,16 @@ export async function POST(req: Request) {
 
     const payload = JSON.parse(rawBody);
 
-    const event = payload.event || payload.Event;
-    if (event && event !== 'transaction_notification' && event !== 'successful_transaction') {
+    const event = (payload.event || payload.Event || '').toLowerCase();
+    // Accept VA credits and card/USSD payment events. Ignore everything else.
+    const ACCEPTED_EVENTS = [
+      'transaction_notification',   // VA bank transfer
+      'successful_transaction',      // VA alternate name
+      'charge_successful',           // card / USSD checkout
+      'transaction_successful',      // card alternate name
+      'payment_notification',        // some sandbox payloads
+    ];
+    if (event && !ACCEPTED_EVENTS.includes(event)) {
       return NextResponse.json({ status: 'ignored' }, { status: 200 });
     }
 

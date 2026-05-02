@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -8,16 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { Wallet, Loader2, Shield, AlertTriangle, Copy, Check, Building2, CreditCard } from 'lucide-react';
-
-type TransferDetails = {
-  accountNumber: string;
-  accountName: string;
-  bankName: string | null;
-  amount: number;
-  expiresAt: string;
-  transactionRef: string;
-};
+import { Wallet, Loader2, Shield, AlertTriangle } from 'lucide-react';
 
 export function WalletModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -30,15 +21,6 @@ export function WalletModal() {
   const [accountNumber, setAccountNumber] = useState('');
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
-
-  // Bank transfer (Squad dynamic VA) state
-  const [transferAmount, setTransferAmount] = useState('');
-  const [transfer, setTransfer] = useState<TransferDetails | null>(null);
-  const [isInitiating, setIsInitiating] = useState(false);
-  const [initiateError, setInitiateError] = useState<string | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState<number>(0);
-  const [paymentDetected, setPaymentDetected] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const { toast } = useToast();
 
@@ -66,101 +48,16 @@ export function WalletModal() {
     }
   }, []);
 
-  // Mint a one-shot NUBAN for the entered amount.
-  const initiateBankTransfer = useCallback(async () => {
-    const amount = Number(transferAmount);
-    if (!Number.isFinite(amount) || amount < 100) {
-      toast({ title: 'Minimum bank transfer deposit is ₦100', variant: 'destructive' });
-      return;
-    }
-    setIsInitiating(true);
-    setInitiateError(null);
-    setPaymentDetected(false);
-    try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (!s?.access_token) throw new Error('Sign in to deposit');
-      const res = await fetch('/api/squad/provision-account', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Failed to generate transfer details');
-      setTransfer(body as TransferDetails);
-    } catch (e: any) {
-      setInitiateError(e.message || 'Could not generate transfer details');
-    } finally {
-      setIsInitiating(false);
-    }
-  }, [transferAmount, toast]);
-
-  // Countdown clock for the active transfer.
-  useEffect(() => {
-    if (!transfer) { setSecondsLeft(0); return; }
-    const tick = () => {
-      const left = Math.max(0, Math.floor((new Date(transfer.expiresAt).getTime() - Date.now()) / 1000));
-      setSecondsLeft(left);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [transfer]);
-
-  // Poll for credit completion. Switches off as soon as the deposit lands or
-  // the modal closes.
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (!transfer || paymentDetected || !session?.user?.id) return;
-    const userId = session.user.id;
-    const ref = transfer.transactionRef;
-
-    pollRef.current = setInterval(async () => {
-      const { data } = await supabase
-        .from('squad_transactions')
-        .select('status')
-        .eq('transaction_ref', ref)
-        .single();
-      if (data?.status === 'completed') {
-        setPaymentDetected(true);
-        await fetchBalance(userId);
-        toast({ title: 'Deposit received! 🎉', description: `₦${transfer.amount.toLocaleString()} credited to your wallet.` });
-      }
-    }, 4000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [transfer, paymentDetected, session?.user?.id, fetchBalance, toast]);
-
-  const resetTransfer = () => {
-    setTransfer(null);
-    setTransferAmount('');
-    setInitiateError(null);
-    setPaymentDetected(false);
-    setSecondsLeft(0);
-  };
-
-  const copyAccountNumber = async () => {
-    if (!transfer) return;
-    try {
-      await navigator.clipboard.writeText(transfer.accountNumber);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleCardDeposit = async (gateway: 'squad' | 'paystack') => {
+  const handleCardDeposit = async (gateway: 'paystack' | 'squad') => {
     const amount = Number(depositAmount);
     if (!amount || amount < 100) {
-      toast({ title: 'Minimum card deposit is ₦100', variant: 'destructive' });
+      toast({ title: 'Minimum deposit is ₦100', variant: 'destructive' });
       return;
     }
     if (!session?.user) {
       toast({ title: 'Please sign in first', variant: 'destructive' });
       return;
     }
-
     setIsDepositLoading(true);
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
@@ -172,7 +69,7 @@ export function WalletModal() {
         body: JSON.stringify({ amount }),
       });
       const body = await res.json();
-      const redirectUrl = body.checkoutUrl || body.authorizationUrl;
+      const redirectUrl = body.authorizationUrl || body.checkoutUrl;
       if (!res.ok || !redirectUrl) throw new Error(body.error || 'Could not start payment');
       window.location.href = redirectUrl;
     } catch (e: any) {
@@ -195,7 +92,6 @@ export function WalletModal() {
       toast({ title: 'Insufficient balance', variant: 'destructive' });
       return;
     }
-
     setIsWithdrawLoading(true);
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
@@ -206,7 +102,6 @@ export function WalletModal() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
-
       if (data.status === 'under_review') {
         toast({ title: 'Withdrawal under review', description: data.message });
       } else {
@@ -214,7 +109,7 @@ export function WalletModal() {
           title: 'Withdrawal initiated ✅',
           description: `₦${data.nairaToReceive?.toLocaleString()} arriving in your bank within 2 hours.`,
         });
-        fetchBalance(session.user.id);
+        if (session?.user?.id) fetchBalance(session.user.id);
       }
       setIsOpen(false);
       setWithdrawAmount('');
@@ -222,38 +117,25 @@ export function WalletModal() {
       setAccountNumber('');
     } catch (err: any) {
       toast({ title: 'Withdrawal failed', description: err.message, variant: 'destructive' });
-    } finally { setIsWithdrawLoading(false); }
+    } finally {
+      setIsWithdrawLoading(false);
+    }
   };
 
-  const depositPreview = () => {
+  const dp = (() => {
     const n = Number(depositAmount);
     if (!n || n < 100) return null;
     return { tNGN: (n * 0.985).toFixed(2), bonus: (n * 0.01).toFixed(2) };
-  };
+  })();
 
-  const withdrawPreview = () => {
+  const wp = (() => {
     const n = Number(withdrawAmount);
     if (!n || n < 100) return null;
-    const spread = n * 0.015;
-    const naira = (n - spread - 100);
-    return { fees: (spread + 100).toFixed(0), naira: naira.toFixed(0) };
-  };
-
-  const transferPreview = () => {
-    const n = Number(transferAmount);
-    if (!n || n < 100) return null;
-    return { tNGN: (n * 0.985).toFixed(2), bonus: (n * 0.01).toFixed(2) };
-  };
-
-  const dp = depositPreview();
-  const wp = withdrawPreview();
-  const tp = transferPreview();
-  const expired = !!transfer && secondsLeft === 0 && !paymentDetected;
-  const mins = Math.floor(secondsLeft / 60);
-  const secs = secondsLeft % 60;
+    return { fees: ((n * 0.015) + 100).toFixed(0), naira: (n - n * 0.015 - 100).toFixed(0) };
+  })();
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) resetTransfer(); }}>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-2 bg-muted/50 border-muted hover:bg-muted">
           <Wallet className="h-4 w-4" />
@@ -275,188 +157,70 @@ export function WalletModal() {
             <TabsTrigger value="withdraw">Withdraw</TabsTrigger>
           </TabsList>
 
+          {/* ── DEPOSIT ─────────────────────────────────────────────────── */}
           <TabsContent value="deposit" className="space-y-4 py-4">
-            <Tabs defaultValue="transfer" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="transfer" className="gap-1.5"><Building2 className="w-3.5 h-3.5" /> Bank Transfer</TabsTrigger>
-                <TabsTrigger value="card" className="gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Card</TabsTrigger>
-              </TabsList>
+            <p className="text-sm text-muted-foreground">
+              Pay with card, bank transfer, or USSD. You&apos;ll be redirected to a secure hosted checkout.
+            </p>
+            <div className="space-y-2">
+              <Label>Amount (₦)</Label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                <Input
+                  type="number"
+                  placeholder="Min ₦100"
+                  value={depositAmount}
+                  onChange={e => setDepositAmount(e.target.value)}
+                  min={100}
+                  className="pl-8"
+                />
+              </div>
+            </div>
 
-              {/* ── BANK TRANSFER ───────────────────────────────────────── */}
-              <TabsContent value="transfer" className="space-y-3 pt-4">
-                {!transfer && (
-                  <>
-                    <p className="text-sm text-muted-foreground">
-                      Enter how much you want to deposit. We&apos;ll generate a one-time bank account valid for 30 minutes.
-                    </p>
-                    <div className="space-y-2">
-                      <Label>Amount (₦)</Label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                        <Input
-                          type="number"
-                          placeholder="Min ₦100"
-                          value={transferAmount}
-                          onChange={e => setTransferAmount(e.target.value)}
-                          min={100}
-                          className="pl-8"
-                        />
-                      </div>
-                    </div>
+            {dp && (
+              <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
+                <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span></div>
+                <div className="flex justify-between"><span>Bonus credit</span><span className="text-amber-400">+₦{dp.bonus}</span></div>
+              </div>
+            )}
 
-                    {tp && (
-                      <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                        <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{tp.tNGN} tNGN</span></div>
-                        <div className="flex justify-between"><span>Bonus credit</span><span className="text-amber-400">+₦{tp.bonus}</span></div>
-                      </div>
-                    )}
-
-                    {initiateError && (
-                      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-                        {initiateError}
-                      </div>
-                    )}
-
-                    <Button
-                      onClick={initiateBankTransfer}
-                      disabled={isInitiating || !transferAmount || Number(transferAmount) < 100}
-                      className="w-full bg-foreground text-background hover:bg-foreground/90 font-semibold"
-                    >
-                      {isInitiating ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Generating…</> : 'Generate transfer details'}
-                    </Button>
-                  </>
-                )}
-
-                {transfer && !paymentDetected && (
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-border/50 bg-muted/30 p-4 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Account number</div>
-                          <div className="text-2xl font-mono font-bold tracking-wider">{transfer.accountNumber}</div>
-                        </div>
-                        <Button size="icon" variant="ghost" onClick={copyAccountNumber} aria-label="Copy account number">
-                          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                        </Button>
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground border-t border-border/50 pt-2">
-                        <span>Bank</span><span className="text-foreground">{transfer.bankName || '—'}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Account name</span><span className="text-foreground">{transfer.accountName}</span>
-                      </div>
-                      <div className="flex justify-between text-xs border-t border-border/50 pt-2">
-                        <span className="text-muted-foreground">Send exactly</span>
-                        <span className="font-semibold text-foreground">₦{transfer.amount.toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="text-center">
-                      {expired ? (
-                        <div className="space-y-2">
-                          <p className="text-xs text-destructive flex items-center justify-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> This account expired. Generate a fresh one.
-                          </p>
-                          <Button size="sm" variant="outline" onClick={resetTransfer}>Start over</Button>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="text-xs text-muted-foreground">
-                            Expires in <span className="font-mono text-foreground">{mins}:{secs.toString().padStart(2, '0')}</span>
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> Waiting for your transfer…
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {paymentDetected && transfer && (
-                  <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4 text-center space-y-3">
-                    <Check className="w-8 h-8 text-emerald-400 mx-auto" />
-                    <div>
-                      <p className="text-sm font-semibold">Deposit received</p>
-                      <p className="text-xs text-muted-foreground">
-                        ₦{transfer.amount.toLocaleString()} credited to your wallet.
-                      </p>
-                    </div>
-                    <Button size="sm" onClick={() => { setIsOpen(false); resetTransfer(); }}>Done</Button>
-                  </div>
-                )}
-
-                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-                  <Shield className="w-3 h-3" /> Powered by Squad
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Choose payment provider</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  onClick={() => handleCardDeposit('paystack')}
+                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                  variant="outline"
+                  className="h-auto py-3 flex-col gap-1"
+                >
+                  <span className="font-semibold">Paystack</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
+                </Button>
+                <Button
+                  onClick={() => handleCardDeposit('squad')}
+                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                  variant="outline"
+                  className="h-auto py-3 flex-col gap-1"
+                >
+                  <span className="font-semibold">Squad</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
+                </Button>
+              </div>
+              {isDepositLoading && (
+                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 pt-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Redirecting to checkout…
                 </p>
-              </TabsContent>
+              )}
+            </div>
 
-              {/* ── CARD ────────────────────────────────────────────────── */}
-              <TabsContent value="card" className="space-y-4 pt-4">
-                <p className="text-sm text-muted-foreground">
-                  Pay with card on a secure hosted checkout. We&apos;ll redirect you to complete the payment.
-                </p>
-                <div className="space-y-2">
-                  <Label>Amount (₦)</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
-                    <Input
-                      type="number"
-                      placeholder="Min ₦100"
-                      value={depositAmount}
-                      onChange={e => setDepositAmount(e.target.value)}
-                      min={100}
-                      className="pl-8"
-                    />
-                  </div>
-                </div>
-
-                {dp && (
-                  <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                    <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span></div>
-                    <div className="flex justify-between"><span>Bonus credit</span><span className="text-amber-400">+₦{dp.bonus}</span></div>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Choose your payment provider</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      onClick={() => handleCardDeposit('paystack')}
-                      disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
-                      variant="outline"
-                      className="h-auto py-3 flex-col gap-1"
-                    >
-                      <span className="font-semibold">Paystack</span>
-                      <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
-                    </Button>
-                    <Button
-                      onClick={() => handleCardDeposit('squad')}
-                      disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
-                      variant="outline"
-                      className="h-auto py-3 flex-col gap-1"
-                    >
-                      <span className="font-semibold">Squad</span>
-                      <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
-                    </Button>
-                  </div>
-                  {isDepositLoading && (
-                    <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 pt-1">
-                      <Loader2 className="w-3 h-3 animate-spin" /> Redirecting to checkout…
-                    </p>
-                  )}
-                </div>
-
-                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-                  <Shield className="w-3 h-3" /> Secured by Paystack &amp; Squad
-                </p>
-              </TabsContent>
-            </Tabs>
+            <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
+              <Shield className="w-3 h-3" /> Secured by Paystack &amp; Squad
+            </p>
           </TabsContent>
 
+          {/* ── WITHDRAW ────────────────────────────────────────────────── */}
           <TabsContent value="withdraw" className="space-y-4 py-4">
             <p className="text-sm text-muted-foreground">Withdraw to any Nigerian bank. Arrives in 1-2 hours.</p>
-
             <div className="space-y-2">
               <Label>Amount (tNGN)</Label>
               <div className="relative">
@@ -472,7 +236,6 @@ export function WalletModal() {
                 />
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Bank Code</Label>
@@ -495,7 +258,6 @@ export function WalletModal() {
                 />
               </div>
             </div>
-
             {wp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
                 <div className="flex justify-between"><span>Fees (spread + ₦100)</span><span>₦{wp.fees}</span></div>
@@ -510,7 +272,6 @@ export function WalletModal() {
                 )}
               </div>
             )}
-
             <Button
               onClick={handleWithdraw}
               disabled={isWithdrawLoading || !withdrawAmount || !bankCode || accountNumber.length !== 10}
