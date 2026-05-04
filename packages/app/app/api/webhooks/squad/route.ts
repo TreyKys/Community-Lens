@@ -30,65 +30,107 @@ export async function POST(req: Request) {
 
     const payload = JSON.parse(rawBody);
 
-    // Squad fires `transaction_notification` for inbound virtual-account credits.
-    const event = payload.event || payload.Event;
-    if (event && event !== 'transaction_notification' && event !== 'successful_transaction') {
+    const event = (payload.event || payload.Event || '').toLowerCase();
+    // Accept VA credits and card/USSD payment events. Ignore everything else.
+    const ACCEPTED_EVENTS = [
+      'transaction_notification',   // VA bank transfer
+      'successful_transaction',      // VA alternate name
+      'charge_successful',           // card / USSD checkout
+      'transaction_successful',      // card alternate name
+      'payment_notification',        // some sandbox payloads
+    ];
+    if (event && !ACCEPTED_EVENTS.includes(event)) {
       return NextResponse.json({ status: 'ignored' }, { status: 200 });
     }
 
     const data = payload.data || payload;
-    const transactionRef: string | undefined = data.transaction_reference || data.reference;
-    const amountField = data.transaction_amount ?? data.amount; // major NGN units in Squad payload
+    const transactionRef: string | undefined =
+      data.transaction_ref || data.transaction_reference || data.reference;
+    const customerIdentifier: string | undefined = data.customer_identifier;
+    const amountField = data.transaction_amount ?? data.amount;
     const accountNumber: string | undefined = data.virtual_account_number || data.account_number;
 
-    if (!transactionRef || !amountField || !accountNumber) {
+    if (!transactionRef || !amountField) {
       return NextResponse.json({ error: 'Missing transaction fields' }, { status: 400 });
     }
 
-    // Idempotency
-    const { data: existingTx } = await supabaseAdmin
+    // Lookup #1: pre-existing pending row created by /api/squad/provision-account.
+    const { data: pending } = await supabaseAdmin
       .from('squad_transactions')
-      .select('transaction_ref')
+      .select('id, user_id, status')
       .eq('transaction_ref', transactionRef)
       .single();
 
-    if (existingTx) {
+    if (pending && pending.status === 'completed') {
       return NextResponse.json({ status: 'already processed' }, { status: 200 });
     }
 
-    // Map account → user
-    const { data: vAccount } = await supabaseAdmin
-      .from('squad_virtual_accounts')
-      .select('user_id')
-      .eq('account_number', accountNumber)
-      .single();
+    // Lookup #2: fall back to a static virtual account (legacy path) or the
+    // customer_identifier Squad echoes back, in that order.
+    let userId: string | null = pending?.user_id || null;
+    if (!userId && accountNumber) {
+      const { data: vAccount } = await supabaseAdmin
+        .from('squad_virtual_accounts')
+        .select('user_id')
+        .eq('account_number', accountNumber)
+        .single();
+      userId = vAccount?.user_id || null;
+    }
+    if (!userId && customerIdentifier) {
+      const { data: byId } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('id', customerIdentifier)
+        .single();
+      userId = byId?.id || null;
+    }
 
-    if (!vAccount) {
-      console.error('Squad webhook: no virtual account found for', accountNumber);
+    if (!userId) {
+      console.error('Squad webhook: could not map credit to a user', { transactionRef, accountNumber, customerIdentifier });
       return NextResponse.json({ error: 'Account not provisioned' }, { status: 404 });
     }
-    const userId = vAccount.user_id;
 
     const amountInNGN = Number(amountField);
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
     const betCredit = amountInNGN * DEPOSIT_PROMO;
 
-    const { error: insertError } = await supabaseAdmin
-      .from('squad_transactions')
-      .insert({
-        transaction_ref: transactionRef,
-        user_id: userId,
-        amount_ngn: amountInNGN,
-        tngn_credited: tNGNToCredit,
-        spread_captured: spreadAmount,
-        status: 'pending',
-        raw_payload: payload,
-      });
-
-    if (insertError) {
-      console.error('Failed to insert squad transaction:', insertError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    // Update the pending row (or insert one if this came in via the legacy path).
+    if (pending) {
+      const { error: updateTxErr } = await supabaseAdmin
+        .from('squad_transactions')
+        .update({
+          amount_ngn: amountInNGN,
+          tngn_credited: tNGNToCredit,
+          spread_captured: spreadAmount,
+          status: 'pending',
+          raw_payload: payload,
+        })
+        .eq('id', pending.id);
+      if (updateTxErr) {
+        console.error('Failed to update pending squad transaction:', updateTxErr);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      }
+    } else {
+      const { error: insertError } = await supabaseAdmin
+        .from('squad_transactions')
+        .insert({
+          transaction_ref: transactionRef,
+          user_id: userId,
+          amount_ngn: amountInNGN,
+          tngn_credited: tNGNToCredit,
+          spread_captured: spreadAmount,
+          status: 'pending',
+          raw_payload: payload,
+        });
+      if (insertError) {
+        // Race: another webhook delivery beat us to this ref. Treat as already processed.
+        if ((insertError as any)?.code === '23505') {
+          return NextResponse.json({ status: 'already processed' }, { status: 200 });
+        }
+        console.error('Failed to insert squad transaction:', insertError);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      }
     }
 
     const { data: userData, error: userError } = await supabaseAdmin

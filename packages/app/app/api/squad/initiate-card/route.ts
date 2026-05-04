@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { createDynamicVirtualAccount } from '@/lib/squad';
+import { initiateCheckout } from '@/lib/squad';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const DEFAULT_TTL_SECONDS = 1800; // 30 min — Squad default
 
 async function getAuthUser(request: Request) {
   const authHeader = request.headers.get('Authorization');
@@ -20,15 +18,15 @@ async function getAuthUser(request: Request) {
 }
 
 /**
- * POST /api/squad/provision-account
+ * POST /api/squad/initiate-card
  * Body: { amount: number }   // naira
  *
- * Mints a one-shot Dynamic Virtual Account for this deposit attempt and
- * inserts a `squad_transactions` row with `status='awaiting_payment'`. The
- * webhook reconciles by `transaction_ref` when the user actually pays.
+ * Creates a Squad-hosted checkout session for card / USSD / bank.
+ * Inserts a `squad_transactions` row with status='awaiting_payment' so the
+ * webhook can credit by transaction_ref when the payment lands.
  *
- * No BVN / KYC required — that's the whole point of using the dynamic
- * endpoint instead of the static one.
+ * Returns { checkoutUrl, transactionRef }. Client should redirect the user
+ * to checkoutUrl (or open it in a popup).
  */
 export async function POST(request: Request) {
   try {
@@ -54,42 +52,46 @@ export async function POST(request: Request) {
     const fallbackName = profile?.username || email.split('@')[0] || 'Odds';
     const firstName = profile?.first_name || fallbackName.split(/\s+/)[0] || 'Odds';
     const lastName = profile?.last_name || fallbackName.split(/\s+/).slice(1).join(' ') || 'Punter';
+    const customerName = `${firstName} ${lastName}`.trim();
 
-    const transactionRef = `odds_${randomUUID().replace(/-/g, '')}`;
+    const transactionRef = `odds_card_${randomUUID().replace(/-/g, '')}`;
     const amountKobo = Math.round(amount * 100);
-    const expiresAt = new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000).toISOString();
 
-    let account;
+    const origin =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      request.headers.get('origin') ||
+      `https://${request.headers.get('host')}`;
+    const callbackUrl = `${origin}/wallet/squad-callback?ref=${transactionRef}`;
+
+    let session;
     try {
-      account = await createDynamicVirtualAccount({
-        firstName,
-        lastName,
-        email,
+      session = await initiateCheckout({
         amountKobo,
-        durationSeconds: DEFAULT_TTL_SECONDS,
+        email,
         transactionRef,
+        callbackUrl,
+        customerName,
+        metadata: { user_id: authUser.id, channel: 'card' },
       });
     } catch (err: any) {
-      console.error('Squad dynamic VA creation failed:', err?.message || err);
+      console.error('Squad checkout init failed:', err?.message || err);
       return NextResponse.json(
-        { error: err?.message || 'Could not create deposit account.' },
+        { error: err?.message || 'Could not start payment.' },
         { status: 502 }
       );
     }
 
-    // expected_amount + expires_at live in raw_payload so this works whether
-    // or not migration 20240510 (which adds the dedicated columns) has been
-    // applied to the connected Supabase instance.
+    // expected_amount lives in raw_payload so this works whether or not
+    // migration 20240510 (which adds the dedicated column) has been applied.
     const { error: insertErr } = await supabaseAdmin.from('squad_transactions').insert({
       transaction_ref: transactionRef,
       user_id: authUser.id,
       amount_ngn: amount,
       status: 'awaiting_payment',
-      raw_payload: { dynamic_va: account, expected_amount: amount, expires_at: expiresAt },
+      raw_payload: { checkout: session, channel: 'card', expected_amount: amount },
     });
-
     if (insertErr) {
-      console.error('Failed to record pending squad transaction:', insertErr);
+      console.error('Failed to record pending squad card transaction:', insertErr);
       return NextResponse.json(
         { error: `Database error: ${insertErr.message}` },
         { status: 500 }
@@ -97,16 +99,11 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      accountNumber: account.virtual_account_number,
-      accountName: account.account_name,
-      bankName: account.bank,
-      bankCode: account.bank_code,
-      amount,
-      expiresAt,
+      checkoutUrl: session.checkout_url,
       transactionRef,
     });
   } catch (e: any) {
-    console.error('Squad initiate-transfer error:', e);
+    console.error('Squad initiate-card error:', e);
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });
   }
 }
