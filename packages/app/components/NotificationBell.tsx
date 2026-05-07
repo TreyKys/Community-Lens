@@ -101,21 +101,46 @@ export function NotificationBell() {
 
       {isOpen && (
         <>
-          {/* Backdrop */}
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          {/* Backdrop — clickable, also dims content on mobile */}
+          <div
+            className="fixed inset-0 z-40 bg-background/40 sm:bg-transparent"
+            onClick={() => setIsOpen(false)}
+          />
 
-          {/* Dropdown */}
-          <div className="absolute right-0 top-11 w-80 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          {/*
+            Dropdown
+            • Mobile (< sm): full-width sheet pinned to top, slide down. Width is
+              viewport minus a small gutter so it never clips. Max height 75vh.
+            • Desktop (≥ sm): anchored dropdown at the bell, fixed width 22rem.
+          */}
+          <div
+            className={cn(
+              'z-50 bg-popover border border-border rounded-xl shadow-xl overflow-hidden flex flex-col',
+              // mobile: fixed full-bleed near top
+              'fixed left-2 right-2 top-16 max-h-[75vh]',
+              // desktop: anchored to the bell
+              'sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[22rem] sm:max-h-[28rem]'
+            )}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <span className="text-sm font-semibold">Notifications</span>
-              {unreadCount > 0 && (
-                <button onClick={markAllRead} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  Mark all read
+              <div className="flex items-center gap-3">
+                {unreadCount > 0 && (
+                  <button onClick={markAllRead} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    Mark all read
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground sm:hidden"
+                  aria-label="Close notifications"
+                >
+                  Close
                 </button>
-              )}
+              </div>
             </div>
 
-            <div className="max-h-80 overflow-y-auto divide-y divide-border/50">
+            <div className="flex-1 overflow-y-auto divide-y divide-border/50 overscroll-contain">
               {notifications.length === 0 ? (
                 <div className="p-6 text-center text-sm text-muted-foreground">
                   No notifications yet
@@ -134,10 +159,11 @@ export function NotificationBell() {
                         {n.type === 'bet_won' ? '🎉' :
                          n.type === 'first_bet_refund' ? '🛡' :
                          n.type === 'deposit' ? '💰' :
-                         n.type === 'withdrawal' ? '💸' : '🔔'}
+                         n.type === 'withdrawal' ? '💸' :
+                         n.type === 'weekly_rebate' ? '💎' : '🔔'}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm leading-snug">{n.message}</p>
+                        <p className="text-sm leading-snug break-words">{n.message}</p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {new Date(n.created_at).toLocaleDateString('en-NG', {
                             day: 'numeric', month: 'short',

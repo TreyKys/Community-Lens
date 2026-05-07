@@ -148,95 +148,186 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
   );
 }
 
-// Trader Card generator — canvas-based PNG for sharing
+// Trader Card generator — high-DPI 1080x1080 PNG for social sharing.
+// Square format renders cleanly on Twitter/X, WhatsApp status, IG feed, Threads.
 async function generateTraderCard(bet: Bet, username: string): Promise<string> {
+  const SIZE = 1080;
+  const dpr = Math.max(2, Math.min(3, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2));
   const canvas = document.createElement('canvas');
-  canvas.width = 600;
-  canvas.height = 340;
+  canvas.width = SIZE * dpr;
+  canvas.height = SIZE * dpr;
   const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+  ctx.textBaseline = 'alphabetic';
+  // Anti-alias fonts crisply
+  if ('imageSmoothingEnabled' in ctx) ctx.imageSmoothingEnabled = true;
 
-  // Background
-  const grad = ctx.createLinearGradient(0, 0, 600, 340);
-  grad.addColorStop(0, '#0a0e1a');
-  grad.addColorStop(1, '#111827');
-  ctx.fillStyle = grad;
-  ctx.roundRect(0, 0, 600, 340, 16);
+  // ── Background — deep navy gradient with subtle vignette ─────────
+  const bg = ctx.createLinearGradient(0, 0, SIZE, SIZE);
+  bg.addColorStop(0, '#0b1220');
+  bg.addColorStop(0.55, '#0a0e1a');
+  bg.addColorStop(1, '#050810');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Diagonal emerald glow (top-left)
+  const glow = ctx.createRadialGradient(120, 120, 60, 120, 120, 720);
+  glow.addColorStop(0, 'rgba(16, 185, 129, 0.18)');
+  glow.addColorStop(1, 'rgba(16, 185, 129, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // ── Header — brand mark + "verified prediction" eyebrow ──────────
+  const won = bet.status === 'won';
+  const accent = won ? '#10b981' : '#ef4444';
+
+  // Accent bar
+  ctx.fillStyle = accent;
+  ctx.fillRect(72, 96, 6, 64);
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 36px system-ui, -apple-system, "Segoe UI", sans-serif';
+  ctx.fillText('Odds.ng', 100, 132);
+
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
+  ctx.font = '500 18px system-ui, -apple-system, "Segoe UI", sans-serif';
+  const eyebrow = won ? 'VERIFIED WIN — I TOLD YOU SO' : 'VERIFIED PREDICTION RECEIPT';
+  ctx.fillText(eyebrow, 100, 158);
+
+  // ── User badge (top-right) ───────────────────────────────────────
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  roundRect(ctx, SIZE - 320, 96, 248, 56, 28);
+  ctx.fill();
+  ctx.fillStyle = '#f1f5f9';
+  ctx.font = '600 22px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`@${username}`, SIZE - 196, 132);
+  ctx.textAlign = 'left';
+
+  // ── Market question — large, two-line max ────────────────────────
+  const q = (bet.markets?.question || '').trim();
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = '700 44px system-ui, -apple-system, "Segoe UI", sans-serif';
+  const qLines = wrapLines(ctx, q, SIZE - 144, 2);
+  let qy = 280;
+  for (const line of qLines) {
+    ctx.fillText(line, 72, qy);
+    qy += 56;
+  }
+
+  // ── Predicted outcome chip ───────────────────────────────────────
+  const options = (bet.markets?.options as string[]) || [];
+  const predicted = options[bet.outcome_index] || `Option ${bet.outcome_index}`;
+  ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+  const chipY = qy + 24;
+  const chipText = `Picked: ${predicted}`;
+  ctx.font = '600 24px system-ui, -apple-system, sans-serif';
+  const chipW = Math.min(SIZE - 144, ctx.measureText(chipText).width + 56);
+  roundRect(ctx, 72, chipY, chipW, 56, 28);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, 72, chipY, chipW, 56, 28);
+  ctx.stroke();
+  ctx.fillStyle = '#93c5fd';
+  ctx.fillText(chipText, 100, chipY + 36);
+
+  // ── HERO — the win/loss number ───────────────────────────────────
+  const profit = (bet.payout_tngn || 0) - bet.stake_tngn;
+  const heroLabel = won ? 'PROFIT' : 'STAKED';
+  const heroValue = won ? `+₦${profit.toLocaleString()}` : `₦${bet.stake_tngn.toLocaleString()}`;
+
+  ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
+  ctx.font = '600 22px system-ui, -apple-system, sans-serif';
+  ctx.fillText(heroLabel, 72, 660);
+
+  ctx.fillStyle = accent;
+  ctx.font = '900 156px system-ui, -apple-system, "Segoe UI", sans-serif';
+  ctx.fillText(heroValue, 72, 800);
+
+  // ── Stats row (3-up) ─────────────────────────────────────────────
+  const stats: { label: string; value: string }[] = won
+    ? [
+        { label: 'STAKED', value: `₦${bet.stake_tngn.toLocaleString()}` },
+        { label: 'PAYOUT', value: `₦${(bet.payout_tngn || 0).toLocaleString()}` },
+        { label: 'MULTIPLIER', value: bet.stake_tngn > 0 ? `${((bet.payout_tngn || 0) / bet.stake_tngn).toFixed(2)}×` : '—' },
+      ]
+    : [
+        { label: 'STATUS', value: bet.status === 'lost' ? 'Lost' : bet.status === 'active' ? 'Live' : 'Refunded' },
+        { label: 'PAYOUT', value: bet.payout_tngn ? `₦${bet.payout_tngn.toLocaleString()}` : '—' },
+        { label: 'STAKED', value: `₦${bet.stake_tngn.toLocaleString()}` },
+      ];
+
+  // Stats panel background
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+  roundRect(ctx, 72, 856, SIZE - 144, 132, 20);
   ctx.fill();
 
-  // Green accent line
-  ctx.fillStyle = '#10b981';
-  ctx.fillRect(0, 0, 4, 340);
-
-  // Odds.ng logo text
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 14px monospace';
-  ctx.fillText('ODDS.NG', 24, 36);
-  ctx.fillStyle = '#6b7280';
-  ctx.font = '11px monospace';
-  ctx.fillText('VERIFIED PREDICTION RECEIPT', 24, 54);
-
-  // Username
-  ctx.fillStyle = '#9ca3af';
-  ctx.font = '13px monospace';
-  ctx.fillText(`@${username}`, 24, 90);
-
-  // Market question
-  ctx.fillStyle = '#f1f5f9';
-  ctx.font = 'bold 18px sans-serif';
-  const q = bet.markets?.question || '';
-  const words = q.split(' ');
-  let line = '';
-  let y = 120;
-  for (const word of words) {
-    if (ctx.measureText(line + word).width > 552) {
-      ctx.fillText(line, 24, y);
-      line = word + ' ';
-      y += 26;
-    } else { line += word + ' '; }
-    if (y > 170) { line = line.slice(0, -4) + '...'; break; }
-  }
-  ctx.fillText(line, 24, y);
-
-  // Predicted
-  const options = bet.markets?.options as string[] || [];
-  ctx.fillStyle = '#6b7280';
-  ctx.font = '12px monospace';
-  ctx.fillText('PREDICTED', 24, 200);
-  ctx.fillStyle = '#3b82f6';
-  ctx.font = 'bold 16px monospace';
-  ctx.fillText(options[bet.outcome_index] || 'Option ' + bet.outcome_index, 24, 220);
-
-  // Divider
-  ctx.strokeStyle = '#1f2937';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(24, 240);
-  ctx.lineTo(576, 240);
-  ctx.stroke();
-
-  // Stats row
-  const profit = (bet.payout_tngn || 0) - bet.stake_tngn;
-  const stats = [
-    { label: 'STAKED', value: `₦${bet.stake_tngn.toLocaleString()}`, color: '#f1f5f9' },
-    { label: 'PAYOUT', value: `₦${(bet.payout_tngn || 0).toLocaleString()}`, color: '#10b981' },
-    { label: 'PROFIT', value: `+₦${profit.toLocaleString()}`, color: '#10b981' },
-  ];
-  stats.forEach(({ label, value, color }, i) => {
-    const x = 24 + i * 184;
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '11px monospace';
-    ctx.fillText(label, x, 265);
-    ctx.fillStyle = color;
-    ctx.font = 'bold 20px monospace';
-    ctx.fillText(value, x, 290);
+  const colW = (SIZE - 144) / 3;
+  stats.forEach(({ label, value }, i) => {
+    const cx = 72 + i * colW + colW / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
+    ctx.font = '600 18px system-ui, -apple-system, sans-serif';
+    ctx.fillText(label, cx, 894);
+    ctx.fillStyle = '#f1f5f9';
+    ctx.font = '700 36px system-ui, -apple-system, sans-serif';
+    ctx.fillText(value, cx, 950);
   });
+  ctx.textAlign = 'left';
 
-  // Footer
-  ctx.fillStyle = '#374151';
-  ctx.font = '10px monospace';
-  ctx.fillText(`${new Date(bet.placed_at).toLocaleDateString('en-NG')} • Polygon • I TOLD YOU SO`, 24, 324);
+  // ── Footer — date + chain marker ─────────────────────────────────
+  ctx.fillStyle = 'rgba(100, 116, 139, 0.7)';
+  ctx.font = '500 18px system-ui, -apple-system, sans-serif';
+  const datePart = new Date(bet.placed_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
+  ctx.fillText(`${datePart}  ·  Settled on Polygon  ·  odds.ng`, 72, 1032);
 
   return canvas.toDataURL('image/png');
+}
+
+// Word-wrap utility for canvas text. Truncates with an ellipsis after maxLines.
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
+  const words = text.split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+      if (lines.length === maxLines - 1) break;
+    } else {
+      current = candidate;
+    }
+  }
+  // Any remaining words — fit what we can on the last line, ellipsize the rest
+  const remainingWords = words.slice(words.indexOf(current.split(' ').pop() || words[0]));
+  if (lines.length < maxLines) {
+    let last = current;
+    let i = words.indexOf(remainingWords[remainingWords.length - 1]) + 1;
+    while (i < words.length && ctx.measureText(`${last} ${words[i]}…`).width <= maxWidth) {
+      last = `${last} ${words[i]}`;
+      i++;
+    }
+    if (i < words.length) last = `${last}…`;
+    lines.push(last);
+  }
+  return lines;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
 }
 
 export default function BetsPage() {

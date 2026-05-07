@@ -7,8 +7,9 @@ const supabaseAdmin = createClient(
 );
 
 // Fee structure
-const WITHDRAWAL_SPREAD = 0.015;   // 1.5% conversion spread
-const WITHDRAWAL_FLAT_FEE = 100;   // ₦100 flat fee
+const WITHDRAWAL_SPREAD = 0.01;    // 1% conversion spread
+const WITHDRAWAL_FLAT_FEE = 50;    // ₦50 flat fee (covers gateway transfer cost)
+const MIN_WITHDRAWAL_TNGN = 200;   // ₦200 floor
 // Large withdrawal threshold — routes to manual admin approval
 const LARGE_WITHDRAWAL_THRESHOLD = 500000; // ₦500,000 in tNGN
 
@@ -31,8 +32,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    if (amountTNGN < 1000) {
-      return NextResponse.json({ error: 'Minimum withdrawal is 1,000 tNGN' }, { status: 400 });
+    if (amountTNGN < MIN_WITHDRAWAL_TNGN) {
+      return NextResponse.json({ error: `Minimum withdrawal is ₦${MIN_WITHDRAWAL_TNGN}` }, { status: 400 });
     }
 
     // 1. Fetch user balance (only real tNGN can be withdrawn — not bonus)
@@ -66,7 +67,9 @@ export async function POST(request: Request) {
       .update({ tngn_balance: newBalance })
       .eq('id', user.id);
 
-    // 4. Check if this is a large withdrawal requiring manual approval
+    // 4. Flag large withdrawals for an extra security audit on the admin side.
+    //    All withdrawals route through admin approval so ops can pick the
+    //    gateway with the most headroom (Paystack vs Squad treasury balances).
     const isLargeWithdrawal = amountTNGN >= LARGE_WITHDRAWAL_THRESHOLD;
 
     // 5. Create withdrawal record
@@ -81,8 +84,9 @@ export async function POST(request: Request) {
         bank_code: bankCode,
         account_number: accountNumber,
         account_name: accountName || null,
-        status: isLargeWithdrawal ? 'pending_admin_approval' : 'pending_paystack',
-        requires_admin_approval: isLargeWithdrawal,
+        status: 'pending_admin_approval',
+        gateway: null,                                  // admin picks at approval time
+        requires_admin_approval: true,
         created_at: new Date().toISOString(),
       })
       .select('id')
@@ -97,86 +101,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to create withdrawal request' }, { status: 500 });
     }
 
-    // 6. Large withdrawal: notify admin and return "under review" response
-    if (isLargeWithdrawal) {
-      // TODO: Send push/email notification to TreyKy here
-      // e.g. via Resend, Novu, or a simple fetch to a webhook
-      console.log(`LARGE WITHDRAWAL ALERT: user=${user.id}, amount=${amountTNGN} tNGN, withdrawal_id=${withdrawal.id}`);
-
-      return NextResponse.json({
-        status: 'under_review',
-        message: 'Your withdrawal is being processed. Due to its size, it requires a security audit before release. This typically takes up to 24 hours. You will be notified once it clears.',
-        withdrawalId: withdrawal.id,
-        nairaToReceive: nairaToSend,
-      }, { status: 200 });
-    }
-
-    // 7. Standard withdrawal: fire Paystack Transfer API
-    // ---------------------------------------------------------------
-    // PHASE 3 TODO: Uncomment and configure once Paystack live keys are ready.
-    //
-    // Step A: Create transfer recipient
-    // const recipientRes = await fetch('https://api.paystack.co/transferrecipient', {
-    //   method: 'POST',
-    //   headers: {
-    //     Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     type: 'nuban',
-    //     name: accountName,
-    //     account_number: accountNumber,
-    //     bank_code: bankCode,
-    //     currency: 'NGN',
-    //   }),
-    // });
-    // const { data: recipient } = await recipientRes.json();
-    //
-    // Step B: Initiate transfer
-    // const transferRes = await fetch('https://api.paystack.co/transfer', {
-    //   method: 'POST',
-    //   headers: {
-    //     Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     source: 'balance',
-    //     amount: nairaToSend * 100, // Paystack uses kobo
-    //     recipient: recipient.recipient_code,
-    //     reason: `Odds.ng withdrawal - ${withdrawal.id}`,
-    //   }),
-    // });
-    // const { data: transfer } = await transferRes.json();
-    //
-    // await supabaseAdmin.from('withdrawals').update({
-    //   status: 'completed',
-    //   paystack_transfer_code: transfer.transfer_code,
-    // }).eq('id', withdrawal.id);
-    // ---------------------------------------------------------------
-
-    // For now, mark as queued for manual Paystack processing
-    await supabaseAdmin
-      .from('withdrawals')
-      .update({ status: 'queued_for_paystack' })
-      .eq('id', withdrawal.id);
-
-    // 8. Log Treasury Activities
-    await supabaseAdmin.from('treasury_log').insert({
-      type: 'withdrawal_fee',
-      amount_tngn: spreadAmount + WITHDRAWAL_FLAT_FEE,
+    // 6. Log fee capture as a treasury movement (no gateway yet — set on payout).
+    await supabaseAdmin.from('treasury_movements').insert({
       user_id: user.id,
-      created_at: new Date().toISOString(),
+      type: 'spread',
+      gateway: null,
+      direction: 'in',
+      amount_ngn: spreadAmount + WITHDRAWAL_FLAT_FEE,
+      reference: withdrawal.id,
+      metadata: { source: 'withdrawal_fee' },
     });
 
-    console.log(`Withdrawal queued: user=${user.id}, tNGN=${amountTNGN}, NGN to send=${nairaToSend}`);
+    console.log(`Withdrawal queued: user=${user.id}, tNGN=${amountTNGN}, NGN to send=${nairaToSend}, large=${isLargeWithdrawal}`);
 
     return NextResponse.json({
-      status: 'success',
+      status: 'under_review',
       withdrawalId: withdrawal.id,
       amountTNGN,
       nairaToReceive: nairaToSend,
       feesDeducted: spreadAmount + WITHDRAWAL_FLAT_FEE,
-      message: 'Withdrawal initiated. Funds will arrive in your bank account within 1-2 hours.',
+      message: isLargeWithdrawal
+        ? 'Your withdrawal is being processed. Due to its size, it requires a security audit before release. This typically takes up to 24 hours.'
+        : 'Withdrawal received. Our team will release it to your bank shortly — usually within 1-2 hours during business hours.',
     }, { status: 200 });
 
   } catch (error: any) {

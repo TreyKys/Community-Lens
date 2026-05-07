@@ -35,8 +35,8 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({} as { amount?: number }));
     const amount = Number(body?.amount);
-    if (!Number.isFinite(amount) || amount < 100) {
-      return NextResponse.json({ error: 'Enter an amount of at least ₦100.' }, { status: 400 });
+    if (!Number.isFinite(amount) || amount < 500) {
+      return NextResponse.json({ error: 'Minimum card deposit is ₦500.' }, { status: 400 });
     }
     if (amount > 1_000_000) {
       return NextResponse.json({ error: 'Single deposit capped at ₦1,000,000.' }, { status: 400 });

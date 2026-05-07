@@ -148,3 +148,14 @@ export async function listBanks(): Promise<{ name: string; code: string }[]> {
   const data = await paystackRequest('/bank?country=nigeria&perPage=100', 'GET');
   return (data || []).map((b: any) => ({ name: b.name, code: b.code }));
 }
+
+/**
+ * Look up the current Paystack merchant balance (NGN, in kobo).
+ * Used by the treasury dashboard to show live "available to pay out".
+ */
+export async function getMerchantBalance(): Promise<{ availableKobo: number }> {
+  const data = await paystackRequest('/balance', 'GET');
+  // Paystack returns an array of currency balances; we only care about NGN.
+  const ngn = Array.isArray(data) ? data.find((b: any) => b.currency === 'NGN') : data;
+  return { availableKobo: Number(ngn?.balance ?? 0) };
+}
