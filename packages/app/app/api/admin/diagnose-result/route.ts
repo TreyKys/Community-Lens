@@ -100,10 +100,14 @@ export async function GET(request: Request) {
     } else if (!homeTeam || !awayTeam || !market.closes_at) {
       diagnostics.sources.statsapi = { error: 'Market missing home_team, away_team, or closes_at' };
     } else {
-      const data = await fetchStatsAPIMatch({ homeTeam, awayTeam, closesAt: market.closes_at });
-      if (!data) {
-        diagnostics.sources.statsapi = { error: 'No matching finished match found in ±1 day window' };
+      const result = await fetchStatsAPIMatch({ homeTeam, awayTeam, closesAt: market.closes_at });
+      if (!result.ok) {
+        diagnostics.sources.statsapi = {
+          error: `lookup_failed: ${result.reason}`,
+          matches_scanned: result.matchesScanned,
+        };
       } else {
+        const data = result.match;
         const flipped = data._orientation === 'flipped';
         const home = flipped ? data.score?.away : data.score?.home;
         const away = flipped ? data.score?.home : data.score?.away;
