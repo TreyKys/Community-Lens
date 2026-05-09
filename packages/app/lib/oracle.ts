@@ -164,6 +164,8 @@ export async function fetchStatsAPIMatch(opts: {
     const dateFrom = new Date(kickoff.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const dateTo = new Date(kickoff.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
+    console.log(`[statsapi] Searching for "${opts.homeTeam}" vs "${opts.awayTeam}" between ${dateFrom} and ${dateTo}`);
+
     const res = await fetch(
       `https://api.thestatsapi.com/api/football/matches?status=finished&date_from=${dateFrom}&date_to=${dateTo}&per_page=100`,
       { headers: { Authorization: `Bearer ${apiKey}` } }
@@ -175,6 +177,7 @@ export async function fetchStatsAPIMatch(opts: {
     }
     const data = await res.json();
     const matches: any[] = data?.data || [];
+    console.log(`[statsapi] Found ${matches.length} finished matches in window`);
 
     // Find the match with both teams matching (in either home/away orientation).
     const targetHome = opts.homeTeam;
@@ -182,14 +185,21 @@ export async function fetchStatsAPIMatch(opts: {
     for (const m of matches) {
       const mh = m.home_team?.name;
       const ma = m.away_team?.name;
-      if (teamsMatch(mh, targetHome) && teamsMatch(ma, targetAway)) {
+      const homeMatch = teamsMatch(mh, targetHome);
+      const awayMatch = teamsMatch(ma, targetAway);
+      if (homeMatch && awayMatch) {
+        console.log(`[statsapi] ✓ Matched: "${mh}" vs "${ma}" (normal orientation)`);
         return { ...m, _orientation: 'normal' };
       }
       // Sometimes home/away are swapped between providers — handle that too.
-      if (teamsMatch(mh, targetAway) && teamsMatch(ma, targetHome)) {
+      const flippedHomeMatch = teamsMatch(mh, targetAway);
+      const flippedAwayMatch = teamsMatch(ma, targetHome);
+      if (flippedHomeMatch && flippedAwayMatch) {
+        console.log(`[statsapi] ✓ Matched: "${mh}" vs "${ma}" (FLIPPED orientation)`);
         return { ...m, _orientation: 'flipped' };
       }
     }
+    console.log(`[statsapi] ✗ No finished match found for "${targetHome}" vs "${targetAway}"`);
     return null;
   } catch (err: any) {
     console.error('[result] statsapi threw:', err?.message || err);
