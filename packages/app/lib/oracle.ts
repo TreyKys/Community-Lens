@@ -123,6 +123,122 @@ export async function fetchEsportsFixtures(): Promise<any[]> {
   }
 }
 
+export async function fetchRapidAPIFootballResult(matchId: number): Promise<any | null> {
+  const apiKey = process.env.RAPIDAPI_KEY;
+  const rapidHost = process.env.RAPIDAPI_HOST;
+  if (!apiKey || !rapidHost) {
+    console.warn('[result] rapidapi: RAPIDAPI_KEY or RAPIDAPI_HOST not set');
+    return null;
+  }
+  try {
+    const res = await fetch(
+      `https://${rapidHost}/v1/fixtures?id=${matchId}`,
+      {
+        headers: {
+          'X-RapidAPI-Key': apiKey,
+          'X-RapidAPI-Host': rapidHost,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[result] rapidapi HTTP ${res.status}: ${body.slice(0, 200)}`);
+      return null;
+    }
+    const data = await res.json();
+    return data?.response?.[0] || null;
+  } catch (err: any) {
+    console.error('[result] rapidapi threw:', err?.message || err);
+    return null;
+  }
+}
+
+// Helper: verify football result from scores (not relying on a single 'winner' field)
+function calculateOutcomeFromScores(homeScore: number | null, awayScore: number | null): number | null {
+  if (homeScore === null || awayScore === null) return null;
+  if (homeScore > awayScore) return 0; // Home Win
+  if (homeScore === awayScore) return 1; // Draw
+  return 2; // Away Win
+}
+
+async function lookupFootballResultFDA(fixtureId: number): Promise<{
+  found: boolean;
+  outcomeIndex: number | null;
+  reason: string;
+}> {
+  const key = process.env.FOOTBALL_DATA_API_KEY;
+  if (!key) {
+    return { found: false, outcomeIndex: null, reason: 'no_fda_key' };
+  }
+  try {
+    const res = await fetch(
+      `https://api.football-data.org/v4/matches/${fixtureId}`,
+      { headers: { 'X-Auth-Token': key } }
+    );
+    if (!res.ok) {
+      const status = res.status;
+      if (status === 429) return { found: false, outcomeIndex: null, reason: 'fda_rate_limit' };
+      if (status >= 500) return { found: false, outcomeIndex: null, reason: 'fda_server_error' };
+      return { found: false, outcomeIndex: null, reason: `fda_http_${status}` };
+    }
+    const d = await res.json();
+    if (d.status !== 'FINISHED') {
+      return { found: false, outcomeIndex: null, reason: `fda_status_${d.status}` };
+    }
+
+    // Prefer calculating from scores to avoid single 'winner' field issues
+    const homeScore = d.score?.fullTime?.home;
+    const awayScore = d.score?.fullTime?.away;
+    const outcomeIndex = calculateOutcomeFromScores(homeScore, awayScore);
+
+    if (outcomeIndex !== null) {
+      console.log(`[lookup] FDA verified fixture ${fixtureId}: home=${homeScore} away=${awayScore} outcome=${outcomeIndex}`);
+      return { found: true, outcomeIndex, reason: 'fda_score_verified' };
+    }
+
+    // Fallback: try the 'winner' field if scores aren't available
+    const map: Record<string, number> = { HOME_TEAM: 0, DRAW: 1, AWAY_TEAM: 2 };
+    const winnerOutcome = map[d.score?.winner] ?? null;
+    if (winnerOutcome !== null) {
+      console.log(`[lookup] FDA verified fixture ${fixtureId} via winner field: ${d.score?.winner}`);
+      return { found: true, outcomeIndex: winnerOutcome, reason: 'fda_winner_verified' };
+    }
+
+    return { found: false, outcomeIndex: null, reason: 'fda_no_result' };
+  } catch (err: any) {
+    console.error(`[lookup] FDA threw for fixture ${fixtureId}:`, err?.message || err);
+    return { found: false, outcomeIndex: null, reason: `fda_error_${err?.message}` };
+  }
+}
+
+async function lookupFootballResultRapidAPI(fixtureId: number): Promise<{
+  found: boolean;
+  outcomeIndex: number | null;
+  reason: string;
+}> {
+  const match = await fetchRapidAPIFootballResult(fixtureId);
+  if (!match) {
+    return { found: false, outcomeIndex: null, reason: 'rapidapi_no_data' };
+  }
+
+  // RapidAPI status values: "Match Finished", "Not Started", etc.
+  if (!match.fixture?.status?.includes('Finished')) {
+    return { found: false, outcomeIndex: null, reason: `rapidapi_status_${match.fixture?.status}` };
+  }
+
+  const homeScore = match.goals?.home;
+  const awayScore = match.goals?.away;
+  const outcomeIndex = calculateOutcomeFromScores(homeScore, awayScore);
+
+  if (outcomeIndex !== null) {
+    console.log(`[lookup] RapidAPI verified fixture ${fixtureId}: home=${homeScore} away=${awayScore} outcome=${outcomeIndex}`);
+    return { found: true, outcomeIndex, reason: 'rapidapi_verified' };
+  }
+
+  return { found: false, outcomeIndex: null, reason: 'rapidapi_no_result' };
+}
+
 export async function createMarketIfNotExists(params: {
   question: string; category: string; sport: string;
   options: string[]; closesAt: string; fixtureId: number | null;
@@ -178,17 +294,13 @@ export async function lookupMarketResult(
 
   try {
     if (sport === 'football') {
-      const key = process.env.FOOTBALL_DATA_API_KEY;
-      if (!key) return { winningOutcomeIndex: null, reason: 'no_key' };
-      const res = await fetch(
-        `https://api.football-data.org/v4/matches/${market.fixture_id}`,
-        { headers: { 'X-Auth-Token': key } }
-      );
-      if (!res.ok) return { winningOutcomeIndex: null, reason: `api_${res.status}` };
-      const d = await res.json();
-      if (d.status !== 'FINISHED') return { winningOutcomeIndex: null, reason: d.status };
-      const map: Record<string, number> = { HOME_TEAM: 0, DRAW: 1, AWAY_TEAM: 2 };
-      return { winningOutcomeIndex: map[d.score?.winner] ?? null };
+      // Try football-data.org first, fall back to RapidAPI
+      let result = await lookupFootballResultFDA(market.fixture_id!);
+      if (!result.found) {
+        console.warn(`[lookup] football-data.org failed (${result.reason}), trying RapidAPI`);
+        result = await lookupFootballResultRapidAPI(market.fixture_id!);
+      }
+      return { winningOutcomeIndex: result.outcomeIndex, reason: result.reason };
     }
 
     if (sport === 'basketball' || sport === 'tennis') {
