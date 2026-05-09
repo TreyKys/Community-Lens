@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
-import { fetchRapidAPIFootballResult } from '@/lib/oracle';
+import { fetchStatsAPIMatch } from '@/lib/oracle';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
 
   const { data: market, error } = await supabaseAdmin
     .from('markets')
-    .select('id, title, fixture_id, sport, options, status, resolved_outcome, resolution_attempts, closes_at')
+    .select('id, title, fixture_id, sport, options, status, resolved_outcome, resolution_attempts, closes_at, home_team, away_team')
     .eq('id', marketId)
     .single();
 
@@ -45,6 +45,8 @@ export async function GET(request: Request) {
       resolved_outcome: market.resolved_outcome,
       resolution_attempts: market.resolution_attempts,
       closes_at: market.closes_at,
+      home_team: (market as any).home_team,
+      away_team: (market as any).away_team,
       options: market.options,
     },
     sources: {} as Record<string, any>,
@@ -88,41 +90,49 @@ export async function GET(request: Request) {
     diagnostics.sources.fda = { error: e?.message || String(e) };
   }
 
-  // Source 2: RapidAPI football
+  // Source 2: StatsAPI (search by team names + date)
   try {
-    const rapidKey = process.env.RAPIDAPI_KEY;
-    if (!rapidKey) {
-      diagnostics.sources.rapidapi = { error: 'RAPIDAPI_KEY not set' };
+    const statsKey = process.env.STATSAPI_KEY;
+    const homeTeam = (market as any).home_team;
+    const awayTeam = (market as any).away_team;
+    if (!statsKey) {
+      diagnostics.sources.statsapi = { error: 'STATSAPI_KEY not set' };
+    } else if (!homeTeam || !awayTeam || !market.closes_at) {
+      diagnostics.sources.statsapi = { error: 'Market missing home_team, away_team, or closes_at' };
     } else {
-      const data = await fetchRapidAPIFootballResult(market.fixture_id);
+      const data = await fetchStatsAPIMatch({ homeTeam, awayTeam, closesAt: market.closes_at });
       if (!data) {
-        diagnostics.sources.rapidapi = { error: 'No data returned (check logs)' };
+        diagnostics.sources.statsapi = { error: 'No matching finished match found in ±1 day window' };
       } else {
-        diagnostics.sources.rapidapi = {
-          status: data.fixture?.status?.long || data.fixture?.status?.short || data.fixture?.status,
-          home_team: data.teams?.home?.name,
-          away_team: data.teams?.away?.name,
-          home_score: data.goals?.home,
-          away_score: data.goals?.away,
-          calculated_outcome: calc(data.goals?.home, data.goals?.away),
+        const flipped = data._orientation === 'flipped';
+        const home = flipped ? data.score?.away : data.score?.home;
+        const away = flipped ? data.score?.home : data.score?.away;
+        diagnostics.sources.statsapi = {
+          status: data.status,
+          orientation: data._orientation,
+          stats_home_team: data.home_team?.name,
+          stats_away_team: data.away_team?.name,
+          home_score: home,
+          away_score: away,
+          calculated_outcome: calc(home, away),
         };
       }
     }
   } catch (e: any) {
-    diagnostics.sources.rapidapi = { error: e?.message || String(e) };
+    diagnostics.sources.statsapi = { error: e?.message || String(e) };
   }
 
   // Recommendation
   const fdaOutcome = diagnostics.sources.fda?.calculated_outcome;
-  const rapidOutcome = diagnostics.sources.rapidapi?.calculated_outcome;
-  if (fdaOutcome !== undefined && rapidOutcome !== undefined && fdaOutcome === rapidOutcome) {
+  const statsOutcome = diagnostics.sources.statsapi?.calculated_outcome;
+  if (fdaOutcome !== undefined && statsOutcome !== undefined && fdaOutcome === statsOutcome) {
     diagnostics.recommendation = `Both sources agree: outcome=${fdaOutcome} (${market.options[fdaOutcome]})`;
-  } else if (fdaOutcome !== undefined && rapidOutcome === undefined) {
+  } else if (fdaOutcome !== undefined && statsOutcome === undefined) {
     diagnostics.recommendation = `Only FDA has result: outcome=${fdaOutcome} (${market.options[fdaOutcome]})`;
-  } else if (rapidOutcome !== undefined && fdaOutcome === undefined) {
-    diagnostics.recommendation = `Only RapidAPI has result: outcome=${rapidOutcome} (${market.options[rapidOutcome]})`;
-  } else if (fdaOutcome !== rapidOutcome) {
-    diagnostics.recommendation = `CONFLICT — FDA=${fdaOutcome} RapidAPI=${rapidOutcome}. Manual review needed.`;
+  } else if (statsOutcome !== undefined && fdaOutcome === undefined) {
+    diagnostics.recommendation = `Only StatsAPI has result: outcome=${statsOutcome} (${market.options[statsOutcome]})`;
+  } else if (fdaOutcome !== statsOutcome && fdaOutcome !== undefined && statsOutcome !== undefined) {
+    diagnostics.recommendation = `CONFLICT — FDA=${fdaOutcome} StatsAPI=${statsOutcome}. Manual review needed.`;
   } else {
     diagnostics.recommendation = 'No source has a finished result yet';
   }
