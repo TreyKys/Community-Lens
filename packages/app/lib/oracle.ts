@@ -148,63 +148,79 @@ function teamsMatch(a: string, b: string): boolean {
 }
 
 // Search StatsAPI for a finished match given home/away names + a date hint.
+// Paginates through results so we don't miss matches on a busy fixture day.
 export async function fetchStatsAPIMatch(opts: {
   homeTeam: string;
   awayTeam: string;
   closesAt: string; // ISO date — kickoff time
-}): Promise<any | null> {
+}): Promise<
+  | { ok: true; match: any }
+  | { ok: false; reason: string; matchesScanned: number }
+> {
   const apiKey = process.env.STATSAPI_KEY;
   if (!apiKey) {
     console.warn('[result] statsapi: STATSAPI_KEY not set');
-    return null;
+    return { ok: false, reason: 'no_statsapi_key', matchesScanned: 0 };
   }
-  try {
-    const kickoff = new Date(opts.closesAt);
-    // Look ±1 day around kickoff to handle timezone slop and late finishes.
-    const dateFrom = new Date(kickoff.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const dateTo = new Date(kickoff.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    console.log(`[statsapi] Searching for "${opts.homeTeam}" vs "${opts.awayTeam}" between ${dateFrom} and ${dateTo}`);
+  const kickoff = new Date(opts.closesAt);
+  // Look ±1 day around kickoff to handle timezone slop and late finishes.
+  const dateFrom = new Date(kickoff.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const dateTo = new Date(kickoff.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    const res = await fetch(
-      `https://api.thestatsapi.com/api/football/matches?status=finished&date_from=${dateFrom}&date_to=${dateTo}&per_page=100`,
-      { headers: { Authorization: `Bearer ${apiKey}` } }
-    );
+  console.log(`[statsapi] Searching for "${opts.homeTeam}" vs "${opts.awayTeam}" between ${dateFrom} and ${dateTo}`);
+
+  const targetHome = opts.homeTeam;
+  const targetAway = opts.awayTeam;
+  const PER_PAGE = 100;
+  const MAX_PAGES = 10; // up to 1000 matches scanned
+  let totalScanned = 0;
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://api.thestatsapi.com/api/football/matches?status=finished&date_from=${dateFrom}&date_to=${dateTo}&per_page=${PER_PAGE}&page=${page}`,
+        { headers: { Authorization: `Bearer ${apiKey}` } }
+      );
+    } catch (err: any) {
+      console.error('[statsapi] network error:', err?.message || err);
+      return { ok: false, reason: `network_${err?.message || 'error'}`, matchesScanned: totalScanned };
+    }
+
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.error(`[result] statsapi HTTP ${res.status}: ${body.slice(0, 200)}`);
-      return null;
+      console.error(`[statsapi] HTTP ${res.status} on page ${page}: ${body.slice(0, 200)}`);
+      return { ok: false, reason: `http_${res.status}`, matchesScanned: totalScanned };
     }
+
     const data = await res.json();
     const matches: any[] = data?.data || [];
-    console.log(`[statsapi] Found ${matches.length} finished matches in window`);
+    totalScanned += matches.length;
+    console.log(`[statsapi] page ${page}: ${matches.length} matches (running total: ${totalScanned})`);
 
-    // Find the match with both teams matching (in either home/away orientation).
-    const targetHome = opts.homeTeam;
-    const targetAway = opts.awayTeam;
     for (const m of matches) {
       const mh = m.home_team?.name;
       const ma = m.away_team?.name;
-      const homeMatch = teamsMatch(mh, targetHome);
-      const awayMatch = teamsMatch(ma, targetAway);
-      if (homeMatch && awayMatch) {
-        console.log(`[statsapi] ✓ Matched: "${mh}" vs "${ma}" (normal orientation)`);
-        return { ...m, _orientation: 'normal' };
+      if (teamsMatch(mh, targetHome) && teamsMatch(ma, targetAway)) {
+        console.log(`[statsapi] ✓ Matched on page ${page}: "${mh}" vs "${ma}" (normal orientation)`);
+        return { ok: true, match: { ...m, _orientation: 'normal' } };
       }
-      // Sometimes home/away are swapped between providers — handle that too.
-      const flippedHomeMatch = teamsMatch(mh, targetAway);
-      const flippedAwayMatch = teamsMatch(ma, targetHome);
-      if (flippedHomeMatch && flippedAwayMatch) {
-        console.log(`[statsapi] ✓ Matched: "${mh}" vs "${ma}" (FLIPPED orientation)`);
-        return { ...m, _orientation: 'flipped' };
+      if (teamsMatch(mh, targetAway) && teamsMatch(ma, targetHome)) {
+        console.log(`[statsapi] ✓ Matched on page ${page}: "${mh}" vs "${ma}" (FLIPPED orientation)`);
+        return { ok: true, match: { ...m, _orientation: 'flipped' } };
       }
     }
-    console.log(`[statsapi] ✗ No finished match found for "${targetHome}" vs "${targetAway}"`);
-    return null;
-  } catch (err: any) {
-    console.error('[result] statsapi threw:', err?.message || err);
-    return null;
+
+    const totalPages = data?.meta?.total_pages || 1;
+    if (page >= totalPages) {
+      console.log(`[statsapi] ✗ Reached last page (${totalPages}). No match for "${targetHome}" vs "${targetAway}" in ${totalScanned} matches.`);
+      return { ok: false, reason: 'no_match_in_window', matchesScanned: totalScanned };
+    }
   }
+
+  console.warn(`[statsapi] Hit MAX_PAGES limit (${MAX_PAGES}) without finding match. Scanned ${totalScanned}.`);
+  return { ok: false, reason: 'max_pages_exhausted', matchesScanned: totalScanned };
 }
 
 // Helper: verify football result from scores (not relying on a single 'winner' field)
@@ -277,14 +293,15 @@ async function lookupFootballResultStatsAPI(opts: {
   if (!opts.homeTeam || !opts.awayTeam || !opts.closesAt) {
     return { found: false, outcomeIndex: null, reason: 'statsapi_missing_team_or_date' };
   }
-  const match = await fetchStatsAPIMatch({
+  const result = await fetchStatsAPIMatch({
     homeTeam: opts.homeTeam,
     awayTeam: opts.awayTeam,
     closesAt: opts.closesAt,
   });
-  if (!match) {
-    return { found: false, outcomeIndex: null, reason: 'statsapi_no_match_found' };
+  if (!result.ok) {
+    return { found: false, outcomeIndex: null, reason: `statsapi_${result.reason}` };
   }
+  const match = result.match;
   if (match.status !== 'finished') {
     return { found: false, outcomeIndex: null, reason: `statsapi_status_${match.status}` };
   }
