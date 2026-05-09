@@ -123,33 +123,76 @@ export async function fetchEsportsFixtures(): Promise<any[]> {
   }
 }
 
-export async function fetchRapidAPIFootballResult(matchId: number): Promise<any | null> {
-  const apiKey = process.env.RAPIDAPI_KEY;
-  const rapidHost = process.env.RAPIDAPI_HOST;
-  if (!apiKey || !rapidHost) {
-    console.warn('[result] rapidapi: RAPIDAPI_KEY or RAPIDAPI_HOST not set');
+// Normalize team names so "Manchester United FC" matches "Man United".
+function normalizeTeamName(name: string | null | undefined): string {
+  if (!name) return '';
+  return name.toLowerCase()
+    .replace(/\b(fc|afc|cf|sc|ac|football club)\b/g, '')
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function teamsMatch(a: string, b: string): boolean {
+  const na = normalizeTeamName(a);
+  const nb = normalizeTeamName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  // Token-overlap: at least 50% of tokens shared (handles "Man United" vs "Manchester United")
+  const ta = new Set(na.split(' ').filter(Boolean));
+  const tb = new Set(nb.split(' ').filter(Boolean));
+  if (ta.size === 0 || tb.size === 0) return false;
+  let shared = 0;
+  for (const t of Array.from(ta)) if (tb.has(t)) shared++;
+  return shared / Math.min(ta.size, tb.size) >= 0.5;
+}
+
+// Search StatsAPI for a finished match given home/away names + a date hint.
+export async function fetchStatsAPIMatch(opts: {
+  homeTeam: string;
+  awayTeam: string;
+  closesAt: string; // ISO date — kickoff time
+}): Promise<any | null> {
+  const apiKey = process.env.STATSAPI_KEY;
+  if (!apiKey) {
+    console.warn('[result] statsapi: STATSAPI_KEY not set');
     return null;
   }
   try {
+    const kickoff = new Date(opts.closesAt);
+    // Look ±1 day around kickoff to handle timezone slop and late finishes.
+    const dateFrom = new Date(kickoff.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const dateTo = new Date(kickoff.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
     const res = await fetch(
-      `https://${rapidHost}/v1/fixtures?id=${matchId}`,
-      {
-        headers: {
-          'X-RapidAPI-Key': apiKey,
-          'X-RapidAPI-Host': rapidHost,
-          'Content-Type': 'application/json',
-        },
-      }
+      `https://api.thestatsapi.com/api/football/matches?status=finished&date_from=${dateFrom}&date_to=${dateTo}&per_page=100`,
+      { headers: { Authorization: `Bearer ${apiKey}` } }
     );
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.error(`[result] rapidapi HTTP ${res.status}: ${body.slice(0, 200)}`);
+      console.error(`[result] statsapi HTTP ${res.status}: ${body.slice(0, 200)}`);
       return null;
     }
     const data = await res.json();
-    return data?.response?.[0] || null;
+    const matches: any[] = data?.data || [];
+
+    // Find the match with both teams matching (in either home/away orientation).
+    const targetHome = opts.homeTeam;
+    const targetAway = opts.awayTeam;
+    for (const m of matches) {
+      const mh = m.home_team?.name;
+      const ma = m.away_team?.name;
+      if (teamsMatch(mh, targetHome) && teamsMatch(ma, targetAway)) {
+        return { ...m, _orientation: 'normal' };
+      }
+      // Sometimes home/away are swapped between providers — handle that too.
+      if (teamsMatch(mh, targetAway) && teamsMatch(ma, targetHome)) {
+        return { ...m, _orientation: 'flipped' };
+      }
+    }
+    return null;
   } catch (err: any) {
-    console.error('[result] rapidapi threw:', err?.message || err);
+    console.error('[result] statsapi threw:', err?.message || err);
     return null;
   }
 }
@@ -212,31 +255,43 @@ async function lookupFootballResultFDA(fixtureId: number): Promise<{
   }
 }
 
-async function lookupFootballResultRapidAPI(fixtureId: number): Promise<{
+async function lookupFootballResultStatsAPI(opts: {
+  homeTeam: string | null;
+  awayTeam: string | null;
+  closesAt: string | null;
+}): Promise<{
   found: boolean;
   outcomeIndex: number | null;
   reason: string;
 }> {
-  const match = await fetchRapidAPIFootballResult(fixtureId);
+  if (!opts.homeTeam || !opts.awayTeam || !opts.closesAt) {
+    return { found: false, outcomeIndex: null, reason: 'statsapi_missing_team_or_date' };
+  }
+  const match = await fetchStatsAPIMatch({
+    homeTeam: opts.homeTeam,
+    awayTeam: opts.awayTeam,
+    closesAt: opts.closesAt,
+  });
   if (!match) {
-    return { found: false, outcomeIndex: null, reason: 'rapidapi_no_data' };
+    return { found: false, outcomeIndex: null, reason: 'statsapi_no_match_found' };
+  }
+  if (match.status !== 'finished') {
+    return { found: false, outcomeIndex: null, reason: `statsapi_status_${match.status}` };
   }
 
-  // RapidAPI status values: "Match Finished", "Not Started", etc.
-  if (!match.fixture?.status?.includes('Finished')) {
-    return { found: false, outcomeIndex: null, reason: `rapidapi_status_${match.fixture?.status}` };
+  let homeScore = match.score?.home;
+  let awayScore = match.score?.away;
+  // If StatsAPI has the orientation flipped, swap scores so they align with our home/away.
+  if (match._orientation === 'flipped') {
+    [homeScore, awayScore] = [awayScore, homeScore];
   }
 
-  const homeScore = match.goals?.home;
-  const awayScore = match.goals?.away;
   const outcomeIndex = calculateOutcomeFromScores(homeScore, awayScore);
-
   if (outcomeIndex !== null) {
-    console.log(`[lookup] RapidAPI verified fixture ${fixtureId}: home=${homeScore} away=${awayScore} outcome=${outcomeIndex}`);
-    return { found: true, outcomeIndex, reason: 'rapidapi_verified' };
+    console.log(`[lookup] StatsAPI verified ${opts.homeTeam} vs ${opts.awayTeam}: home=${homeScore} away=${awayScore} outcome=${outcomeIndex} (orientation=${match._orientation})`);
+    return { found: true, outcomeIndex, reason: 'statsapi_verified' };
   }
-
-  return { found: false, outcomeIndex: null, reason: 'rapidapi_no_result' };
+  return { found: false, outcomeIndex: null, reason: 'statsapi_no_score' };
 }
 
 export async function createMarketIfNotExists(params: {
@@ -288,17 +343,30 @@ export async function createMarketIfNotExists(params: {
 
 // Core market-result lookup by sport. Returns winningOutcomeIndex (0-based) or null.
 export async function lookupMarketResult(
-  market: { id: number; sport: string | null; fixture_id: number | null; options: string[] }
+  market: {
+    id: number;
+    sport: string | null;
+    fixture_id: number | null;
+    options: string[];
+    home_team?: string | null;
+    away_team?: string | null;
+    closes_at?: string | null;
+  }
 ): Promise<{ winningOutcomeIndex: number | null; reason?: string }> {
   const sport = market.sport || 'football';
 
   try {
     if (sport === 'football') {
-      // Try football-data.org first, fall back to RapidAPI
+      // Try football-data.org first (it has the matching fixture_id)
       let result = await lookupFootballResultFDA(market.fixture_id!);
       if (!result.found) {
-        console.warn(`[lookup] football-data.org failed (${result.reason}), trying RapidAPI`);
-        result = await lookupFootballResultRapidAPI(market.fixture_id!);
+        console.warn(`[lookup] FDA failed for market ${market.id} (${result.reason}), trying StatsAPI by team names`);
+        // StatsAPI doesn't share fixture IDs with FDA — search by team names + date.
+        result = await lookupFootballResultStatsAPI({
+          homeTeam: market.home_team || null,
+          awayTeam: market.away_team || null,
+          closesAt: market.closes_at || null,
+        });
       }
       return { winningOutcomeIndex: result.outcomeIndex, reason: result.reason };
     }

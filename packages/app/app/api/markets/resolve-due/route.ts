@@ -14,7 +14,7 @@ export async function POST(request: Request) {
 
   const { data: markets } = await supabaseAdmin
     .from('markets')
-    .select('id, title, fixture_id, sport, options, resolution_attempts, closes_at')
+    .select('id, title, fixture_id, sport, options, resolution_attempts, closes_at, home_team, away_team')
     .eq('status', 'locked')
     .eq('category', 'sports')
     .not('fixture_id', 'is', null)
@@ -52,6 +52,9 @@ export async function POST(request: Request) {
       sport: (m as any).sport,
       fixture_id: (m as any).fixture_id,
       options: (m.options as string[]) || [],
+      home_team: (m as any).home_team,
+      away_team: (m as any).away_team,
+      closes_at: (m as any).closes_at,
     });
 
     if (winningOutcomeIndex === null) {
