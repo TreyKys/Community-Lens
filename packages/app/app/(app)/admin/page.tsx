@@ -451,178 +451,206 @@ type Withdrawal = {
   users?: { email?: string };
 };
 
+type TreasuryData = {
+  liveBalances: { paystack: number | null; squad: number | null; errors: Record<string, string> };
+  ledger: Record<'paystack' | 'squad' | 'unallocated', { in: number; out: number; net: number }>;
+  pendingWithdrawals: Array<{
+    id: string;
+    user_id: string;
+    amount_tngn: number;
+    naira_to_send: number;
+    bank_code: string;
+    account_number: string;
+    account_name: string | null;
+    status: string;
+    gateway: string | null;
+    created_at: string;
+    user: { email?: string; username?: string } | null;
+  }>;
+};
+
 function WithdrawalPanel() {
   const { toast } = useToast();
-  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [data, setData] = useState<TreasuryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [rejectTarget, setRejectTarget] = useState<Withdrawal[] | null>(null);
+  const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [busyRowId, setBusyRowId] = useState<string | null>(null);
+  const [isRefunding, setIsRefunding] = useState(false);
 
-  const fetchWithdrawals = useCallback(async () => {
-    const res = await fetch('/api/admin/withdrawals', { headers: adminHeaders() });
-    const data = await res.json();
-    setWithdrawals(data.withdrawals || []);
+  const fetchData = useCallback(async () => {
+    const res = await fetch('/api/admin/treasury', { headers: adminHeaders() });
+    const body = await res.json();
+    if (res.ok) setData(body);
     setIsLoading(false);
   }, []);
 
-  useEffect(() => { fetchWithdrawals(); }, [fetchWithdrawals]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const callAction = async (withdrawalId: string, action: 'approve' | 'reject', reason?: string) => {
-    const res = await fetch('/api/admin/withdrawals', {
-      method: 'POST',
-      headers: adminHeaders(),
-      body: JSON.stringify({ withdrawalId, action, reason }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    return data;
-  };
-
-  const handleApprove = async (rows: Withdrawal[]) => {
-    setIsProcessing(true);
-    let ok = 0;
-    for (const w of rows) {
-      try { await callAction(w.id, 'approve'); ok++; } catch { /* continue */ }
+  const approveVia = async (withdrawalId: string, gateway: 'paystack' | 'squad') => {
+    setBusyRowId(withdrawalId);
+    try {
+      const res = await fetch('/api/admin/withdrawals/approve', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ withdrawalId, gateway }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Approval failed');
+      toast({ title: `Payout fired via ${gateway === 'paystack' ? 'Paystack' : 'Squad'}` });
+      fetchData();
+    } catch (e: any) {
+      toast({ title: 'Payout failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setBusyRowId(null);
     }
-    toast({ title: `${ok} of ${rows.length} approved` });
-    setIsProcessing(false);
-    fetchWithdrawals();
   };
 
   const submitReject = async () => {
-    if (!rejectTarget) return;
-    setIsProcessing(true);
-    let ok = 0;
-    for (const w of rejectTarget) {
-      try {
-        await callAction(w.id, 'reject', rejectReason.trim() || 'Rejected by admin');
-        ok++;
-      } catch { /* continue */ }
+    if (!rejectTargetId) return;
+    setIsRefunding(true);
+    try {
+      const res = await fetch('/api/admin/withdrawals/reject', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ withdrawalId: rejectTargetId, reason: rejectReason.trim() || 'Rejected by admin' }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Reject failed');
+      toast({ title: 'Withdrawal rejected', description: 'User refunded.' });
+      setRejectTargetId(null);
+      setRejectReason('');
+      fetchData();
+    } catch (e: any) {
+      toast({ title: 'Reject failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsRefunding(false);
     }
-    toast({ title: `${ok} of ${rejectTarget.length} rejected` });
-    setRejectTarget(null);
-    setRejectReason('');
-    setIsProcessing(false);
-    fetchWithdrawals();
   };
 
-  const columns: Column<Withdrawal>[] = [
-    {
-      key: 'user',
-      label: 'User',
-      sortable: true,
-      sortValue: (w) => w.users?.email || w.user_id,
-      render: (w) => (
-        <span className="text-xs font-mono">
-          {w.users?.email || `${w.user_id.slice(0, 8)}…`}
-        </span>
-      ),
-    },
-    {
-      key: 'amount_tngn',
-      label: 'Amount (tNGN)',
-      sortable: true,
-      sortValue: (w) => w.amount_tngn,
-      render: (w) => <span className="font-medium">₦{w.amount_tngn.toLocaleString()}</span>,
-    },
-    {
-      key: 'naira_to_send',
-      label: 'Naira to send',
-      sortable: true,
-      sortValue: (w) => w.naira_to_send,
-      render: (w) => `₦${w.naira_to_send.toLocaleString()}`,
-    },
-    {
-      key: 'bank',
-      label: 'Bank / Account',
-      render: (w) => <span className="text-xs">{w.bank_code} / {w.account_number}</span>,
-    },
-    {
-      key: 'created_at',
-      label: 'Requested',
-      sortable: true,
-      sortValue: (w) => new Date(w.created_at || 0).getTime(),
-      render: (w) =>
-        w.created_at ? (
-          <span className="text-xs text-muted-foreground">
-            {new Date(w.created_at).toLocaleString('en-NG', {
-              day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-            })}
-          </span>
-        ) : '—',
-    },
-    {
-      key: 'actions',
-      label: '',
-      render: (w) => (
-        <div className="flex gap-1 justify-end">
-          <Button
-            size="sm"
-            className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500"
-            onClick={(e) => { e.stopPropagation(); handleApprove([w]); }}
-            disabled={isProcessing}
-          >
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs border-red-500/30 text-red-400"
-            onClick={(e) => { e.stopPropagation(); setRejectTarget([w]); }}
-            disabled={isProcessing}
-          >
-            Reject
-          </Button>
-        </div>
-      ),
-      className: 'text-right',
-    },
-  ];
+  if (isLoading) return <div className="h-32 bg-muted/30 rounded-xl animate-pulse" />;
+  if (!data) return <div className="text-sm text-muted-foreground">Failed to load treasury data.</div>;
 
-  if (isLoading) return <div className="h-24 bg-muted/30 rounded-xl animate-pulse" />;
+  const fmt = (n: number | null) => n == null ? '—' : `₦${Math.round(n).toLocaleString()}`;
 
   return (
     <>
+      {/* ── Live Treasury Balances ───────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        {(['paystack', 'squad'] as const).map(g => {
+          const live = data.liveBalances[g];
+          const led = data.ledger[g];
+          const drift = live != null ? live - led.net : null;
+          return (
+            <Card key={g} className="bg-card/60">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold capitalize">{g}</span>
+                  {data.liveBalances.errors[g] && (
+                    <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-400">live unavailable</Badge>
+                  )}
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Available to pay out</div>
+                  <div className="text-2xl font-bold">{fmt(live)}</div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11px] pt-2 border-t border-border/40">
+                  <div><div className="text-muted-foreground">Inflow</div><div className="text-emerald-400 font-medium">{fmt(led.in)}</div></div>
+                  <div><div className="text-muted-foreground">Outflow</div><div className="text-rose-400 font-medium">{fmt(led.out)}</div></div>
+                  <div><div className="text-muted-foreground">Ledger net</div><div className="font-medium">{fmt(led.net)}</div></div>
+                </div>
+                {drift != null && Math.abs(drift) > 1 && (
+                  <div className="text-[10px] text-amber-400/80">
+                    Drift: {drift > 0 ? '+' : ''}{fmt(drift)} (live vs ledger — investigate)
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* ── Pending Withdrawals Queue ──────────────────────────────── */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center justify-between">
-            Pending Large Withdrawals
-            <Badge variant="outline">{withdrawals.length}</Badge>
+            Pending Withdrawals
+            <Badge variant="outline">{data.pendingWithdrawals.length}</Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <DataTable
-            rows={withdrawals}
-            columns={columns}
-            rowKey={(w) => w.id}
-            searchFields={(w) => `${w.users?.email || ''} ${w.user_id} ${w.bank_code} ${w.account_number}`}
-            pageSize={10}
-            emptyMessage="No pending approvals"
-            bulkActions={[
-              {
-                label: 'Approve selected',
-                variant: 'default',
-                onClick: handleApprove,
-                disabled: () => isProcessing,
-              },
-              {
-                label: 'Reject selected',
-                variant: 'destructive',
-                onClick: (rows) => { setRejectTarget(rows); },
-                disabled: () => isProcessing,
-              },
-            ]}
-          />
+        <CardContent className="space-y-2">
+          {data.pendingWithdrawals.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-6 text-center">No pending withdrawals 🎉</div>
+          ) : (
+            data.pendingWithdrawals.map(w => {
+              const live = data.liveBalances;
+              const canPaystack = live.paystack == null || live.paystack >= w.naira_to_send;
+              const canSquad = live.squad == null || live.squad >= w.naira_to_send;
+              const isBusy = busyRowId === w.id;
+              return (
+                <div key={w.id} className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium">
+                          {w.user?.email || w.user?.username || `${w.user_id.slice(0, 8)}…`}
+                        </span>
+                        <span className="text-lg font-bold">₦{w.naira_to_send.toLocaleString()}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          (from {w.amount_tngn.toLocaleString()} tNGN)
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Bank {w.bank_code} · NUBAN {w.account_number}
+                        {w.account_name && <> · {w.account_name}</>}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Requested {new Date(w.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button
+                        size="sm"
+                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+                        onClick={() => approveVia(w.id, 'paystack')}
+                        disabled={isBusy || !canPaystack}
+                        title={!canPaystack ? 'Insufficient Paystack balance' : 'Pay out via Paystack'}
+                      >
+                        {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Pay via Paystack'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-8 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
+                        onClick={() => approveVia(w.id, 'squad')}
+                        disabled={isBusy || !canSquad}
+                        title={!canSquad ? 'Insufficient Squad balance' : 'Pay out via Squad'}
+                      >
+                        {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Pay via Squad'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs border-red-500/30 text-red-400"
+                        onClick={() => setRejectTargetId(w.id)}
+                        disabled={isBusy}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </CardContent>
       </Card>
 
-      <Dialog open={!!rejectTarget} onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectReason(''); } }}>
+      <Dialog open={!!rejectTargetId} onOpenChange={(open) => { if (!open) { setRejectTargetId(null); setRejectReason(''); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reject {rejectTarget?.length === 1 ? 'withdrawal' : `${rejectTarget?.length} withdrawals`}</DialogTitle>
+            <DialogTitle>Reject withdrawal</DialogTitle>
             <DialogDescription>
-              Balance will be refunded. Reason is sent to the user&apos;s notification feed.
+              Balance will be refunded to the user&apos;s tNGN wallet. The reason is sent to their notification feed.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -634,15 +662,11 @@ function WithdrawalPanel() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRejectTarget(null)} disabled={isProcessing}>
+            <Button variant="outline" onClick={() => setRejectTargetId(null)} disabled={isRefunding}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={submitReject}
-              disabled={isProcessing}
-            >
-              {isProcessing ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Confirm reject'}
+            <Button variant="destructive" onClick={submitReject} disabled={isRefunding}>
+              {isRefunding ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Refunding…</> : 'Confirm reject'}
             </Button>
           </DialogFooter>
         </DialogContent>

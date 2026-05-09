@@ -1,0 +1,22 @@
+name: Cron — Weekly Loss Rebate
+
+# Mondays at 06:00 Africa/Lagos (= 05:00 UTC). Runs after the previous week
+# closed at midnight Lagos on Sunday → window is exactly the prior Mon-Sun.
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-weekly-rebate
+  cancel-in-progress: false
+
+jobs:
+  rebate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pay weekly loss rebates
+        run: |
+          curl -sSf --max-time 290 -X POST "${{ secrets.API_BASE_URL }}/api/cron/weekly-rebate" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

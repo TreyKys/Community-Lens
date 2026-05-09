@@ -8,9 +8,10 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Conversion spread: we credit 98.5% of received amount as tNGN.
-// The 1.5% goes to platform treasury. This is invisible to the user.
-const CONVERSION_SPREAD = 0.015;
+// Conversion spread: we credit 99% of received amount as tNGN.
+// The 1% goes to platform treasury. The deposit promo was retired in favour of the
+// weekly loss rebate (see /api/cron/weekly-rebate).
+const CONVERSION_SPREAD = 0.01;
 
 export async function POST(req: Request) {
   try {
@@ -103,14 +104,10 @@ export async function POST(req: Request) {
     }
 
     const newBalance = (userData.tngn_balance || 0) + tNGNToCredit;
-    const betCredit = amountInNGN * 0.01;
 
     const { error: updateError } = await supabaseAdmin
       .from('users')
-      .update({
-        tngn_balance: newBalance,
-        bonus_balance: (userData.bonus_balance || 0) + betCredit,
-      })
+      .update({ tngn_balance: newBalance })
       .eq('id', userId);
 
     if (updateError) {
@@ -128,28 +125,32 @@ export async function POST(req: Request) {
       .update({ status: 'completed' })
       .eq('reference', reference);
 
-    // 6. Log Treasury Activities
+    // 6. Treasury ledger — gateway-tagged inflow + spread capture.
+    await supabaseAdmin.from('treasury_movements').insert([
+      {
+        user_id: userId, type: 'deposit', gateway: 'paystack', direction: 'in',
+        amount_ngn: amountInNGN, reference,
+      },
+      {
+        user_id: userId, type: 'spread', gateway: 'paystack', direction: 'in',
+        amount_ngn: spreadAmount, reference,
+      },
+    ]);
+    // Backwards-compatible treasury_log entry — leave for now; admin UI will switch over.
     await supabaseAdmin.from('treasury_log').insert({
       type: 'deposit_spread',
       amount_tngn: spreadAmount,
       user_id: userId,
+      metadata: { source: 'paystack', reference },
       created_at: new Date().toISOString(),
     });
 
-    await supabaseAdmin.from('treasury_log').insert({
-      type: 'deposit_bet_credit',
-      amount_tngn: -betCredit, // negative = cost to platform
-      user_id: userId,
-      created_at: new Date().toISOString(),
-    });
-
-    console.log(`Deposit complete: user=${userId}, NGN=${amountInNGN}, tNGN credited=${tNGNToCredit}, bet credit=${betCredit}, spread=${spreadAmount}`);
+    console.log(`Deposit complete: user=${userId}, NGN=${amountInNGN}, tNGN credited=${tNGNToCredit}, spread=${spreadAmount}`);
 
     return NextResponse.json({
       status: 'success',
       tNGNcredited: tNGNToCredit,
       spreadCaptured: spreadAmount,
-      betCredit: betCredit,
     }, { status: 200 });
 
   } catch (error: unknown) {

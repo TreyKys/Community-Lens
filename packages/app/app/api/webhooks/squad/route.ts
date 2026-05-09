@@ -7,9 +7,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Match Paystack: 1.5% conversion spread to platform, 1% deposit promo to user.
-const CONVERSION_SPREAD = 0.015;
-const DEPOSIT_PROMO = 0.01;
+// 1% conversion spread; deposit promo retired in favour of the weekly loss rebate.
+const CONVERSION_SPREAD = 0.01;
 
 export async function POST(req: Request) {
   try {
@@ -93,7 +92,6 @@ export async function POST(req: Request) {
     const amountInNGN = Number(amountField);
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
-    const betCredit = amountInNGN * DEPOSIT_PROMO;
 
     // Update the pending row (or insert one if this came in via the legacy path).
     if (pending) {
@@ -135,7 +133,7 @@ export async function POST(req: Request) {
 
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('tngn_balance, bonus_balance')
+      .select('tngn_balance')
       .eq('id', userId)
       .single();
 
@@ -149,10 +147,7 @@ export async function POST(req: Request) {
 
     const { error: updateError } = await supabaseAdmin
       .from('users')
-      .update({
-        tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit,
-        bonus_balance: (userData.bonus_balance || 0) + betCredit,
-      })
+      .update({ tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit })
       .eq('id', userId);
 
     if (updateError) {
@@ -168,16 +163,20 @@ export async function POST(req: Request) {
       .update({ status: 'completed' })
       .eq('transaction_ref', transactionRef);
 
+    // Treasury ledger — gateway-tagged inflow + spread.
+    await supabaseAdmin.from('treasury_movements').insert([
+      { user_id: userId, type: 'deposit', gateway: 'squad', direction: 'in', amount_ngn: amountInNGN, reference: transactionRef },
+      { user_id: userId, type: 'spread', gateway: 'squad', direction: 'in', amount_ngn: spreadAmount, reference: transactionRef },
+    ]);
+    // Backwards-compatible legacy log
     await supabaseAdmin.from('treasury_log').insert([
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
-      { type: 'deposit_bet_credit', amount_tngn: -betCredit, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
     ]);
 
     return NextResponse.json({
       status: 'success',
       tNGNcredited: tNGNToCredit,
       spreadCaptured: spreadAmount,
-      betCredit,
     }, { status: 200 });
   } catch (e: any) {
     console.error('Squad webhook error:', e);

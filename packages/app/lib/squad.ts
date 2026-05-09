@@ -114,3 +114,66 @@ export async function initiateCheckout(params: {
 export async function verifyTransaction(reference: string): Promise<any> {
   return await squadRequest(`/transaction/verify/${encodeURIComponent(reference)}`, 'GET');
 }
+
+/**
+ * Look up a Nigerian bank account name from NUBAN + bank code (Squad's
+ * name-enquiry endpoint). Used by admin treasury dashboard before approving
+ * a payout to confirm the destination is correct.
+ */
+export async function resolveBankAccount(params: {
+  bankCode: string;
+  accountNumber: string;
+}): Promise<{ accountName: string; bankCode: string; accountNumber: string }> {
+  const data = await squadRequest('/payout/account/lookup', 'POST', {
+    bank_code: params.bankCode,
+    account_number: params.accountNumber,
+  });
+  return {
+    accountName: data?.account_name ?? data?.accountName ?? '',
+    bankCode: params.bankCode,
+    accountNumber: params.accountNumber,
+  };
+}
+
+/**
+ * Initiate a payout to a Nigerian bank via Squad. Mirrors Paystack's
+ * createTransferRecipient + initiateTransfer rolled into one call.
+ *
+ * @param amountKobo amount in kobo (multiply naira by 100)
+ * @returns transaction_reference for tracking; webhook fires with this on completion
+ */
+export async function initiateTransfer(params: {
+  amountKobo: number;
+  bankCode: string;
+  accountNumber: string;
+  accountName: string;
+  transactionRef: string;
+  remark?: string;
+}): Promise<{ transactionRef: string; status: string; merchantRef?: string }> {
+  const data = await squadRequest('/payout/transfer', 'POST', {
+    transaction_reference: params.transactionRef,
+    amount: params.amountKobo,
+    bank_code: params.bankCode,
+    account_number: params.accountNumber,
+    account_name: params.accountName,
+    currency_id: 'NGN',
+    remark: params.remark || `Odds.ng payout ${params.transactionRef}`,
+  });
+  return {
+    transactionRef: data?.transaction_reference || params.transactionRef,
+    status: data?.transaction_status || data?.status || 'pending',
+    merchantRef: data?.merchant_amount,
+  };
+}
+
+/**
+ * Look up the current Squad merchant balance (NGN, in kobo).
+ * Used by the treasury dashboard to show live "available to pay out".
+ */
+export async function getMerchantBalance(): Promise<{ availableKobo: number; ledgerKobo: number }> {
+  const data = await squadRequest('/merchant/balance', 'GET');
+  return {
+    availableKobo: Number(data?.available_balance ?? 0),
+    ledgerKobo: Number(data?.ledger_balance ?? 0),
+  };
+}

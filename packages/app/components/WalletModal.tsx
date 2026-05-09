@@ -50,8 +50,8 @@ export function WalletModal() {
 
   const handleCardDeposit = async (gateway: 'paystack' | 'squad') => {
     const amount = Number(depositAmount);
-    if (!amount || amount < 100) {
-      toast({ title: 'Minimum deposit is ₦100', variant: 'destructive' });
+    if (!amount || amount < 500) {
+      toast({ title: 'Minimum deposit is ₦500', variant: 'destructive' });
       return;
     }
     if (!session?.user) {
@@ -80,8 +80,8 @@ export function WalletModal() {
 
   const handleWithdraw = async () => {
     const amount = Number(withdrawAmount);
-    if (amount < 1000) {
-      toast({ title: 'Minimum withdrawal is 1,000 tNGN', variant: 'destructive' });
+    if (amount < 200) {
+      toast({ title: 'Minimum withdrawal is 200 tNGN', variant: 'destructive' });
       return;
     }
     if (!bankCode || accountNumber.length !== 10) {
@@ -124,14 +124,14 @@ export function WalletModal() {
 
   const dp = (() => {
     const n = Number(depositAmount);
-    if (!n || n < 100) return null;
-    return { tNGN: (n * 0.985).toFixed(2), bonus: (n * 0.01).toFixed(2) };
+    if (!n || n < 500) return null;
+    return { tNGN: (n * 0.99).toFixed(2) };
   })();
 
   const wp = (() => {
     const n = Number(withdrawAmount);
-    if (!n || n < 100) return null;
-    return { fees: ((n * 0.015) + 100).toFixed(0), naira: (n - n * 0.015 - 100).toFixed(0) };
+    if (!n || n < 200) return null;
+    return { fees: ((n * 0.01) + 50).toFixed(0), naira: (n - n * 0.01 - 50).toFixed(0) };
   })();
 
   return (
@@ -168,10 +168,10 @@ export function WalletModal() {
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
                 <Input
                   type="number"
-                  placeholder="Min ₦100"
+                  placeholder="Min ₦500"
                   value={depositAmount}
                   onChange={e => setDepositAmount(e.target.value)}
-                  min={100}
+                  min={500}
                   className="pl-8"
                 />
               </div>
@@ -180,7 +180,9 @@ export function WalletModal() {
             {dp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
                 <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span></div>
-                <div className="flex justify-between"><span>Bonus credit</span><span className="text-amber-400">+₦{dp.bonus}</span></div>
+                <div className="flex justify-between text-[10px] pt-1 border-t border-border/40 mt-1.5">
+                  <span>Bet a lot, lose a lot? Get up to ₦5,000 back every Monday.</span>
+                </div>
               </div>
             )}
 
@@ -189,7 +191,7 @@ export function WalletModal() {
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   onClick={() => handleCardDeposit('paystack')}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
                   variant="outline"
                   className="h-auto py-3 flex-col gap-1"
                 >
@@ -198,7 +200,7 @@ export function WalletModal() {
                 </Button>
                 <Button
                   onClick={() => handleCardDeposit('squad')}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 100}
+                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
                   variant="outline"
                   className="h-auto py-3 flex-col gap-1"
                 >
@@ -227,10 +229,10 @@ export function WalletModal() {
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₦</span>
                 <Input
                   type="number"
-                  placeholder={`Min 1,000 (max ${balance.toLocaleString()})`}
+                  placeholder={`Min 200 (max ${balance.toLocaleString()})`}
                   value={withdrawAmount}
                   onChange={e => setWithdrawAmount(e.target.value)}
-                  min={1000}
+                  min={200}
                   max={balance}
                   className="pl-8"
                 />
@@ -260,7 +262,7 @@ export function WalletModal() {
             </div>
             {wp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                <div className="flex justify-between"><span>Fees (spread + ₦100)</span><span>₦{wp.fees}</span></div>
+                <div className="flex justify-between"><span>Fees (1% spread + ₦50)</span><span>₦{wp.fees}</span></div>
                 <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
                   <span>You receive</span><span className="text-emerald-400">₦{wp.naira}</span>
                 </div>

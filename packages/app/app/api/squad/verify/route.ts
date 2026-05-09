@@ -7,8 +7,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const CONVERSION_SPREAD = 0.015;
-const DEPOSIT_PROMO = 0.01;
+const CONVERSION_SPREAD = 0.01;
+// Deposit promo retired — replaced by weekly loss rebate.
 
 /**
  * POST /api/squad/verify
@@ -82,7 +82,6 @@ export async function POST(request: Request) {
     const amountInNGN = row?.amount_ngn ?? Number(squadData?.amount ?? 0) / 100;
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
-    const betCredit = amountInNGN * DEPOSIT_PROMO;
 
     // Guard against double-credit from a concurrent webhook.
     const { data: latest } = await supabaseAdmin
@@ -96,7 +95,7 @@ export async function POST(request: Request) {
 
     const { data: userData, error: userError } = await supabaseAdmin
       .from('users')
-      .select('tngn_balance, bonus_balance')
+      .select('tngn_balance')
       .eq('id', userId)
       .single();
 
@@ -110,10 +109,7 @@ export async function POST(request: Request) {
 
     const { error: updateErr } = await supabaseAdmin
       .from('users')
-      .update({
-        tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit,
-        bonus_balance: (userData.bonus_balance || 0) + betCredit,
-      })
+      .update({ tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit })
       .eq('id', userId);
 
     if (updateErr) {
@@ -129,9 +125,12 @@ export async function POST(request: Request) {
       .update({ status: 'completed', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
       .eq('transaction_ref', reference);
 
+    await supabaseAdmin.from('treasury_movements').insert([
+      { user_id: userId, type: 'deposit', gateway: 'squad', direction: 'in', amount_ngn: amountInNGN, reference },
+      { user_id: userId, type: 'spread', gateway: 'squad', direction: 'in', amount_ngn: spreadAmount, reference },
+    ]);
     await supabaseAdmin.from('treasury_log').insert([
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
-      { type: 'deposit_bet_credit', amount_tngn: -betCredit, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
     ]);
 
     return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit });

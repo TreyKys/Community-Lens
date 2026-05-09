@@ -7,8 +7,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const CONVERSION_SPREAD = 0.015;
-const DEPOSIT_PROMO = 0.01;
+const CONVERSION_SPREAD = 0.01;
+// Deposit promo retired — replaced by weekly loss rebate (api/cron/weekly-rebate).
 
 /**
  * POST /api/paystack/verify
@@ -79,7 +79,6 @@ export async function POST(request: Request) {
     const amountInNGN = Number(psData.amount) / 100;
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
-    const betCredit = amountInNGN * DEPOSIT_PROMO;
 
     // Insert-if-missing so this works even if the popup-only path was used
     // historically and there's no pre-existing pending row.
@@ -143,10 +142,7 @@ export async function POST(request: Request) {
 
     const { error: updateErr } = await supabaseAdmin
       .from('users')
-      .update({
-        tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit,
-        bonus_balance: (userData.bonus_balance || 0) + betCredit,
-      })
+      .update({ tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit })
       .eq('id', userId);
 
     if (updateErr) {
@@ -162,16 +158,18 @@ export async function POST(request: Request) {
       .update({ status: 'completed' })
       .eq('reference', reference);
 
+    await supabaseAdmin.from('treasury_movements').insert([
+      { user_id: userId, type: 'deposit', gateway: 'paystack', direction: 'in', amount_ngn: amountInNGN, reference },
+      { user_id: userId, type: 'spread', gateway: 'paystack', direction: 'in', amount_ngn: spreadAmount, reference },
+    ]);
     await supabaseAdmin.from('treasury_log').insert([
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'paystack', reference } },
-      { type: 'deposit_bet_credit', amount_tngn: -betCredit, user_id: userId, metadata: { source: 'paystack', reference } },
     ]);
 
     return NextResponse.json({
       status: 'completed',
       amount: amountInNGN,
       tngn_credited: tNGNToCredit,
-      bonus_credit: betCredit,
     });
   } catch (e: any) {
     console.error('Paystack verify error:', e);
