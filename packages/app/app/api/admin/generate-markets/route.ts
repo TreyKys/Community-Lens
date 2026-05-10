@@ -2,37 +2,60 @@ import { NextResponse } from 'next/server';
 import { isAdminRequest } from '@/lib/adminAuth';
 
 // POST /api/admin/generate-markets
-// Accepts a document (text content) and uses Claude to generate
-// structured prediction market objects for TreyKy to review before submission.
+// Accepts a document (text content) and uses Gemini to generate
+// structured prediction market objects for review before submission.
 
 const SYSTEM_PROMPT = `You are a prediction market curator for Odds.ng, Nigeria's leading event-derivative market.
 
-Your job is to read a document and generate high-quality prediction markets from it.
+Your job: read a document and extract or generate high-quality prediction markets.
+
+The document may be in any of these formats — handle them all:
+- Numbered lists ("1. The Arsenal Bottle Job (Narrative Market)")
+- Section headers with emojis ("🎵 Pop Culture & Afrobeats")
+- A market line followed by a "Why it works:" rationale and an "Oracle:" data source
+- Plain prose with embedded events
+- Fixture lists or schedules
+
+When the document already lists candidate markets (with "The Market:", "Why it works:", "Oracle:" structure), preserve the author's intent — copy the question and rationale faithfully. When the document is raw source material (news, fixtures), generate fresh markets from it.
 
 Rules:
-- Questions must be specific, answerable, and verifiable
+- Questions must be specific, answerable, and verifiable from a clearly named source
 - Each question must resolve before or on the closes_at date
 - Options must be mutually exclusive and exhaustive
-- For sports: always include all realistic outcomes (don't omit Draw for football)
-- For yes/no markets: phrase the question so "Yes" is the interesting outcome
-- For Nigerian politics/culture: use local context, real names, real institutions
-- Closes_at should be set to just before the event resolves (kickoff for sports, announcement date for politics)
-- Generate between 5 and 20 markets depending on document richness
+- For sports: include all realistic outcomes (don't omit Draw for football)
+- For yes/no markets: phrase the question so "Yes" is the interesting/contrarian outcome
+- For Nigerian politics/culture/economy: use local context, real names, real institutions, NGN currency
+- closes_at: set to just before the event resolves (kickoff for sports, deadline for "before X date" markets)
+- description: 1-3 sentences explaining WHY users will care or bet on this. Capture the cultural hook, rivalry, or stakes. Copy "Why it works:" rationale verbatim if the document has one.
+- Generate as many markets as the document warrants (typically 5-20). Do not pad with low-quality markets.
 
-Output ONLY a valid JSON array. No explanation. No markdown. No backticks. Raw JSON only.
+Output ONLY a valid JSON array. No prose. No markdown. No code fences. Just \`[...]\`.
 
 Each market object must have exactly these fields:
 {
-  "question": "string — clear prediction question",
+  "question": "string — clear prediction question, max 200 chars",
   "category": "sports | politics | economics | entertainment | finance",
   "sport": "football | basketball | tennis | esports | null",
-  "options": ["string", "string"],
-  "closes_at": "ISO 8601 datetime string",
+  "options": ["Yes", "No"]  or  ["Home Win", "Draw", "Away Win"]  or  custom array of 2-4 strings,
+  "closes_at": "ISO 8601 datetime string with timezone (e.g. 2026-05-17T22:59:00Z)",
   "fixture_id": null,
-  "home_team": "string or null",
-  "away_team": "string or null",
-  "notes": "string — brief explanation of why this is a good market"
+  "home_team": "string or null (only for sports)",
+  "away_team": "string or null (only for sports)",
+  "description": "1-3 sentences. The 'why it works' / cultural hook / what makes this engaging."
 }`;
+
+// Strip code fences and any leading/trailing prose so JSON.parse has a chance.
+// Handles: ```json [...] ```, leading "Here's the array:", trailing "That's it!" etc.
+function extractJsonArray(text: string): string {
+  if (!text) return '';
+  // Drop markdown fences
+  let t = text.replace(/```(?:json|JSON)?/g, '').replace(/```/g, '').trim();
+  // If the response starts with prose, find the first '[' and last ']'.
+  const first = t.indexOf('[');
+  const last = t.lastIndexOf(']');
+  if (first === -1 || last === -1 || last <= first) return t;
+  return t.slice(first, last + 1);
+}
 
 export async function POST(request: Request) {
   try {
@@ -58,17 +81,20 @@ export async function POST(request: Request) {
 Document name: ${documentName || 'Untitled'}
 
 Document content:
+---
 ${documentContent}
+---
 
 Generate prediction markets from this document. Focus on:
-- Upcoming events mentioned that have clear outcomes
-- Nigerian market relevance (CBN, NNPC, INEC, local sports teams, entertainment)
-- Events that resolve within 1-90 days
-- Markets that Nigerian users would find engaging and bet on
+- Upcoming events with clear, verifiable outcomes
+- Nigerian market relevance (CBN, NNPC, INEC, NEPA/grid, Naira/USD, NPFL, Afrobeats artists, Nollywood, local crypto adoption)
+- Events that resolve within 1-90 days from today
+- Markets with cultural pull — rivalries, stan wars, political beefs, viral moments
 
-Remember: output ONLY the JSON array.`;
+If the document already structures markets with "The Market:" / "Why it works:" / "Oracle:" — copy them faithfully. The "Why it works" line should become the "description" field.
 
-    // Call Gemini API
+Remember: output ONLY the JSON array. Start with [ and end with ].`;
+
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) {
       console.error('Missing GEMINI_API_KEY');
@@ -77,21 +103,16 @@ Remember: output ONLY the JSON array.`;
 
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: SYSTEM_PROMPT }]
-        },
-        contents: [{
-          parts: [{ text: userPrompt }]
-        }],
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ parts: [{ text: userPrompt }] }],
         generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 4000,
-          responseMimeType: "application/json"
-        }
+          temperature: 0.3,
+          // 16k is enough for ~25 verbose markets with descriptions; old 4k truncated mid-JSON.
+          maxOutputTokens: 16000,
+          responseMimeType: 'application/json',
+        },
       }),
     });
 
@@ -102,29 +123,33 @@ Remember: output ONLY the JSON array.`;
     }
 
     const data = await response.json();
+    const finishReason = data.candidates?.[0]?.finishReason;
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // Parse the JSON array from the response
+    // Parse the JSON array from the response, with graceful recovery
     let markets: any[] = [];
     try {
-      // Strip any accidental markdown fences
-      const cleaned = rawText.replace(/```json|```/g, '').trim();
+      const cleaned = extractJsonArray(rawText);
       markets = JSON.parse(cleaned);
-
       if (!Array.isArray(markets)) {
         throw new Error('Response is not an array');
       }
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', rawText.slice(0, 500));
+    } catch (parseError: any) {
+      console.error('Failed to parse AI response. finishReason=' + finishReason + '. First 500 chars:', rawText.slice(0, 500));
+      const hint = finishReason === 'MAX_TOKENS'
+        ? 'AI response was cut off mid-output. Try a shorter document or fewer markets.'
+        : 'AI returned malformed JSON. The document may be too unstructured — try splitting it or rewriting as a list.';
       return NextResponse.json({
-        error: 'AI returned malformed data. Please try again with a clearer document.',
+        error: hint,
+        debug: { finishReason, rawTextSnippet: rawText.slice(0, 300) },
       }, { status: 500 });
     }
 
-    // Validate and sanitize each market
+    // Validate and sanitize each market. Accept legacy "notes" as a fallback for description
+    // (in case the model echoes the old field name).
     const validatedMarkets = markets
-      .filter(m => m.question && m.category && Array.isArray(m.options) && m.options.length >= 2 && m.closes_at)
-      .map((m, i) => ({
+      .filter((m: any) => m.question && m.category && Array.isArray(m.options) && m.options.length >= 2 && m.closes_at)
+      .map((m: any, i: number) => ({
         id: `draft_${Date.now()}_${i}`,
         question: String(m.question).slice(0, 200),
         category: ['sports', 'politics', 'economics', 'entertainment', 'finance'].includes(m.category)
@@ -135,8 +160,8 @@ Remember: output ONLY the JSON array.`;
         fixture_id: m.fixture_id || null,
         home_team: m.home_team || null,
         away_team: m.away_team || null,
-        notes: m.notes || '',
-        approved: false, // All start as not approved
+        description: String(m.description || m.notes || '').slice(0, 800),
+        approved: false,
       }));
 
     if (validatedMarkets.length === 0) {

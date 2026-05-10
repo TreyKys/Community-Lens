@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const {
       title, question, category, options, closesAt,
       parentMarketId, fixtureId, isJackpotEligible,
-      sport, homeTeam, awayTeam, leagueCode,
+      sport, homeTeam, awayTeam, leagueCode, description,
     } = body;
 
     if (!question || !category || !options || !closesAt) {
@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         home_team: homeTeam || null,
         away_team: awayTeam || null,
         league_code: leagueCode || null,
+        description: description || null,
         total_pool: 0,
         created_at: new Date().toISOString(),
       })

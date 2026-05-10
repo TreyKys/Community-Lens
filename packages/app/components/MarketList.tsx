@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Market {
@@ -26,6 +26,8 @@ interface Market {
   parent_market_id: number | null;
   on_chain_market_id: number | null;
   merkle_root: string | null;
+  description: string | null;
+  resolved_at: string | null;
 }
 
 interface MarketCardProps {
@@ -234,6 +236,7 @@ function BettingInterface({
 function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: MarketCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showDescription, setShowDescription] = useState(false);
 
   const closesAt = new Date(market.closes_at);
   const isOpen = market.status === 'open' && closesAt > new Date();
@@ -283,6 +286,24 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
           </CardTitle>
           <div className="shrink-0">{statusBadge()}</div>
         </div>
+        {market.description && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => setShowDescription(s => !s)}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground/80 hover:text-foreground transition-colors"
+            >
+              <Info className="w-3 h-3" />
+              <span className="underline-offset-2 hover:underline">About this market</span>
+              <ChevronDown className={cn('w-3 h-3 transition-transform', showDescription && 'rotate-180')} />
+            </button>
+            {showDescription && (
+              <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed bg-muted/30 border border-border/40 rounded-md px-2.5 py-2 animate-in fade-in slide-in-from-top-1">
+                {market.description}
+              </p>
+            )}
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="relative z-10">
@@ -496,10 +517,14 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   const fetchMarkets = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Hide voided markets, and resolved markets older than 26 hours.
+      // Data stays in DB (audit trail intact) — this is purely a display filter.
+      const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at')
         .not('status', 'eq', 'voided')
+        .or(`status.neq.resolved,resolved_at.gte.${cutoff}`)
         .order('closes_at', { ascending: true });
 
       if (filterExactMarketId !== undefined) {

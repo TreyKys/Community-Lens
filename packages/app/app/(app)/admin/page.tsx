@@ -1084,6 +1084,7 @@ function AIMarketGenerator() {
             fixtureId: draft.fixture_id,
             homeTeam: draft.home_team,
             awayTeam: draft.away_team,
+            description: draft.description,
           }),
         });
         if (res.ok) { created++; } else { failed++; }
@@ -1186,16 +1187,20 @@ function AIMarketGenerator() {
                         onChange={() => toggleApprove(draft.id)}
                         className="mt-1 w-4 h-4 cursor-pointer accent-emerald-500"
                       />
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 space-y-2">
                         <input
                           type="text"
                           value={draft.question}
                           onChange={e => updateDraft(draft.id, 'question', e.target.value)}
                           className="w-full bg-transparent text-sm font-medium border-b border-transparent hover:border-border focus:border-primary focus:outline-none pb-0.5"
                         />
-                        {draft.notes && (
-                          <p className="text-xs text-muted-foreground mt-1 italic">{draft.notes}</p>
-                        )}
+                        <textarea
+                          value={draft.description || ''}
+                          onChange={e => updateDraft(draft.id, 'description', e.target.value)}
+                          placeholder="Why this market matters — the cultural hook, rivalry, or stakes. Shown to users."
+                          rows={2}
+                          className="w-full bg-muted/20 border border-border/50 rounded-md px-2 py-1.5 text-xs text-muted-foreground resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
                       </div>
                     </div>
                     <button onClick={() => removeDraft(draft.id)} className="text-muted-foreground hover:text-red-400 transition-colors shrink-0">
