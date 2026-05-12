@@ -15,7 +15,7 @@ export default function MarketsPage() {
         <Suspense fallback={null}>
           <JackpotBanner />
         </Suspense>
-        <div className="flex-1 p-4 md:p-6 space-y-5">
+        <div className="flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
           <Suspense fallback={<div className="h-32 rounded-xl shimmer" />}>
             <PopularMarketsScroll />
           </Suspense>

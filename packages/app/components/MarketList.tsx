@@ -279,7 +279,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
     <Card className="hover:shadow-lg transition-all bg-card relative overflow-hidden group border-muted">
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-      <CardHeader className="pb-2 relative z-10">
+      <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
         <div className="flex justify-between items-start gap-3">
           <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug">
             {displayQuestion}
@@ -306,7 +306,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
         )}
       </CardHeader>
 
-      <CardContent className="relative z-10">
+      <CardContent className="px-4 md:px-6 pb-4 md:pb-6 relative z-10">
         {/* Resolved outcome */}
         {isResolved && resolvedOption && (
           <div className="flex items-center gap-2 mb-3 text-sm">
@@ -315,13 +315,13 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
           </div>
         )}
 
-        {/* Pool + deadline */}
-        <div className="flex justify-between text-xs text-muted-foreground mt-1 mb-3">
-          <span className="flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" />
-            Pool: ₦{(market.total_pool || 0).toLocaleString()} tNGN
+        {/* Pool + deadline — wraps on narrow phones so neither label gets cut off */}
+        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1 mb-3">
+          <span className="flex items-center gap-1 min-w-0">
+            <TrendingUp className="w-3 h-3 shrink-0" />
+            <span className="truncate">Pool: ₦{(market.total_pool || 0).toLocaleString()} tNGN</span>
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 shrink-0">
             <Clock className="w-3 h-3" />
             {isResolved || isLocked
               ? `Closed ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`
@@ -354,7 +354,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
         )}
       </CardContent>
 
-      <CardFooter className="pt-0 flex gap-2 relative z-10">
+      <CardFooter className="px-4 md:px-6 pb-4 md:pb-6 pt-0 flex gap-2 relative z-10">
         {/* Desktop place bet */}
         <div className="hidden md:flex gap-2 w-full">
           {isOpen && !isExpanded && (

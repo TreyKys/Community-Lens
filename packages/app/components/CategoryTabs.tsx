@@ -62,16 +62,19 @@ export function CategoryTabs() {
   };
 
   return (
-    <div className="relative">
+    // w-full + min-w-0 so the rail scrolls within its own container instead of
+    // pushing the page wider. Border lives on the wrapper so it spans full width
+    // even after the inner rail scrolls.
+    <div className="relative w-full min-w-0 border-b border-border/50">
       {showLeftFade && (
-        <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-background to-transparent pointer-events-none z-10" />
+        <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-background to-transparent pointer-events-none z-10" />
       )}
       {showRightFade && (
-        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background to-transparent pointer-events-none z-10" />
+        <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none z-10" />
       )}
       <div
         ref={railRef}
-        className="flex gap-1.5 overflow-x-auto -mx-4 px-4 md:-mx-0 md:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden border-b border-border/50"
+        className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {TABS.map(({ id, label, Icon }) => {
           const isActive = active === id;
@@ -81,7 +84,7 @@ export function CategoryTabs() {
               data-tab-id={id}
               onClick={() => setCategory(id)}
               className={cn(
-                'shrink-0 flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                'shrink-0 flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap',
                 isActive
                   ? 'border-foreground text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
