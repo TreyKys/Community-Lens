@@ -23,6 +23,9 @@ const nextConfig = {
       },
     ];
   },
+  experimental: {
+    outputFileTracingRoot: process.cwd(),
+  },
 };
 
 export default nextConfig;
