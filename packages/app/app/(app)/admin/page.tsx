@@ -1332,7 +1332,7 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-4 md:grid-cols-7">
+        <TabsList className="grid w-full grid-cols-4 md:grid-cols-8">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="ai">AI Markets</TabsTrigger>
@@ -1340,6 +1340,7 @@ export default function AdminPage() {
           <TabsTrigger value="override">Override</TabsTrigger>
           <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
           <TabsTrigger value="credits">Credits</TabsTrigger>
+          <TabsTrigger value="swarm">Swarm</TabsTrigger>
         </TabsList>
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
@@ -1349,6 +1350,13 @@ export default function AdminPage() {
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
         <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>
         <TabsContent value="credits" className="pt-4"><CreditsPanel /></TabsContent>
+        <TabsContent value="swarm" className="pt-4">
+          <div className="flex flex-col items-center justify-center p-12 text-center border rounded-lg bg-muted/20">
+             <h3 className="text-xl font-bold mb-2">Swarm Commander</h3>
+             <p className="text-muted-foreground mb-4">Autonomous bots and load testing suite.</p>
+             <Button onClick={() => window.location.href='/admin/swarm'}>Open Commander HUD</Button>
+          </div>
+        </TabsContent>
       </Tabs>
     </div>
   );
