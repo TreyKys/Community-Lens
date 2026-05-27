@@ -16,6 +16,8 @@ async function getAuthUser(request: Request) {
 }
 
 // GET /api/user/profile — full profile + stats
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const user = await getAuthUser(request);

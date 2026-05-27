@@ -14,6 +14,8 @@ const supabaseAdmin = createClient(
  * Shows what each API source returns for a market's fixture, side-by-side.
  * Useful for debugging when a match isn't resolving or resolving incorrectly.
  */
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

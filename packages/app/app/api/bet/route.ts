@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -33,129 +34,53 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Minimum stake is ₦100 (100 tNGN)' }, { status: 400 });
     }
 
-    // 1. Fetch user balance
-    const { data: userData, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('tngn_balance, bonus_balance')
-      .eq('id', user.id)
-      .single();
-
-    if (userError || !userData) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    // 2. Check if user has sufficient balance
-    // Use real balance first, then bonus balance
-    const totalAvailable = (userData.tngn_balance || 0) + (userData.bonus_balance || 0);
-    if (totalAvailable < stakeAmount) {
-      return NextResponse.json({ error: 'Insufficient balance' }, { status: 400 });
-    }
-
-    // 3. Fetch market and verify it's still open
-    const { data: market, error: marketError } = await supabaseAdmin
-      .from('markets')
-      .select('id, status, closes_at, options')
-      .eq('id', marketId)
-      .single();
-
-    if (marketError || !market) {
-      return NextResponse.json({ error: 'Market not found' }, { status: 404 });
-    }
-
-    if (market.status !== 'open') {
-      return NextResponse.json({ error: 'Market is not open for betting' }, { status: 400 });
-    }
-
-    if (new Date(market.closes_at) < new Date()) {
-      return NextResponse.json({ error: 'Market betting period has ended' }, { status: 400 });
-    }
-
-    // 4. Calculate rake
+    // Calculate rake
     const entryRakeAmount = stakeAmount * ENTRY_RAKE;
     const netStake = stakeAmount - entryRakeAmount;
 
-    // 5. Determine if this qualifies for the jackpot
-    // We check after the bet is placed — jackpot eligibility is tracked per slip
-    // For now we record it and the jackpot engine evaluates at market lock
+    // Determine if this qualifies for the jackpot
     const isJackpotEligible = stakeAmount >= 500;
 
-    // 6. Deduct from balance (use real balance first, then bonus)
-    let newRealBalance = userData.tngn_balance || 0;
-    let newBonusBalance = userData.bonus_balance || 0;
-
-    if (newRealBalance >= stakeAmount) {
-      newRealBalance -= stakeAmount;
-    } else {
-      // Spend real balance first, then bonus
-      const remainingAfterReal = stakeAmount - newRealBalance;
-      newRealBalance = 0;
-      newBonusBalance -= remainingAfterReal;
-    }
-
-    // 7. Write bet to database (this is the fast path — no blockchain)
-    const { data: bet, error: betError } = await supabaseAdmin
-      .from('user_bets')
-      .insert({
-        user_id: user.id,
-        market_id: marketId,
-        outcome_index: outcomeIndex,
-        stake_tngn: stakeAmount,
-        net_stake_tngn: netStake,
-        entry_rake_tngn: entryRakeAmount,
-        is_jackpot_eligible: isJackpotEligible,
-        placed_at: new Date().toISOString(),
-        status: 'active',
-      })
-      .select('id')
-      .single();
-
-    if (betError) {
-      console.error('Failed to write bet:', betError);
-      return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
-    }
-
-    // 8. Update user balance
-    const { error: balanceError } = await supabaseAdmin
-      .from('users')
-      .update({
-        tngn_balance: newRealBalance,
-        bonus_balance: Math.max(0, newBonusBalance),
-      })
-      .eq('id', user.id);
-
-    if (balanceError) {
-      console.error('Failed to update balance:', balanceError);
-      // Critical: bet was written but balance not deducted — log for manual review
-      await supabaseAdmin.from('error_log').insert({
-        type: 'balance_deduction_failed',
-        bet_id: bet.id,
-        user_id: user.id,
-        amount: stakeAmount,
-        created_at: new Date().toISOString(),
-      });
-      return NextResponse.json({ error: 'Balance update failed' }, { status: 500 });
-    }
-
-    // 9. Record the rake in the treasury log
-    await supabaseAdmin.from('treasury_log').insert({
-      type: 'entry_rake',
-      amount_tngn: entryRakeAmount,
-      bet_id: bet.id,
-      user_id: user.id,
-      market_id: marketId,
-      created_at: new Date().toISOString(),
+    // Use the RPC function for atomic bet placement
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('place_bet', {
+      p_user_id: user.id,
+      p_market_id: marketId,
+      p_outcome_index: outcomeIndex,
+      p_stake_amount: stakeAmount,
+      p_entry_rake: entryRakeAmount,
+      p_is_jackpot_eligible: isJackpotEligible
     });
 
-    console.log(`Bet placed: user=${user.id}, market=${marketId}, stake=${stakeAmount}, netStake=${netStake}, rake=${entryRakeAmount}`);
+    if (rpcError) {
+      console.error('Failed to write bet via RPC:', rpcError);
+
+      // Map RPC errors to user-friendly messages
+      let errorMessage = 'Failed to place bet';
+      if (rpcError.message.includes('Insufficient balance')) {
+        errorMessage = 'Insufficient balance';
+      } else if (rpcError.message.includes('Market not found')) {
+        errorMessage = 'Market not found';
+      } else if (rpcError.message.includes('Market is not open')) {
+        errorMessage = 'Market is not open for betting';
+      } else if (rpcError.message.includes('Market betting period has ended')) {
+        errorMessage = 'Market betting period has ended';
+      } else if (rpcError.message.includes('User not found')) {
+        errorMessage = 'User not found';
+      }
+
+      return NextResponse.json({ error: errorMessage }, { status: 400 });
+    }
+
+    console.log(`Bet placed via RPC: user=${user.id}, market=${marketId}, stake=${stakeAmount}, netStake=${netStake}, rake=${entryRakeAmount}`);
 
     return NextResponse.json({
       success: true,
-      betId: bet.id,
+      betId: rpcData.bet_id,
       stakeAmount,
       netStake,
       entryRake: entryRakeAmount,
       isJackpotEligible,
-      newBalance: newRealBalance,
+      newBalance: rpcData.new_tngn_balance,
     }, { status: 200 });
 
   } catch (error: any) {

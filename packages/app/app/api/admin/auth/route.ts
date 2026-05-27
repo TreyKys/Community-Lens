@@ -37,6 +37,8 @@ export async function POST(request: Request) {
  * GET /api/admin/auth — returns 200 if the caller currently holds a valid
  * admin cookie. Used by the admin shell on mount to skip the password prompt.
  */
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ ok: false }, { status: 401 });

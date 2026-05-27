@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 
 // Proxies RPC requests to Pimlico to bypass geo-blocking or inject API keys safely

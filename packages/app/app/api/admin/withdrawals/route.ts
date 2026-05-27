@@ -8,6 +8,8 @@ const supabaseAdmin = createClient(
 );
 
 // GET: List all withdrawals pending admin approval
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     if (!isAdminRequest(request)) {

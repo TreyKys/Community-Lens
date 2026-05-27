@@ -21,6 +21,8 @@ function supabaseAdmin() {
  * Returns each user's wallet + bonus balance + lifetime credits issued (sum of
  * positive treasury_log entries tagged manual_credit / first_bet_insurance / deposit_bet_credit).
  */
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
