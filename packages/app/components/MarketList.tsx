@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Market {
@@ -26,6 +26,8 @@ interface Market {
   parent_market_id: number | null;
   on_chain_market_id: number | null;
   merkle_root: string | null;
+  description: string | null;
+  resolved_at: string | null;
 }
 
 interface MarketCardProps {
@@ -234,6 +236,7 @@ function BettingInterface({
 function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: MarketCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showDescription, setShowDescription] = useState(false);
 
   const closesAt = new Date(market.closes_at);
   const isOpen = market.status === 'open' && closesAt > new Date();
@@ -276,16 +279,34 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
     <Card className="hover:shadow-lg transition-all bg-card relative overflow-hidden group border-muted">
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-      <CardHeader className="pb-2 relative z-10">
+      <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
         <div className="flex justify-between items-start gap-3">
           <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug">
             {displayQuestion}
           </CardTitle>
           <div className="shrink-0">{statusBadge()}</div>
         </div>
+        {market.description && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => setShowDescription(s => !s)}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground/80 hover:text-foreground transition-colors"
+            >
+              <Info className="w-3 h-3" />
+              <span className="underline-offset-2 hover:underline">About this market</span>
+              <ChevronDown className={cn('w-3 h-3 transition-transform', showDescription && 'rotate-180')} />
+            </button>
+            {showDescription && (
+              <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed bg-muted/30 border border-border/40 rounded-md px-2.5 py-2 animate-in fade-in slide-in-from-top-1">
+                {market.description}
+              </p>
+            )}
+          </div>
+        )}
       </CardHeader>
 
-      <CardContent className="relative z-10">
+      <CardContent className="px-4 md:px-6 pb-4 md:pb-6 relative z-10">
         {/* Resolved outcome */}
         {isResolved && resolvedOption && (
           <div className="flex items-center gap-2 mb-3 text-sm">
@@ -294,13 +315,13 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
           </div>
         )}
 
-        {/* Pool + deadline */}
-        <div className="flex justify-between text-xs text-muted-foreground mt-1 mb-3">
-          <span className="flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" />
-            Pool: ₦{(market.total_pool || 0).toLocaleString()} tNGN
+        {/* Pool + deadline — wraps on narrow phones so neither label gets cut off */}
+        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1 mb-3">
+          <span className="flex items-center gap-1 min-w-0">
+            <TrendingUp className="w-3 h-3 shrink-0" />
+            <span className="truncate">Pool: ₦{(market.total_pool || 0).toLocaleString()} tNGN</span>
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 shrink-0">
             <Clock className="w-3 h-3" />
             {isResolved || isLocked
               ? `Closed ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`
@@ -333,7 +354,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
         )}
       </CardContent>
 
-      <CardFooter className="pt-0 flex gap-2 relative z-10">
+      <CardFooter className="px-4 md:px-6 pb-4 md:pb-6 pt-0 flex gap-2 relative z-10">
         {/* Desktop place bet */}
         <div className="hidden md:flex gap-2 w-full">
           {isOpen && !isExpanded && (
@@ -496,10 +517,14 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   const fetchMarkets = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Hide voided markets, and resolved markets older than 26 hours.
+      // Data stays in DB (audit trail intact) — this is purely a display filter.
+      const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at')
         .not('status', 'eq', 'voided')
+        .or(`status.neq.resolved,resolved_at.gte.${cutoff}`)
         .order('closes_at', { ascending: true });
 
       if (filterExactMarketId !== undefined) {

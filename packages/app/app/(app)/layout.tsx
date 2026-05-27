@@ -13,7 +13,7 @@ export default function AppLayout({
           <Sidebar />
         </Suspense>
       </div>
-      <div className="flex-1 bg-background pb-20 md:pb-0">
+      <div className="flex-1 min-w-0 bg-background pb-20 md:pb-0">
         {children}
       </div>
     </div>

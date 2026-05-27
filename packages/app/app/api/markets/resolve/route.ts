@@ -152,6 +152,7 @@ export async function POST(request: Request) {
       status: 'resolved',
       resolved_outcome: winningOutcomeIndex,
       total_pool: totalPool,
+      resolved_at: new Date().toISOString(),
     }).eq('id', marketId);
 
     console.log(`Market ${marketId} resolved. Winners: ${winningBets.length}. Pool: ${totalPool}. Rake: ${resolutionRakeAmount}.`);
