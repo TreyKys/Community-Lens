@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+
   const supabaseAdmin = getSupabaseAdmin();
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
