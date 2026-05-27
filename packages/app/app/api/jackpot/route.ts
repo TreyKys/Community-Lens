@@ -7,6 +7,8 @@ const supabaseAdmin = createClient(
 );
 
 // GET /api/jackpot — returns current jackpot pool size + carryover info
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     // The jackpot pool = sum of entry rakes from qualifying slips this week

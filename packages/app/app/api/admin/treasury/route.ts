@@ -21,6 +21,8 @@ const supabaseAdmin = createClient(
  * what our books say should be there. Drift between the two = something to
  * reconcile (failed payout, refund, fee anomaly).
  */
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

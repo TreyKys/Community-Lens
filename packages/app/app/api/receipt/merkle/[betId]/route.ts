@@ -39,6 +39,8 @@ function buildMerkleProof(leaves: string[], targetIndex: number): string[] {
   return proof;
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: Request,
   { params }: { params: { betId: string } }
