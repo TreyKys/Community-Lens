@@ -78,16 +78,24 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
 
       if (isBypassEnabled && normalizedEmail.includes('@odds.ng')) {
         if (otp.trim() === '123456') {
-          const { error } = await supabase.auth.signInWithPassword({
-            email: normalizedEmail,
-            password: 'OddsNgBotSquad2026!',
+          const bypassRes = await fetch('/api/auth/bot-bypass', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: normalizedEmail }),
           });
 
-          if (error) throw error;
+          if (!bypassRes.ok) {
+            const errData = await bypassRes.json();
+            throw new Error(errData.error || 'Bot bypass failed');
+          }
+
+          const { action_link } = await bypassRes.json();
+          if (!action_link) throw new Error('No action link returned');
 
           setIsOpen(false);
           resetForm();
-          window.location.href = '/dashboard';
+          // Navigate to the magic link to log in and create the session automatically
+          window.location.href = action_link;
           return;
         } else {
           throw new Error('Invalid bypass OTP. Use 123456 for bot accounts.');

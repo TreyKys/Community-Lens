@@ -11,14 +11,22 @@ export default function BotTestPage() {
     setLoading(true);
     setError('');
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: 'bot1@odds.ng',
-        password: 'OddsNgBotSquad2026!',
+      const email = 'bot1@odds.ng';
+      const bypassRes = await fetch('/api/auth/bot-bypass', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
       });
-      if (error) throw error;
 
-      // If successful, redirect to dashboard
-      window.location.href = '/dashboard';
+      if (!bypassRes.ok) {
+        const errData = await bypassRes.json();
+        throw new Error(errData.error || 'Bot bypass failed');
+      }
+
+      const { action_link } = await bypassRes.json();
+      if (!action_link) throw new Error('No action link returned');
+
+      window.location.href = action_link;
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {
