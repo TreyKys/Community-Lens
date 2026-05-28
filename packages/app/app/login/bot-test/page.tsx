@@ -28,8 +28,8 @@ export default function BotTestPage() {
       if (!token_hash) throw new Error('No token hash returned');
 
       // Verify the extracted token_hash client-side so Supabase SDK handles session cookies naturally
+      // Note: when verifying a token_hash, Supabase requires ONLY token_hash and type.
       const { error: verifyError } = await supabase.auth.verifyOtp({
-        email,
         token_hash: token_hash,
         type: 'magiclink',
       });
