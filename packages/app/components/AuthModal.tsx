@@ -26,7 +26,10 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
 
       const normalizedEmail = email.trim().toLowerCase();
 
-      if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
+      const isBypassEnabled = String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true';
+      console.log(`[Bot Auth Debug] Bypass Enabled: ${isBypassEnabled}, Env Value: ${process.env.NEXT_PUBLIC_BYPASS_OTP}`);
+
+      if (isBypassEnabled && normalizedEmail.includes('@odds.ng')) {
         // Bypass Supabase OTP entirely. Faking the UI transition so the user can enter the hardcoded 123456 OTP.
         setStep('verify');
         toast({
@@ -71,8 +74,9 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
+      const isBypassEnabled = String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true';
 
-      if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
+      if (isBypassEnabled && normalizedEmail.includes('@odds.ng')) {
         if (otp.trim() === '123456') {
           const { error } = await supabase.auth.signInWithPassword({
             email: normalizedEmail,
