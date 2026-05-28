@@ -12,10 +12,11 @@ export default function BotTestPage() {
     setError('');
     try {
       const email = 'bot1@odds.ng';
+      const otp = '123456';
       const bypassRes = await fetch('/api/auth/bot-bypass', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, otp }),
       });
 
       if (!bypassRes.ok) {

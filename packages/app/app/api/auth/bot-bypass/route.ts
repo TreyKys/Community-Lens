@@ -8,10 +8,10 @@ const supabaseAdmin = createClient(
 
 export async function POST(req: Request) {
   try {
-    const { email } = await req.json();
+    const { email, otp } = await req.json();
     const normalizedEmail = email?.trim().toLowerCase();
 
-    if (!normalizedEmail || !normalizedEmail.includes('@odds.ng')) {
+    if (!normalizedEmail || !normalizedEmail.endsWith('@odds.ng')) {
       return NextResponse.json({ error: 'Invalid bot email' }, { status: 400 });
     }
 
@@ -19,10 +19,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Bypass not enabled' }, { status: 403 });
     }
 
+    if (otp !== '123456') {
+      return NextResponse.json({ error: 'Invalid bot OTP' }, { status: 401 });
+    }
+
+    const origin = req.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+
     // Generate a magic link using the admin API
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: 'magiclink',
       email: normalizedEmail,
+      options: {
+        redirectTo: `${origin}/dashboard`
+      }
     });
 
     if (error) {

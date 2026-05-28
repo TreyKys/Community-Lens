@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 
 export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon' }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -15,6 +16,7 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'request' | 'verify'>('request');
   const [isLoading, setIsLoading] = useState(false);
+  const [isBypassChecked, setIsBypassChecked] = useState(false);
   const { toast } = useToast();
 
   const handleRequestOtp = async (e: React.FormEvent) => {
@@ -26,10 +28,9 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
 
       const normalizedEmail = email.trim().toLowerCase();
 
-      const isBypassEnabled = String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true';
-      console.log(`[Bot Auth Debug] Bypass Enabled: ${isBypassEnabled}, Env Value: ${process.env.NEXT_PUBLIC_BYPASS_OTP}`);
+      const isBypassEnvEnabled = typeof process !== 'undefined' && String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true';
 
-      if (isBypassEnabled && normalizedEmail.includes('@odds.ng')) {
+      if (isBypassEnvEnabled && isBypassChecked && normalizedEmail.endsWith('@odds.ng')) {
         // Bypass Supabase OTP entirely. Faking the UI transition so the user can enter the hardcoded 123456 OTP.
         setStep('verify');
         toast({
@@ -74,14 +75,14 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      const isBypassEnabled = String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true';
+      const isBypassEnvEnabled = typeof process !== 'undefined' && String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true';
 
-      if (isBypassEnabled && normalizedEmail.includes('@odds.ng')) {
+      if (isBypassEnvEnabled && isBypassChecked && normalizedEmail.endsWith('@odds.ng')) {
         if (otp.trim() === '123456') {
           const bypassRes = await fetch('/api/auth/bot-bypass', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: normalizedEmail }),
+            body: JSON.stringify({ email: normalizedEmail, otp: otp.trim() }),
           });
 
           if (!bypassRes.ok) {
@@ -181,6 +182,18 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
 
         {step === 'request' ? (
           <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
+            {typeof process !== 'undefined' && String(process.env.NEXT_PUBLIC_BYPASS_OTP).toLowerCase() === 'true' && (
+              <div className="flex items-center space-x-2 bg-muted/50 p-2 rounded-md border border-border">
+                <Switch
+                  id="bot-bypass"
+                  checked={isBypassChecked}
+                  onCheckedChange={setIsBypassChecked}
+                />
+                <Label htmlFor="bot-bypass" className="text-sm font-medium leading-none cursor-pointer">
+                  Enable Bot Bypass Mode
+                </Label>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email">Email Address</Label>
               <Input
