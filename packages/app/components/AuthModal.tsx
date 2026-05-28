@@ -90,13 +90,21 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
             throw new Error(errData.error || 'Bot bypass failed');
           }
 
-          const { action_link } = await bypassRes.json();
-          if (!action_link) throw new Error('No action link returned');
+          const { token_hash } = await bypassRes.json();
+          if (!token_hash) throw new Error('No token hash returned');
+
+          // Verify the extracted token_hash client-side so Supabase SDK handles session cookies naturally
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            email: normalizedEmail,
+            token_hash: token_hash,
+            type: 'magiclink',
+          });
+
+          if (verifyError) throw verifyError;
 
           setIsOpen(false);
           resetForm();
-          // Navigate to the magic link to log in and create the session automatically
-          window.location.href = action_link;
+          window.location.href = '/dashboard';
           return;
         } else {
           throw new Error('Invalid bypass OTP. Use 123456 for bot accounts.');

@@ -24,10 +24,19 @@ export default function BotTestPage() {
         throw new Error(errData.error || 'Bot bypass failed');
       }
 
-      const { action_link } = await bypassRes.json();
-      if (!action_link) throw new Error('No action link returned');
+      const { token_hash } = await bypassRes.json();
+      if (!token_hash) throw new Error('No token hash returned');
 
-      window.location.href = action_link;
+      // Verify the extracted token_hash client-side so Supabase SDK handles session cookies naturally
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email,
+        token_hash: token_hash,
+        type: 'magiclink',
+      });
+
+      if (verifyError) throw verifyError;
+
+      window.location.href = '/dashboard';
     } catch (err: any) {
       setError(err.message || 'Login failed');
     } finally {

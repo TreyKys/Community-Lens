@@ -38,7 +38,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ action_link: data.properties.action_link });
+    // Extract the token_hash from the generated action link to verify it client-side
+    // The action_link format is typically: https://[project-ref].supabase.co/auth/v1/verify?token=[token_hash]&type=magiclink&redirect_to=...
+    const url = new URL(data.properties.action_link);
+    const token = url.searchParams.get('token');
+
+    if (!token) {
+      return NextResponse.json({ error: 'Failed to extract token from magic link' }, { status: 500 });
+    }
+
+    return NextResponse.json({ token_hash: token });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
