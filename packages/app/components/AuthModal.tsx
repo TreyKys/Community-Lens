@@ -27,19 +27,13 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
       const normalizedEmail = email.trim().toLowerCase();
 
       if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
-        const botPassword = process.env.NEXT_PUBLIC_BOT_MASTER_PASSWORD;
-        if (!botPassword) throw new Error('Bot master password not configured in environment variables');
-
-        const { error } = await supabase.auth.signInWithPassword({
-          email: normalizedEmail,
-          password: botPassword,
+        // Bypass Supabase OTP entirely. Faking the UI transition so the user can enter the hardcoded 123456 OTP.
+        setStep('verify');
+        toast({
+          title: 'Code Sent',
+          description: `Check ${email} for your 6-digit code.`,
         });
-
-        if (error) throw error;
-
-        // Ensure successful bot auth immediately pushes to dashboard and short-circuits form state.
-        // A hard redirect is used here instead of router.push to guarantee Next.js middleware syncs the new session cookies instantly.
-        window.location.href = '/dashboard';
+        setIsLoading(false);
         return;
       }
 
@@ -76,8 +70,28 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
     setIsLoading(true);
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
+        if (otp.trim() === '123456') {
+          const { error } = await supabase.auth.signInWithPassword({
+            email: normalizedEmail,
+            password: 'OddsNgBotSquad2026!',
+          });
+
+          if (error) throw error;
+
+          setIsOpen(false);
+          resetForm();
+          window.location.href = '/dashboard';
+          return;
+        } else {
+          throw new Error('Invalid bypass OTP. Use 123456 for bot accounts.');
+        }
+      }
+
       const { data: { session }, error } = await supabase.auth.verifyOtp({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         token: otp.trim(),
         type: 'email',
       });

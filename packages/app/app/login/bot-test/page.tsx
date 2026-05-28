@@ -11,12 +11,9 @@ export default function BotTestPage() {
     setLoading(true);
     setError('');
     try {
-      const botPassword = process.env.NEXT_PUBLIC_BOT_MASTER_PASSWORD;
-      if (!botPassword) throw new Error('Bot master password not configured in environment variables');
-
       const { data, error } = await supabase.auth.signInWithPassword({
         email: 'bot1@odds.ng',
-        password: botPassword,
+        password: 'OddsNgBotSquad2026!',
       });
       if (error) throw error;
 
