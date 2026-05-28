@@ -1,11 +1,9 @@
 'use client';
 
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 export default function BotTestPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -13,27 +11,14 @@ export default function BotTestPage() {
     setLoading(true);
     setError('');
     try {
-      const email = 'bot1@odds.ng';
+      const botPassword = process.env.NEXT_PUBLIC_BOT_MASTER_PASSWORD;
+      if (!botPassword) throw new Error('Bot master password not configured in environment variables');
 
-      const bypassRes = await fetch('/api/auth/bot-bypass', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: 'bot1@odds.ng',
+        password: botPassword,
       });
-
-      if (!bypassRes.ok) {
-        const errData = await bypassRes.json();
-        throw new Error(errData.error || 'Bot bypass failed');
-      }
-
-      const { session } = await bypassRes.json();
-
-      if (!session) {
-         throw new Error('No session returned from bypass endpoint');
-      }
-
-      const { error: setSessionError } = await supabase.auth.setSession(session);
-      if (setSessionError) throw setSessionError;
+      if (error) throw error;
 
       // If successful, redirect to dashboard
       window.location.href = '/dashboard';

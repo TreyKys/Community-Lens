@@ -27,30 +27,20 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
       const normalizedEmail = email.trim().toLowerCase();
 
       if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
-        // Authenticate the bot server-side to avoid exposing the password
-        const bypassRes = await fetch('/api/auth/bot-bypass', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: normalizedEmail }),
+        const botPassword = process.env.NEXT_PUBLIC_BOT_MASTER_PASSWORD;
+        if (!botPassword) throw new Error('Bot master password not configured in environment variables');
+
+        const { error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: botPassword,
         });
 
-        if (!bypassRes.ok) {
-          const errData = await bypassRes.json();
-          throw new Error(errData.error || 'Bot bypass failed');
-        }
+        if (error) throw error;
 
-        const { session } = await bypassRes.json();
-
-        if (session) {
-          // Set the session client-side so middleware and app recognizes it
-          const { error: setSessionError } = await supabase.auth.setSession(session);
-
-          if (setSessionError) throw setSessionError;
-
-          // Ensure successful bot auth immediately pushes to dashboard and short-circuits form state
-          window.location.href = '/dashboard';
-          return;
-        }
+        // Ensure successful bot auth immediately pushes to dashboard and short-circuits form state.
+        // A hard redirect is used here instead of router.push to guarantee Next.js middleware syncs the new session cookies instantly.
+        window.location.href = '/dashboard';
+        return;
       }
 
       // signInWithOtp with shouldCreateUser:true sends a 6-digit code
