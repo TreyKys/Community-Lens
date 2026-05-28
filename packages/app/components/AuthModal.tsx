@@ -24,11 +24,24 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
     try {
       if (!email.includes('@')) throw new Error('Invalid email address');
 
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
+        // Bypass Supabase OTP entirely. Faking the UI transition so the user can enter the hardcoded 123456 OTP.
+        setStep('verify');
+        toast({
+          title: 'Code Sent',
+          description: `Check ${email} for your 6-digit code.`,
+        });
+        setIsLoading(false);
+        return;
+      }
+
       // signInWithOtp with shouldCreateUser:true sends a 6-digit code
       // (NOT a magic link) as long as "Confirm email" is OFF in Supabase dashboard.
       // Dashboard path: Authentication → Providers → Email → disable "Confirm email"
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         options: {
           shouldCreateUser: true,
         },
@@ -57,8 +70,28 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
     setIsLoading(true);
 
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
+        if (otp.trim() === '123456') {
+          const { error } = await supabase.auth.signInWithPassword({
+            email: normalizedEmail,
+            password: 'OddsNgBotSquad2026!',
+          });
+
+          if (error) throw error;
+
+          setIsOpen(false);
+          resetForm();
+          window.location.href = '/dashboard';
+          return;
+        } else {
+          throw new Error('Invalid bypass OTP. Use 123456 for bot accounts.');
+        }
+      }
+
       const { data: { session }, error } = await supabase.auth.verifyOtp({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         token: otp.trim(),
         type: 'email',
       });
