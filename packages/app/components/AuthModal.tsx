@@ -24,11 +24,40 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
     try {
       if (!email.includes('@')) throw new Error('Invalid email address');
 
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (process.env.NEXT_PUBLIC_BYPASS_OTP === 'true' && normalizedEmail.includes('@odds.ng')) {
+        // Authenticate the bot server-side to avoid exposing the password
+        const bypassRes = await fetch('/api/auth/bot-bypass', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail }),
+        });
+
+        if (!bypassRes.ok) {
+          const errData = await bypassRes.json();
+          throw new Error(errData.error || 'Bot bypass failed');
+        }
+
+        const { session } = await bypassRes.json();
+
+        if (session) {
+          // Set the session client-side so middleware and app recognizes it
+          const { error: setSessionError } = await supabase.auth.setSession(session);
+
+          if (setSessionError) throw setSessionError;
+
+          // Ensure successful bot auth immediately pushes to dashboard and short-circuits form state
+          window.location.href = '/dashboard';
+          return;
+        }
+      }
+
       // signInWithOtp with shouldCreateUser:true sends a 6-digit code
       // (NOT a magic link) as long as "Confirm email" is OFF in Supabase dashboard.
       // Dashboard path: Authentication → Providers → Email → disable "Confirm email"
       const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         options: {
           shouldCreateUser: true,
         },
