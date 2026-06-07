@@ -123,20 +123,19 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
       }
 
       // Try sign in first; if user doesn't exist, create account
-      let signInResult = await supabase.auth.signInWithPassword({
+      const signInResult = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
       });
 
-      if (signInResult.error?.status === 400) {
-        // User doesn't exist; try sign up
-        signInResult = await supabase.auth.signUp({
+      if (signInResult.error) {
+        // Sign-in failed (invalid creds OR user doesn't exist) — try sign-up
+        const signUpResult = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
         });
+        if (signUpResult.error) throw signUpResult.error;
       }
-
-      if (signInResult.error) throw signInResult.error;
 
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
