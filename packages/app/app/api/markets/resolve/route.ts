@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(
 // VIP referrers earn a slice of this rake from their referred users' bets
 // only — see splitResolutionRakeForVipReferrers below.
 const POOL_RAKE_PCT = 0.10;
-const FIRST_BET_INSURANCE_CAP = 2000;
+const BET_INSURANCE_CAP = 2000;
 
 // Random Bet Insurance — formerly "First Bet Insurance".
 //
@@ -68,7 +68,7 @@ async function applyFirstBetInsurance(userId: string, bet: any, marketId: number
 
   if (!trigger) return;
 
-  const refundAmount = Math.min(bet.stake_tngn, FIRST_BET_INSURANCE_CAP);
+  const refundAmount = Math.min(bet.stake_tngn, BET_INSURANCE_CAP);
 
   const { data: user } = await supabaseAdmin.from('users').select('bonus_balance').eq('id', userId).single();
   await supabaseAdmin.from('users').update({

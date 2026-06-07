@@ -65,9 +65,12 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
     setMode(newMode);
   };
 
-  const totalPoolStr = totalPool > 1000
-    ? `₦${(totalPool / 1000).toFixed(1)}k`
-    : `₦${totalPool.toLocaleString()}`;
+  // Apply the standard 10% pool rake before showing any user-facing total.
+  // Single source of truth is lib/displayPool.ts — never render the raw pool.
+  const displayedPool = Math.round(totalPool * 0.9);
+  const totalPoolStr = displayedPool > 1000
+    ? `₦${(displayedPool / 1000).toFixed(1)}k`
+    : `₦${displayedPool.toLocaleString()}`;
 
   return (
     <Card className="w-full bg-card/50 backdrop-blur-sm border-muted overflow-hidden">
@@ -108,8 +111,11 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
 
       <CardContent className="p-0 sm:p-6 sm:pt-0">
         {isLoading ? (
-          <div className="h-[220px] flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          <div className="h-[220px] flex flex-col items-center justify-center gap-2 px-4">
+            <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
+            <div className="h-1 w-32 rounded-full bg-muted/40 overflow-hidden">
+              <div className="h-full w-full progress-stripe" />
+            </div>
           </div>
         ) : mode === 'distribution' ? (
           <>

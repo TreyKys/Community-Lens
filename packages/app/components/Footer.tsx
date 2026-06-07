@@ -1,10 +1,18 @@
 'use client';
 
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import Link from 'next/link';
 
 export function Footer() {
   return (
-    <footer className="w-full py-6 mt-12 border-t flex flex-col items-center gap-4 text-sm text-muted-foreground pb-24 md:pb-6">
+    <footer className="w-full py-6 mt-12 border-t border-emerald-500/10 flex flex-col items-center gap-3 text-sm text-muted-foreground pb-24 md:pb-6">
+      <div className="flex items-center gap-4 text-xs">
+        <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+        <span className="text-muted-foreground/40">·</span>
+        <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+        <span className="text-muted-foreground/40">·</span>
+        <a href="mailto:hello@opinions.ng" className="hover:text-foreground transition-colors">Contact</a>
+      </div>
       <p>© {new Date().getFullYear()} Opinions.ng. All rights reserved.</p>
 
       {/* Hidden RainbowKit integration for crypto-natives */}

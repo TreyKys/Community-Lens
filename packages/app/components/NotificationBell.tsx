@@ -58,7 +58,7 @@ export function NotificationBell() {
           // Show toast for new notification
           toast({
             title: newNotif.type === 'bet_won' ? '🎉 You won!' :
-                   newNotif.type === 'first_bet_refund' ? '🛡 First Bet Protected' :
+                   (newNotif.type === 'bet_insurance_refund' || newNotif.type === 'first_bet_refund') ? '🛡 Bet Insurance Applied' :
                    'Notification',
             description: newNotif.message,
           });
@@ -157,7 +157,7 @@ export function NotificationBell() {
                     <div className="flex items-start gap-2">
                       <span className="text-base leading-none mt-0.5">
                         {n.type === 'bet_won' ? '🎉' :
-                         n.type === 'first_bet_refund' ? '🛡' :
+                         (n.type === 'bet_insurance_refund' || n.type === 'first_bet_refund') ? '🛡' :
                          n.type === 'deposit' ? '💰' :
                          n.type === 'withdrawal' ? '💸' :
                          n.type === 'weekly_rebate' ? '💎' : '🔔'}

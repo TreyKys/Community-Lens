@@ -677,23 +677,15 @@ function WithdrawalPanel() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
+                      {/* Paystack scrapped per board decision — Squad is the only active payout rail. */}
                       <Button
                         size="sm"
                         className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-                        onClick={() => approveVia(w.id, 'paystack')}
-                        disabled={isBusy || !canPaystack}
-                        title={!canPaystack ? 'Insufficient Paystack balance' : 'Pay out via Paystack'}
-                      >
-                        {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Pay via Paystack'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="h-8 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50"
                         onClick={() => approveVia(w.id, 'squad')}
                         disabled={isBusy || !canSquad}
                         title={!canSquad ? 'Insufficient Squad balance' : 'Pay out via Squad'}
                       >
-                        {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Pay via Squad'}
+                        {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Approve & Pay'}
                       </Button>
                       <Button
                         size="sm"
@@ -1324,6 +1316,159 @@ function AIMarketGenerator() {
   );
 }
 
+// ── VIP Account Manager ──────────────────────────────────────────────────
+function VIPPanel() {
+  const { toast } = useToast();
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [rakeSharePct, setRakeSharePct] = useState('20');
+  const [preloadBonus, setPreloadBonus] = useState('5000');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recentVips, setRecentVips] = useState<any[]>([]);
+  const [isLoadingVips, setIsLoadingVips] = useState(true);
+
+  const loadVips = useCallback(async () => {
+    setIsLoadingVips(true);
+    const { data } = await supabase
+      .from('users')
+      .select(`
+        id, email, created_at, is_vip, bonus_balance, points,
+        referral_codes!referral_codes_owner_user_id_fkey (code, is_vip_code, rake_share_pct, uses_count, is_active)
+      `)
+      .eq('is_vip', true)
+      .order('created_at', { ascending: false })
+      .limit(30);
+    setRecentVips(data || []);
+    setIsLoadingVips(false);
+  }, []);
+
+  useEffect(() => { loadVips(); }, [loadVips]);
+
+  const handleCreate = async () => {
+    if (!email || !code) {
+      toast({ title: 'Email and code required', variant: 'destructive' });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/vip/create', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({
+          email: email.trim(),
+          code: code.trim().toUpperCase(),
+          rakeSharePct: Number(rakeSharePct) || 0,
+          preloadBonus: Number(preloadBonus) || 0,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      toast({ title: `VIP created: ${json.code}`, description: `${rakeSharePct}% rake share, ₦${Number(preloadBonus).toLocaleString()} preloaded.` });
+      setEmail(''); setCode(''); setRakeSharePct('20'); setPreloadBonus('5000');
+      loadVips();
+    } catch (e: any) {
+      toast({ title: 'VIP creation failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="w-4 h-4 text-amber-400" /> Promote to VIP
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">User Email</Label>
+              <Input
+                type="email"
+                placeholder="trader@example.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Custom Referral Code</Label>
+              <Input
+                type="text"
+                placeholder="e.g. AJALA25"
+                value={code}
+                onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                maxLength={20}
+                className="font-mono tracking-wider"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Rake Share % (0–50)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={50}
+                value={rakeSharePct}
+                onChange={e => setRakeSharePct(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground">% of resolution rake from THIS VIP's referred users only.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Preload Bonus (tNGN)</Label>
+              <Input
+                type="number"
+                min={0}
+                value={preloadBonus}
+                onChange={e => setPreloadBonus(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground">Credited to bonus_balance (non-withdrawable).</p>
+            </div>
+          </div>
+          <Button
+            onClick={handleCreate}
+            disabled={isSubmitting || !email || !code}
+            className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold"
+          >
+            {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Creating VIP…</> : 'Promote & Issue Code'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Active VIPs</h3>
+        {isLoadingVips ? (
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => <div key={i} className="h-16 rounded-xl shimmer" />)}
+          </div>
+        ) : recentVips.length === 0 ? (
+          <p className="text-sm text-muted-foreground p-4 border border-dashed rounded-xl text-center">No VIP accounts yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {recentVips.map((v: any) => {
+              const vipCode = (v.referral_codes || []).find((c: any) => c.is_vip_code);
+              return (
+                <div key={v.id} className="flex items-center justify-between p-3 bg-card/60 border border-amber-500/15 rounded-xl">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{v.email || v.id.slice(0, 8)}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {vipCode ? <>Code <span className="font-mono text-amber-300">{vipCode.code}</span> · {vipCode.uses_count} uses · {vipCode.rake_share_pct}% share</> : 'No VIP code'}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0 ml-3">
+                    <p className="text-xs text-muted-foreground">Bonus</p>
+                    <p className="text-sm font-bold tabular-nums">₦{Number(v.bonus_balance || 0).toLocaleString()}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Admin Page ───────────────────────────────────────────────────────
 export default function AdminPage() {
   const [session, setSession] = useState<any>(null);
@@ -1400,9 +1545,10 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-4 md:grid-cols-7">
+        <TabsList className="grid w-full grid-cols-4 md:grid-cols-8">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="vip">VIP</TabsTrigger>
           <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
           <TabsTrigger value="override">Override</TabsTrigger>
@@ -1412,6 +1558,7 @@ export default function AdminPage() {
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
         <TabsContent value="users" className="pt-4"><UsersPanel /></TabsContent>
+        <TabsContent value="vip" className="pt-4"><VIPPanel /></TabsContent>
         <TabsContent value="ai" className="pt-4"><AIMarketGenerator /></TabsContent>
         <TabsContent value="create" className="pt-4"><CreateMarketPanel /></TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
