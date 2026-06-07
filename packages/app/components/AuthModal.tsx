@@ -16,13 +16,15 @@ interface AuthModalProps {
   trigger?: ReactNode;
 }
 
-type AuthMethod = 'otp' | 'password';
+type AuthMethod = 'otp' | 'password' | 'phone';
 
 export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
+  const [phone, setPhone] = useState('');
+  const [pinId, setPinId] = useState('');
   const [authMethod, setAuthMethod] = useState<AuthMethod>('otp');
   const [step, setStep] = useState<'request' | 'verify'>('request');
   const [isLoading, setIsLoading] = useState(false);
@@ -156,6 +158,84 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
     }
   };
 
+  const handleRequestPhoneOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptedTerms) {
+      toast({
+        title: 'Accept the terms',
+        description: 'You need to agree to our Terms & Privacy Policy to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      const trimmedRef = referralCode.trim().toUpperCase();
+      if (trimmedRef) {
+        try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
+      }
+
+      const res = await fetch('/api/auth/phone/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not send code');
+
+      setPinId(body.pinId);
+      setStep('verify');
+      toast({ title: 'Code Sent', description: `Check ${body.phone} for your 6-digit code.` });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to send code.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/phone/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, pinId, pin: otp }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Invalid or expired code.');
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: body.access_token,
+        refresh_token: body.refresh_token,
+      });
+      if (sessionError) throw sessionError;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await applyPostAuthHooks(session.access_token);
+      }
+
+      toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
+      setIsOpen(false);
+      window.location.href = '/markets';
+    } catch (error: any) {
+      toast({
+        title: 'Verification failed',
+        description: error.message || 'Invalid or expired code.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -192,6 +272,8 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
     setOtp('');
     setPassword('');
     setEmail('');
+    setPhone('');
+    setPinId('');
     setIsLoading(false);
   };
 
@@ -220,14 +302,20 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
           <DialogTitle>
-            {step === 'request' ? 'Welcome to Opinions.ng' : authMethod === 'otp' ? 'Enter Your Code' : 'Set Your Password'}
+            {step === 'request'
+              ? 'Welcome to Opinions.ng'
+              : authMethod === 'password'
+                ? 'Set Your Password'
+                : 'Enter Your Code'}
           </DialogTitle>
           <DialogDescription>
             {step === 'request'
               ? 'Log in or create an account to start predicting.'
               : authMethod === 'otp'
                 ? `We sent a 6-digit code to ${email}`
-                : 'Create a password for faster future logins'}
+                : authMethod === 'phone'
+                  ? `We sent a 6-digit code to ${phone}`
+                  : 'Create a password for faster future logins'}
           </DialogDescription>
         </DialogHeader>
 
@@ -249,6 +337,14 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                 onClick={() => setAuthMethod('password')}
               >
                 Password
+              </Button>
+              <Button
+                type="button"
+                variant={authMethod === 'phone' ? 'default' : 'outline'}
+                className="flex-1"
+                onClick={() => setAuthMethod('phone')}
+              >
+                Phone Code
               </Button>
             </div>
 
@@ -304,9 +400,60 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                     </span>
                   ) : 'Continue with Email'}
                 </Button>
-                <p className="text-xs text-center text-muted-foreground">
-                  Phone login coming soon via SMS
-                </p>
+              </form>
+            ) : authMethod === 'phone' ? (
+              <form onSubmit={handleRequestPhoneOtp} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="080XXXXXXXX"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/[^\d+]/g, ''))}
+                    required
+                    autoComplete="tel"
+                  />
+                  <p className="text-[10px] text-muted-foreground">We&apos;ll text you a 6-digit code</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ref-phone" className="flex items-center justify-between">
+                    <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+                  </Label>
+                  <Input
+                    id="ref-phone"
+                    type="text"
+                    placeholder="e.g. ALEX25"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    maxLength={20}
+                    className="uppercase tracking-wider"
+                  />
+                </div>
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={acceptedTerms}
+                    onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I&apos;m 18+ and agree to the{' '}
+                    <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                      Privacy Policy
+                    </Link>.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms || phone.length < 10}>
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Sending code…
+                    </span>
+                  ) : 'Continue with Phone'}
+                </Button>
               </form>
             ) : (
               <form onSubmit={handlePasswordAuth} className="space-y-4 pt-4">
@@ -377,7 +524,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
             )}
           </>
         ) : (
-          <form onSubmit={handleVerifyOtp} className="space-y-4 pt-4">
+          <form onSubmit={authMethod === 'phone' ? handleVerifyPhoneOtp : handleVerifyOtp} className="space-y-4 pt-4">
             <div className="space-y-2">
               <Label htmlFor="otp">6-Digit Code</Label>
               <Input
@@ -412,7 +559,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                 onClick={resetForm}
                 className="text-muted-foreground"
               >
-                Wrong email? Go back
+                {authMethod === 'phone' ? 'Wrong number? Go back' : 'Wrong email? Go back'}
               </Button>
             </div>
           </form>
