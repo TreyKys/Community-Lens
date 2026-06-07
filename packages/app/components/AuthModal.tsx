@@ -16,15 +16,42 @@ interface AuthModalProps {
   trigger?: ReactNode;
 }
 
+type AuthMethod = 'otp' | 'password';
+
 export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('otp');
   const [step, setStep] = useState<'request' | 'verify'>('request');
   const [isLoading, setIsLoading] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [referralCode, setReferralCode] = useState('');
   const { toast } = useToast();
+
+  const applyPostAuthHooks = async (accessToken: string) => {
+    try {
+      fetch('/api/user/accept-terms', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {});
+
+      const pendingRef = typeof window !== 'undefined' ? localStorage.getItem('pending_referral_code') : null;
+      if (pendingRef) {
+        fetch('/api/referral/redeem', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ code: pendingRef }),
+        }).finally(() => {
+          try { localStorage.removeItem('pending_referral_code'); } catch {}
+        });
+      }
+    } catch {}
+  };
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +101,62 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
     }
   };
 
+  const handlePasswordAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptedTerms) {
+      toast({
+        title: 'Accept the terms',
+        description: 'You need to agree to our Terms & Privacy Policy to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      if (!email.includes('@')) throw new Error('Invalid email address');
+      if (password.length < 8) throw new Error('Password must be at least 8 characters');
+
+      const trimmedRef = referralCode.trim().toUpperCase();
+      if (trimmedRef) {
+        try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
+      }
+
+      // Try sign in first; if user doesn't exist, create account
+      let signInResult = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      if (signInResult.error?.status === 400) {
+        // User doesn't exist; try sign up
+        signInResult = await supabase.auth.signUp({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+      }
+
+      if (signInResult.error) throw signInResult.error;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await applyPostAuthHooks(session.access_token);
+      }
+
+      toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
+      setIsOpen(false);
+      window.location.href = '/markets';
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to sign in.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -86,31 +169,10 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
       });
       if (error) throw error;
 
-      // Mark the T&C acceptance + redeem any pending referral, fire-and-forget.
-      // Both endpoints are idempotent.
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          fetch('/api/user/accept-terms', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${session.access_token}` },
-          }).catch(() => {});
-
-          const pendingRef = typeof window !== 'undefined' ? localStorage.getItem('pending_referral_code') : null;
-          if (pendingRef) {
-            fetch('/api/referral/redeem', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ code: pendingRef }),
-            }).finally(() => {
-              try { localStorage.removeItem('pending_referral_code'); } catch {}
-            });
-          }
-        }
-      } catch {}
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await applyPostAuthHooks(session.access_token);
+      }
 
       toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
       setIsOpen(false);
@@ -129,6 +191,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const resetForm = () => {
     setStep('request');
     setOtp('');
+    setPassword('');
     setEmail('');
     setIsLoading(false);
   };
@@ -158,71 +221,162 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
           <DialogTitle>
-            {step === 'request' ? 'Welcome to Opinions.ng' : 'Enter Your Code'}
+            {step === 'request' ? 'Welcome to Opinions.ng' : authMethod === 'otp' ? 'Enter Your Code' : 'Set Your Password'}
           </DialogTitle>
           <DialogDescription>
             {step === 'request'
               ? 'Log in or create an account to start predicting.'
-              : `We sent a 6-digit code to ${email}`}
+              : authMethod === 'otp'
+                ? `We sent a 6-digit code to ${email}`
+                : 'Create a password for faster future logins'}
           </DialogDescription>
         </DialogHeader>
 
         {step === 'request' ? (
-          <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-              />
+          <>
+            <div className="flex gap-2 mb-4">
+              <Button
+                type="button"
+                variant={authMethod === 'otp' ? 'default' : 'outline'}
+                className="flex-1"
+                onClick={() => setAuthMethod('otp')}
+              >
+                Email Code
+              </Button>
+              <Button
+                type="button"
+                variant={authMethod === 'password' ? 'default' : 'outline'}
+                className="flex-1"
+                onClick={() => setAuthMethod('password')}
+              >
+                Password
+              </Button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="ref" className="flex items-center justify-between">
-                <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
-              </Label>
-              <Input
-                id="ref"
-                type="text"
-                placeholder="e.g. ALEX25"
-                value={referralCode}
-                onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                maxLength={20}
-                className="uppercase tracking-wider"
-              />
-            </div>
-            <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
-              <Checkbox
-                checked={acceptedTerms}
-                onCheckedChange={(c) => setAcceptedTerms(c === true)}
-                className="mt-0.5"
-              />
-              <span>
-                I&apos;m 18+ and agree to the{' '}
-                <Link href="/terms" target="_blank" className="text-emerald-400 underline">
-                  Terms of Service
-                </Link>
-                {' '}and{' '}
-                <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
-                  Privacy Policy
-                </Link>.
-              </span>
-            </label>
-            <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms}>
-              {isLoading ? (
-                <span className="flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Sending code…
-                </span>
-              ) : 'Continue with Email'}
-            </Button>
-            <p className="text-xs text-center text-muted-foreground">
-              Phone login coming soon via SMS
-            </p>
-          </form>
+
+            {authMethod === 'otp' ? (
+              <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ref" className="flex items-center justify-between">
+                    <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+                  </Label>
+                  <Input
+                    id="ref"
+                    type="text"
+                    placeholder="e.g. ALEX25"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    maxLength={20}
+                    className="uppercase tracking-wider"
+                  />
+                </div>
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={acceptedTerms}
+                    onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I&apos;m 18+ and agree to the{' '}
+                    <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                      Privacy Policy
+                    </Link>.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms}>
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Sending code…
+                    </span>
+                  ) : 'Continue with Email'}
+                </Button>
+                <p className="text-xs text-center text-muted-foreground">
+                  Phone login coming soon via SMS
+                </p>
+              </form>
+            ) : (
+              <form onSubmit={handlePasswordAuth} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email-pwd">Email Address</Label>
+                  <Input
+                    id="email-pwd"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="At least 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Min. 8 characters for security</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ref-pwd" className="flex items-center justify-between">
+                    <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+                  </Label>
+                  <Input
+                    id="ref-pwd"
+                    type="text"
+                    placeholder="e.g. ALEX25"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    maxLength={20}
+                    className="uppercase tracking-wider"
+                  />
+                </div>
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={acceptedTerms}
+                    onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I&apos;m 18+ and agree to the{' '}
+                    <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                      Privacy Policy
+                    </Link>.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms || password.length < 8}>
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Signing in…
+                    </span>
+                  ) : 'Sign In / Sign Up'}
+                </Button>
+              </form>
+            )}
+          </>
         ) : (
           <form onSubmit={handleVerifyOtp} className="space-y-4 pt-4">
             <div className="space-y-2">

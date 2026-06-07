@@ -1412,7 +1412,7 @@ function VIPPanel() {
                 value={rakeSharePct}
                 onChange={e => setRakeSharePct(e.target.value)}
               />
-              <p className="text-[10px] text-muted-foreground">% of resolution rake from THIS VIP's referred users only.</p>
+              <p className="text-[10px] text-muted-foreground">% of resolution rake from THIS VIP&apos;s referred users only.</p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Preload Bonus (tNGN)</Label>

@@ -6,10 +6,13 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Wallet, Gift, Trophy, Sparkles, Crown, Copy, Check,
-  TrendingUp, Clock, ChevronRight, Loader2,
+  TrendingUp, Clock, ChevronRight, Loader2, Lock,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { getDisplayPool } from '@/lib/displayPool';
 import { cn } from '@/lib/utils';
@@ -54,6 +57,10 @@ export default function DashboardPage() {
   const [vipEarnings, setVipEarnings] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +134,32 @@ export default function DashboardPage() {
       setTimeout(() => setCopied(false), 1800);
     } catch {
       toast({ title: 'Copy failed', variant: 'destructive' });
+    }
+  };
+
+  const handleSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 8) {
+      toast({ title: 'Password too short', description: 'Minimum 8 characters', variant: 'destructive' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast({ title: 'Passwords don\'t match', variant: 'destructive' });
+      return;
+    }
+
+    setIsSettingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      toast({ title: 'Password set successfully', description: 'You can now log in with your password.' });
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowPasswordForm(false);
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsSettingPassword(false);
     }
   };
 
@@ -257,6 +290,73 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Password management */}
+      <Card className="border-emerald-500/15">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              Account Security
+            </p>
+          </div>
+          {!showPasswordForm ? (
+            <Button
+              onClick={() => setShowPasswordForm(true)}
+              variant="outline"
+              className="w-full"
+            >
+              Set or Change Password
+            </Button>
+          ) : (
+            <form onSubmit={handleSetPassword} className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="new-pwd" className="text-xs">New Password</Label>
+                <Input
+                  id="new-pwd"
+                  type="password"
+                  placeholder="At least 8 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm-pwd" className="text-xs">Confirm Password</Label>
+                <Input
+                  id="confirm-pwd"
+                  type="password"
+                  placeholder="Confirm your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="submit"
+                  className="flex-1"
+                  disabled={isSettingPassword || newPassword.length < 8}
+                >
+                  {isSettingPassword ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Password'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setShowPasswordForm(false);
+                    setNewPassword('');
+                    setConfirmPassword('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Active stakes */}
       <div>
