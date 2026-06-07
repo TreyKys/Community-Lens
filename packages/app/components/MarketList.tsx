@@ -10,8 +10,9 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown } from 'lucide-react';
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { calculatePotentialPayout } from '@/lib/payout';
 
 interface Market {
   id: number;
@@ -65,8 +66,16 @@ function BettingInterface({
   const [amount, setAmount] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
-  const [distribution, setDistribution] = useState<{ option: string; percentage: number }[]>([]);
+  const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
   const { toast } = useToast();
+
+  // Per-option net pools used by the potential-winnings calculator.
+  // Kept in sync with the bet distribution fetched below.
+  const pools = market.options.map((_, i) => distribution[i]?.amount ?? 0);
+  const stakeNum = Number(amount);
+  const payoutPreview = (selectedOption !== '' && stakeNum >= 100)
+    ? calculatePotentialPayout(stakeNum, pools, parseInt(selectedOption))
+    : null;
 
   // Fetch user balance + bet distribution on mount
   useEffect(() => {
@@ -201,6 +210,41 @@ function BettingInterface({
         <p className="text-xs text-right text-muted-foreground">
           Balance: ₦{balance.toLocaleString()} tNGN
         </p>
+      )}
+
+      {payoutPreview && (
+        <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
+              <Sparkles className="w-3 h-3" /> If you win
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {Math.round(payoutPreview.impliedProb * 100)}% implied
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-2xl md:text-3xl font-black text-emerald-400 tracking-tight tabular-nums">
+              ₦{Math.round(payoutPreview.payout).toLocaleString()}
+            </span>
+            <span className="text-xs text-emerald-300/80 font-medium tabular-nums">
+              {payoutPreview.multiplier.toFixed(2)}× stake
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-1.5">
+            <span className="text-muted-foreground">
+              Profit{' '}
+              <span className={cn(
+                'font-semibold tabular-nums',
+                payoutPreview.profit >= 0 ? 'text-emerald-400' : 'text-red-400'
+              )}>
+                {payoutPreview.profit >= 0 ? '+' : ''}₦{Math.round(payoutPreview.profit).toLocaleString()}
+              </span>
+            </span>
+            {payoutPreview.isFirstMover && (
+              <span className="text-[10px] text-amber-300/80">First mover — needs an opposing bet</span>
+            )}
+          </div>
+        </div>
       )}
 
       {(!selectedOption || !amount || Number(amount) < 100) && (
