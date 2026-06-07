@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { findBankByCode } from '@/lib/banks';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,6 +31,14 @@ export async function POST(request: Request) {
 
     if (!amountTNGN || !bankCode || !accountNumber) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const bank = findBankByCode(String(bankCode).trim());
+    if (!bank) {
+      return NextResponse.json({ error: 'Selected bank is not in our approved payout list' }, { status: 400 });
+    }
+    if (String(accountNumber).trim().length !== 10) {
+      return NextResponse.json({ error: 'Account number must be a 10-digit NUBAN' }, { status: 400 });
     }
 
     if (amountTNGN < MIN_WITHDRAWAL_TNGN) {

@@ -14,6 +14,7 @@ import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { findBankByCode } from '@/lib/banks';
 import Link from 'next/link';
 
 // Admin auth is now cookie-based: POST /api/admin/auth sets an httpOnly cookie
@@ -669,7 +670,7 @@ function WithdrawalPanel() {
                         </span>
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Bank {w.bank_code} · NUBAN {w.account_number}
+                        {findBankByCode(w.bank_code)?.name || `Bank ${w.bank_code}`} · NUBAN {w.account_number}
                         {w.account_name && <> · {w.account_name}</>}
                       </div>
                       <div className="text-[10px] text-muted-foreground">
@@ -705,6 +706,8 @@ function WithdrawalPanel() {
         </CardContent>
       </Card>
 
+      <WithdrawalHistoryPanel />
+
       <Dialog open={!!rejectTargetId} onOpenChange={(open) => { if (!open) { setRejectTargetId(null); setRejectReason(''); } }}>
         <DialogContent>
           <DialogHeader>
@@ -732,6 +735,123 @@ function WithdrawalPanel() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// ── Withdrawal History (full ledger — every status, for tracking/audit) ───
+type WithdrawalHistoryRow = {
+  id: string;
+  user_id: string;
+  amount_tngn: number;
+  naira_to_send: number;
+  bank_code: string;
+  account_number: string;
+  account_name: string | null;
+  status: string;
+  gateway: string | null;
+  gateway_transfer_code: string | null;
+  admin_note: string | null;
+  created_at: string;
+  approved_at: string | null;
+  processed_at: string | null;
+  user: { email?: string; username?: string } | null;
+};
+
+const WITHDRAWAL_STATUS_STYLES: Record<string, string> = {
+  pending_admin_approval: 'border-amber-500/40 text-amber-400',
+  transfer_initiated: 'border-blue-500/40 text-blue-400',
+  completed: 'border-emerald-500/40 text-emerald-400',
+  failed_transfer: 'border-red-500/40 text-red-400',
+  rejected: 'border-red-500/40 text-red-400',
+};
+
+function WithdrawalHistoryPanel() {
+  const [rows, setRows] = useState<WithdrawalHistoryRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/admin/withdrawals/history', { headers: adminHeaders() });
+      const body = await res.json();
+      if (res.ok) setRows(body.withdrawals || []);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const statuses = ['all', ...Array.from(new Set(rows.map(r => r.status)))];
+  const filtered = statusFilter === 'all' ? rows : rows.filter(r => r.status === statusFilter);
+  const bankName = (code: string) => findBankByCode(code)?.name || code;
+
+  return (
+    <Card className="mt-4">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center justify-between flex-wrap gap-2">
+          <span className="flex items-center gap-2">
+            Withdrawal History
+            <Badge variant="outline">{filtered.length}</Badge>
+          </span>
+          <div className="flex items-center gap-2">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 w-[180px] text-xs">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                {statuses.map(s => (
+                  <SelectItem key={s} value={s} className="text-xs">
+                    {s === 'all' ? 'All statuses' : s.replace(/_/g, ' ')}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" onClick={load} className="h-8 text-xs text-muted-foreground">
+              Refresh
+            </Button>
+          </div>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {isLoading ? (
+          <div className="h-24 bg-muted/30 rounded-xl animate-pulse" />
+        ) : filtered.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-6 text-center">No withdrawals match this filter.</div>
+        ) : (
+          <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+            {filtered.map(w => (
+              <div key={w.id} className="rounded-lg border border-border/40 bg-muted/10 px-3 py-2 text-xs flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium">{w.user?.email || w.user?.username || `${w.user_id.slice(0, 8)}…`}</span>
+                    <span className="font-bold">₦{Number(w.naira_to_send || 0).toLocaleString()}</span>
+                    <Badge variant="outline" className={cn('text-[9px] px-1.5 py-0', WITHDRAWAL_STATUS_STYLES[w.status] || 'border-muted-foreground/30 text-muted-foreground')}>
+                      {w.status.replace(/_/g, ' ')}
+                    </Badge>
+                    {w.gateway && <Badge variant="outline" className="text-[9px] px-1.5 py-0 capitalize">{w.gateway}</Badge>}
+                  </div>
+                  <div className="text-muted-foreground">
+                    {bankName(w.bank_code)} · {w.account_number}{w.account_name && ` · ${w.account_name}`}
+                  </div>
+                  {w.gateway_transfer_code && (
+                    <div className="text-[10px] text-muted-foreground/70 font-mono">ref: {w.gateway_transfer_code}</div>
+                  )}
+                  {w.admin_note && (
+                    <div className="text-[10px] text-amber-400/80">note: {w.admin_note}</div>
+                  )}
+                </div>
+                <div className="text-[10px] text-muted-foreground text-right shrink-0">
+                  <div>{new Date(w.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                  {w.processed_at && <div>processed {new Date(w.processed_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

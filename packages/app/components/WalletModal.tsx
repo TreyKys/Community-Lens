@@ -7,8 +7,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Wallet, Loader2, Shield, AlertTriangle } from 'lucide-react';
+import { Wallet, Loader2, Shield, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { APPROVED_BANKS } from '@/lib/banks';
 
 export function WalletModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -19,6 +21,9 @@ export function WalletModal() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
+  const [resolvedAccountName, setResolvedAccountName] = useState<string | null>(null);
+  const [isResolvingAccount, setIsResolvingAccount] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
 
@@ -78,6 +83,39 @@ export function WalletModal() {
     }
   };
 
+  // Resolve the account name once bank + 10-digit NUBAN are both present.
+  const resolveAccount = useCallback(async (code: string, acct: string) => {
+    if (!code || acct.length !== 10) {
+      setResolvedAccountName(null);
+      setResolveError(null);
+      return;
+    }
+    setIsResolvingAccount(true);
+    setResolveError(null);
+    setResolvedAccountName(null);
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (!s?.access_token) throw new Error('Sign in to verify your account');
+      const res = await fetch('/api/squad/resolve-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.access_token}` },
+        body: JSON.stringify({ bankCode: code, accountNumber: acct }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not verify account');
+      setResolvedAccountName(body.accountName);
+    } catch (e: any) {
+      setResolveError(e.message || 'Could not verify account');
+    } finally {
+      setIsResolvingAccount(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => resolveAccount(bankCode, accountNumber), 500);
+    return () => clearTimeout(t);
+  }, [bankCode, accountNumber, resolveAccount]);
+
   const handleWithdraw = async () => {
     const amount = Number(withdrawAmount);
     if (amount < 200) {
@@ -86,6 +124,10 @@ export function WalletModal() {
     }
     if (!bankCode || accountNumber.length !== 10) {
       toast({ title: 'Enter valid bank details', description: '10-digit NUBAN required', variant: 'destructive' });
+      return;
+    }
+    if (!resolvedAccountName) {
+      toast({ title: 'Verify your account first', description: 'We need to confirm the account name before sending funds', variant: 'destructive' });
       return;
     }
     if (amount > balance) {
@@ -98,7 +140,7 @@ export function WalletModal() {
       const res = await fetch('/api/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
-        body: JSON.stringify({ amountTNGN: amount, bankCode, accountNumber }),
+        body: JSON.stringify({ amountTNGN: amount, bankCode, accountNumber, accountName: resolvedAccountName }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
@@ -115,6 +157,8 @@ export function WalletModal() {
       setWithdrawAmount('');
       setBankCode('');
       setAccountNumber('');
+      setResolvedAccountName(null);
+      setResolveError(null);
     } catch (err: any) {
       toast({ title: 'Withdrawal failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -203,7 +247,7 @@ export function WalletModal() {
 
           {/* ── WITHDRAW ────────────────────────────────────────────────── */}
           <TabsContent value="withdraw" className="space-y-4 py-4">
-            <p className="text-sm text-muted-foreground">Withdraw to any Nigerian bank. Arrives in 1-2 hours.</p>
+            <p className="text-sm text-muted-foreground">Withdraw to any approved Nigerian bank. Arrives in 1-2 hours.</p>
             <div className="space-y-2">
               <Label>Amount (tNGN)</Label>
               <div className="relative">
@@ -219,28 +263,55 @@ export function WalletModal() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Bank Code</Label>
-                <Input
-                  type="text"
-                  placeholder="e.g. 058"
-                  value={bankCode}
-                  onChange={e => setBankCode(e.target.value.replace(/\D/g, ''))}
-                  maxLength={6}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Account Number</Label>
-                <Input
-                  type="text"
-                  placeholder="10-digit NUBAN"
-                  maxLength={10}
-                  value={accountNumber}
-                  onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>Bank</Label>
+              <Select
+                value={bankCode}
+                onValueChange={(v) => { setBankCode(v); setResolvedAccountName(null); setResolveError(null); }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select your bank" />
+                </SelectTrigger>
+                <SelectContent>
+                  {APPROVED_BANKS.map(b => (
+                    <SelectItem key={b.code} value={b.code}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            <div className="space-y-2">
+              <Label>Account Number</Label>
+              <Input
+                type="text"
+                placeholder="10-digit NUBAN"
+                maxLength={10}
+                value={accountNumber}
+                onChange={e => {
+                  setAccountNumber(e.target.value.replace(/\D/g, ''));
+                  setResolvedAccountName(null);
+                  setResolveError(null);
+                }}
+              />
+            </div>
+
+            {/* Account verification feedback */}
+            {bankCode && accountNumber.length === 10 && (
+              <div className="text-xs rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors"
+                style={{
+                  borderColor: resolvedAccountName ? 'rgba(16,185,129,0.3)' : resolveError ? 'rgba(239,68,68,0.3)' : 'rgba(148,163,184,0.2)',
+                  background: resolvedAccountName ? 'rgba(16,185,129,0.08)' : resolveError ? 'rgba(239,68,68,0.08)' : 'rgba(148,163,184,0.06)',
+                }}
+              >
+                {isResolvingAccount ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" /> Verifying account…</>
+                ) : resolvedAccountName ? (
+                  <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> <span className="text-emerald-300 font-medium">{resolvedAccountName}</span></>
+                ) : resolveError ? (
+                  <><AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" /> <span className="text-red-300">{resolveError}</span></>
+                ) : null}
+              </div>
+            )}
+
             {wp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
                 <div className="flex justify-between"><span>Fees (1% spread + ₦50)</span><span>₦{wp.fees}</span></div>
@@ -257,7 +328,7 @@ export function WalletModal() {
             )}
             <Button
               onClick={handleWithdraw}
-              disabled={isWithdrawLoading || !withdrawAmount || !bankCode || accountNumber.length !== 10}
+              disabled={isWithdrawLoading || isResolvingAccount || !withdrawAmount || !bankCode || accountNumber.length !== 10 || !resolvedAccountName}
               variant="secondary"
               className="w-full"
             >
