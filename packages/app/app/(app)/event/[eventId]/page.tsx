@@ -1,5 +1,6 @@
 import { MarketList } from "@/components/MarketList";
 import { EventChart } from "@/components/EventChart";
+import { UserStakeBanner } from "@/components/UserStakeBanner";
 import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -43,6 +44,7 @@ export default function EventPage({ params }: { params: { eventId: string } }) {
           </Suspense>
 
           <div>
+            <UserStakeBanner marketId={eventId} />
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
               Main Event
             </h2>

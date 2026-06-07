@@ -530,13 +530,19 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
   }
 
   if (category === 'economy') {
-    // "Everything Economy" — economics + finance + crypto-tagged markets.
-    // The list-fetch logic handles this OR by using the multi-category filter.
+    // "Everything Economy" — economics + finance + crypto + tech/AI + entertainment + geo.
+    // Per board decision (2026-06-07), all money-/world-/culture-adjacent markets
+    // fold into this one bucket. The list-fetch logic handles this via .in() filter.
     base.category = 'economy_or_finance'; // sentinel handled in the query
     return base;
   }
 
-  // Backward-compat for any legacy params (sports, entertainment, crypto, geo, tech)
+  // Legacy params (crypto, tech, entertainment, geo) — redirect into economy bucket
+  if (['crypto', 'tech', 'entertainment', 'geo'].includes(category)) {
+    base.category = 'economy_or_finance';
+    return base;
+  }
+
   base.category = category;
   return base;
 }
@@ -601,7 +607,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
         const filter = buildCategoryFilter(category, subcategory);
         // Sentinel: 'Everything Economy' tab spans multiple legacy categories.
         if (filter.category === 'economy_or_finance') {
-          query = query.in('category', ['economy', 'economics', 'finance']);
+          query = query.in('category', ['economy', 'economics', 'finance', 'crypto', 'tech', 'entertainment', 'geo', 'geopolitics']);
         } else if (filter.category) {
           query = query.eq('category', filter.category);
         }

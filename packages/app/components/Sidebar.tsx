@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Trophy, Flame, Bitcoin, Globe, BarChart3, Cpu, Star, ChevronDown, User, Receipt } from 'lucide-react';
+import { Trophy, Flame, BarChart3, ChevronDown, User, Receipt } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -55,23 +55,7 @@ const CATEGORIES: Category[] = [
     ],
   },
   { id: 'politics', label: '🗳️ Naija Politics', icon: null, color: 'text-green-500' },
-  { id: 'crypto', label: 'Crypto', icon: Bitcoin, color: 'text-yellow-600' },
-  {
-    id: 'entertainment',
-    label: 'Entertainment',
-    icon: Star,
-    color: 'text-pink-500',
-    subcategories: [
-      { id: 'pop', label: '🍿 Pop Culture' },
-      { id: 'reality', label: '🎬 Reality TV' },
-      { id: 'nollywood', label: '🎥 Nollywood' },
-      { id: 'afrobeats', label: '🎶 Afrobeats' },
-      { id: 'music', label: '🎵 Music' },
-    ],
-  },
-  { id: 'geo', label: 'Geopolitics', icon: Globe, color: 'text-blue-500' },
-  { id: 'economy', label: 'Economy', icon: BarChart3, color: 'text-emerald-500' },
-  { id: 'tech', label: 'Tech & AI', icon: Cpu, color: 'text-purple-500' },
+  { id: 'economy', label: 'Everything Economy', icon: BarChart3, color: 'text-emerald-500' },
 ];
 
 export function Sidebar() {

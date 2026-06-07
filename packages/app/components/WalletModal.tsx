@@ -122,12 +122,6 @@ export function WalletModal() {
     }
   };
 
-  const dp = (() => {
-    const n = Number(depositAmount);
-    if (!n || n < 500) return null;
-    return { tNGN: (n * 0.99).toFixed(2) };
-  })();
-
   const wp = (() => {
     const n = Number(withdrawAmount);
     if (!n || n < 200) return null;
@@ -177,12 +171,9 @@ export function WalletModal() {
               </div>
             </div>
 
-            {dp && (
-              <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span></div>
-                <div className="flex justify-between text-[10px] pt-1 border-t border-border/40 mt-1.5">
-                  <span>Bet a lot, lose a lot? Get up to ₦5,000 back every Monday.</span>
-                </div>
+            {Number(depositAmount) >= 500 && (
+              <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/50">
+                Bet a lot, lose a lot? Get up to ₦5,000 back every Monday.
               </div>
             )}
 

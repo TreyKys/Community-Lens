@@ -66,6 +66,7 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
 }) {
   const options = bet.markets?.options as string[] || [];
   const predicted = options[bet.outcome_index] || `Option ${bet.outcome_index}`;
+  const isResolved = bet.status === 'won' || bet.status === 'lost';
   const profit = bet.status === 'won' ? (bet.payout_tngn || 0) - bet.stake_tngn : -bet.stake_tngn;
   const isLocked = bet.markets?.merkle_root != null;
   const closesAt = new Date(bet.markets?.closes_at);
@@ -110,7 +111,7 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
           <Badge variant="outline" className="text-xs">{predicted}</Badge>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 text-center">
+        <div className={cn('grid gap-3 text-center', isResolved ? 'grid-cols-3' : 'grid-cols-1')}>
           <div className="bg-muted/30 rounded-lg p-2">
             <p className="text-xs text-muted-foreground mb-0.5">Staked</p>
             <p className="text-sm font-bold">₦{bet.stake_tngn.toLocaleString()}</p>
@@ -121,13 +122,15 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
               <p className="text-sm font-bold text-emerald-400">₦{(bet.payout_tngn || 0).toLocaleString()}</p>
             </div>
           )}
-          <div className={cn('rounded-lg p-2', profit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10')}>
-            <p className={cn('text-xs mb-0.5', profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>P&L</p>
-            <p className={cn('text-sm font-bold flex items-center justify-center gap-0.5', profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-              {profit >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-              {profit >= 0 ? '+' : ''}₦{Math.abs(profit).toLocaleString()}
-            </p>
-          </div>
+          {isResolved && (
+            <div className={cn('rounded-lg p-2', profit >= 0 ? 'bg-emerald-500/10' : 'bg-red-500/10')}>
+              <p className={cn('text-xs mb-0.5', profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>P&L</p>
+              <p className={cn('text-sm font-bold flex items-center justify-center gap-0.5', profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                {profit >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                {profit >= 0 ? '+' : ''}₦{Math.abs(profit).toLocaleString()}
+              </p>
+            </div>
+          )}
         </div>
 
         {bet.is_first_bet_refunded && (
