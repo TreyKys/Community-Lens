@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Compass, Receipt, User, Menu } from 'lucide-react';
+import { Home, Compass, Receipt, User, Menu, LayoutDashboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -38,13 +38,23 @@ export function BottomTabBar() {
         </SheetContent>
       </Sheet>
 
-      <button
-        onClick={() => router.push('/')}
-        className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors', pathname === '/' ? 'text-foreground' : 'text-muted-foreground')}
-      >
-        <Home className="w-5 h-5" />
-        <span className="text-[10px] font-medium">Home</span>
-      </button>
+      {session ? (
+        <button
+          onClick={() => router.push('/dashboard')}
+          className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors', pathname === '/dashboard' ? 'text-foreground' : 'text-muted-foreground')}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Wallet</span>
+        </button>
+      ) : (
+        <button
+          onClick={() => router.push('/')}
+          className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors', pathname === '/' ? 'text-foreground' : 'text-muted-foreground')}
+        >
+          <Home className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Home</span>
+        </button>
+      )}
 
       <button
         onClick={() => router.push('/markets')}

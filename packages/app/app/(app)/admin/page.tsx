@@ -30,81 +30,149 @@ function cronHeaders() {
 }
 
 // ── Treasury Overview ────────────────────────────────────────────────────
+function StatCard({ label, value, sub, icon: Icon, color }: any) {
+  return (
+    <Card className="bg-card/60 border-emerald-500/15">
+      <CardContent className="p-3.5">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">{label}</span>
+          {Icon && <Icon className={cn('w-3.5 h-3.5', color)} />}
+        </div>
+        <div className="text-xl md:text-2xl font-bold tabular-nums">{value}</div>
+        {sub && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 function TreasuryPanel() {
   const [stats, setStats] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [heartbeat, setHeartbeat] = useState<{ daysSince: number | null; lastFiredAt: Date | null }>({ daysSince: null, lastFiredAt: null });
 
   useEffect(() => {
-    async function fetchStats() {
-      const [rakeData, usersData, marketsData, heartbeatData] = await Promise.all([
-        supabase.from('treasury_log').select('amount_tngn, type').then(r => r.data || []),
-        supabase.from('users').select('id', { count: 'exact', head: true }).then(r => r.count || 0),
-        supabase.from('markets').select('status', { count: 'exact', head: false }).then(r => r.data || []),
+    let alive = true;
+    const load = async () => {
+      const [analyticsRes, heartbeatData] = await Promise.all([
+        fetch('/api/admin/analytics', { credentials: 'include' }).then(r => r.json()),
         supabase.from('heartbeat_log').select('fired_at').order('fired_at', { ascending: false }).limit(1).then(r => r.data?.[0] || null),
       ]);
+      if (!alive) return;
+      setStats(analyticsRes);
 
-      const entryRake = rakeData.filter((r: any) => r.type === 'entry_rake').reduce((s: number, r: any) => s + r.amount_tngn, 0);
-      const resolutionRake = rakeData.filter((r: any) => r.type === 'resolution_rake').reduce((s: number, r: any) => s + r.amount_tngn, 0);
-      const totalRake = entryRake + resolutionRake;
-
-      const openMarkets = (marketsData as any[]).filter(m => m.status === 'open').length;
-      const lockedMarkets = (marketsData as any[]).filter(m => m.status === 'locked').length;
-
-      const lastHeartbeat = heartbeatData?.fired_at ? new Date(heartbeatData.fired_at) : null;
-      const daysSinceHeartbeat = lastHeartbeat
-        ? Math.floor((Date.now() - lastHeartbeat.getTime()) / (1000 * 60 * 60 * 24))
-        : null;
-
-      setStats({ totalRake, entryRake, resolutionRake, usersData, openMarkets, lockedMarkets, lastHeartbeat, daysSinceHeartbeat });
+      const last = heartbeatData?.fired_at ? new Date(heartbeatData.fired_at) : null;
+      const days = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : null;
+      setHeartbeat({ daysSince: days, lastFiredAt: last });
       setIsLoading(false);
-    }
-    fetchStats();
+    };
+    load();
+    // Auto-refresh every 30s so the panel stays live during launches
+    const t = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
-  if (isLoading) return <div className="h-32 bg-muted/30 rounded-xl animate-pulse" />;
+  if (isLoading || !stats) {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[...Array(8)].map((_, i) => <div key={i} className="h-20 rounded-xl shimmer" />)}
+        </div>
+        <div className="h-20 rounded-xl shimmer" />
+      </div>
+    );
+  }
+
+  const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
+  const t = stats.treasury, u = stats.users, m = stats.markets, b = stats.bets, r = stats.referrals;
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'Total Rake', value: `₦${(stats?.totalRake || 0).toLocaleString()}`, icon: Coins, color: 'text-emerald-400' },
-          { label: 'Total Users', value: stats?.usersData || 0, icon: Users, color: 'text-blue-400' },
-          { label: 'Open Markets', value: stats?.openMarkets || 0, icon: Activity, color: 'text-amber-400' },
-          { label: 'Locked Markets', value: stats?.lockedMarkets || 0, icon: Lock, color: 'text-purple-400' },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <Card key={label} className="bg-card/50">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-muted-foreground uppercase tracking-wider">{label}</span>
-                <Icon className={cn('w-4 h-4', color)} />
-              </div>
-              <div className="text-2xl font-bold">{value}</div>
-            </CardContent>
-          </Card>
-        ))}
+    <div className="space-y-5">
+      {/* ── Revenue ─────────────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Revenue</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="House Net" value={f(t.houseRevenueNet)} sub="After VIP + insurance" icon={Coins} color="text-emerald-400" />
+          <StatCard label="Entry Rake" value={f(t.entryRake)} sub="1.5% of every stake" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Pool Rake" value={f(t.resolutionRake)} sub="10% at resolution" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Total Rake" value={f(t.totalRake)} sub="Gross before deductions" icon={Coins} color="text-amber-400" />
+        </div>
       </div>
 
-      {/* Heartbeat status */}
-      <Card className={cn('border', stats?.daysSinceHeartbeat >= 25 ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5')}>
+      {/* ── User base + acquisition ─────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Users</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Total Users" value={u.total} icon={Users} color="text-blue-400" />
+          <StatCard label="VIP Accounts" value={u.vip} sub="Special referral codes" icon={Sparkles} color="text-amber-400" />
+          <StatCard label="New (24h)" value={u.new24h} icon={Users} color="text-emerald-400" />
+          <StatCard label="Active Bettors (24h)" value={u.activeBettors24h} sub="Unique placers" icon={Activity} color="text-emerald-400" />
+        </div>
+      </div>
+
+      {/* ── Betting activity ────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Betting Activity</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Vol (24h)" value={f(b.volume24h)} sub="Gross stakes" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Vol (7d)" value={f(b.volume7d)} sub="Gross stakes" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Lifetime Vol" value={f(b.totalVolume)} sub={`${b.totalCount} bets`} icon={Coins} color="text-amber-400" />
+          <StatCard label="Active Bets" value={b.activeCount} sub={`${b.wonCount} won · ${b.lostCount} lost`} icon={Activity} color="text-blue-400" />
+        </div>
+      </div>
+
+      {/* ── Markets ─────────────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Markets</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Open" value={m.open} icon={Activity} color="text-emerald-400" />
+          <StatCard label="Locked" value={m.locked} icon={Lock} color="text-purple-400" />
+          <StatCard label="Resolved" value={m.resolved} icon={CheckCircle2} color="text-emerald-400" />
+          <StatCard label="Voided" value={m.voided} icon={Lock} color="text-muted-foreground" />
+        </div>
+      </div>
+
+      {/* ── Referrals + VIP ─────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Referrals &amp; VIP</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Total Referrals" value={r.totalReferrals} sub="All-time signups" icon={Users} color="text-emerald-400" />
+          <StatCard label="VIP Referrals" value={r.vipReferrals} sub={`${r.vipCodes} VIP codes active`} icon={Sparkles} color="text-amber-400" />
+          <StatCard label="VIP Paid Out" value={f(t.vipPaidOut)} sub="From rake splits" icon={Gift} color="text-amber-400" />
+          <StatCard label="Insurance Paid" value={f(t.insurancePaid)} sub="Bet insurance refunds" icon={Shield} color="text-blue-400" />
+        </div>
+      </div>
+
+      {/* ── Wallet flow ─────────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Wallet</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Lifetime Deposits" value={f(stats.deposits.lifetime)} icon={Coins} color="text-emerald-400" />
+          <StatCard label="Pending Withdrawals" value={f(stats.withdrawals.pendingAmount)} sub={`${stats.withdrawals.pendingCount} requests`} icon={Activity} color="text-amber-400" />
+          <StatCard label="Points Outstanding" value={(stats.points.outstanding || 0).toLocaleString()} sub="Across all users" icon={Sparkles} color="text-emerald-400" />
+          <StatCard label="Last Refresh" value={new Date(stats.generatedAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })} sub="Auto-updates every 30s" icon={Activity} color="text-muted-foreground" />
+        </div>
+      </div>
+
+      {/* Heartbeat status (unchanged) */}
+      <Card className={cn('border', heartbeat.daysSince !== null && heartbeat.daysSince >= 25 ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5')}>
         <CardContent className="p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Shield className={cn('w-5 h-5', stats?.daysSinceHeartbeat >= 25 ? 'text-red-400' : 'text-emerald-400')} />
+            <Shield className={cn('w-5 h-5', heartbeat.daysSince !== null && heartbeat.daysSince >= 25 ? 'text-red-400' : 'text-emerald-400')} />
             <div>
               <p className="text-sm font-medium">Escape Hatch Clock</p>
               <p className="text-xs text-muted-foreground">
-                {stats?.lastHeartbeat
-                  ? `Last heartbeat: ${stats.lastHeartbeat.toLocaleDateString()} (${stats.daysSinceHeartbeat} days ago)`
+                {heartbeat.lastFiredAt
+                  ? `Last heartbeat: ${heartbeat.lastFiredAt.toLocaleDateString()} (${heartbeat.daysSince} days ago)`
                   : 'No heartbeat recorded'}
               </p>
             </div>
           </div>
-          <Badge className={cn(stats?.daysSinceHeartbeat >= 25 ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30')}>
-            {30 - (stats?.daysSinceHeartbeat || 0)} days remaining
+          <Badge className={cn(heartbeat.daysSince !== null && heartbeat.daysSince >= 25 ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30')}>
+            {30 - (heartbeat.daysSince || 0)} days remaining
           </Badge>
         </CardContent>
       </Card>
 
-      {/* Quick link to resolution dashboard */}
       <Link href="/admin/resolve">
         <div className="flex items-center justify-between p-4 bg-card border border-amber-500/20 rounded-xl hover:border-amber-500/40 transition-colors cursor-pointer">
           <div className="flex items-center gap-3">

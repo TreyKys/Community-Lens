@@ -11,9 +11,10 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Download, Share2, TrendingUp, TrendingDown,
   Clock, CheckCircle2, XCircle, Shield,
-  Trophy, AlertCircle
+  Trophy, AlertCircle, Target
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { POOL_RAKE_PCT } from '@/lib/displayPool';
 
 interface Bet {
   id: string;
@@ -34,7 +35,28 @@ interface Bet {
     status: string;
     closes_at: string;
     merkle_root: string | null;
+    total_pool: number | null;
+    pool_by_outcome: Record<string, number> | null;
   };
+}
+
+// Live "pot win" projection for an ACTIVE bet, using the current pool
+// snapshot. Same math as lib/payout (pari-mutuel with 10% pool rake).
+function projectActivePayout(bet: Bet): { payout: number; multiplier: number } | null {
+  const pools = bet.markets?.pool_by_outcome;
+  if (!pools || typeof pools !== 'object') return null;
+
+  const winningPool = Number(pools[String(bet.outcome_index)] || 0);
+  if (winningPool <= 0) return null;
+  const totalPool = Object.values(pools).reduce((s: number, v: any) => s + Number(v || 0), 0);
+  const losingPool = totalPool - winningPool;
+  if (losingPool <= 0) return null; // void scenario
+
+  const payoutPool = totalPool * (1 - POOL_RAKE_PCT);
+  const share = bet.net_stake_tngn / winningPool;
+  const payout = share * payoutPool;
+  if (!Number.isFinite(payout) || payout <= 0) return null;
+  return { payout, multiplier: payout / bet.stake_tngn };
 }
 
 function BetCard({ bet, onDownloadReceipt, onShareCard }: {
@@ -111,9 +133,29 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
         {bet.is_first_bet_refunded && (
           <div className="mt-3 flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg px-3 py-2">
             <Shield className="w-3.5 h-3.5 shrink-0" />
-            First Bet Insurance applied — stake refunded as credit
+            Bet Insurance applied — stake refunded as credit
           </div>
         )}
+
+        {bet.status === 'active' && (() => {
+          const proj = projectActivePayout(bet);
+          if (!proj) return null;
+          return (
+            <div className="mt-3 flex items-center justify-between bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-emerald-300/90 font-semibold">
+                <Target className="w-3 h-3" /> Pot Win
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-emerald-400 font-black text-base tabular-nums">
+                  ₦{Math.round(proj.payout).toLocaleString()}
+                </span>
+                <span className="text-[10px] text-emerald-300/70 tabular-nums">
+                  {proj.multiplier.toFixed(2)}×
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="flex items-center justify-between mt-4">
           <span className="text-xs text-muted-foreground">
@@ -352,7 +394,7 @@ export default function BetsPage() {
     try {
       const { data, error } = await supabase
         .from('user_bets')
-        .select('*, markets(id, title, question, options, status, closes_at, merkle_root)')
+        .select('*, markets(id, title, question, options, status, closes_at, merkle_root, total_pool, pool_by_outcome)')
         .eq('user_id', session.user.id)
         .order('placed_at', { ascending: false });
 
