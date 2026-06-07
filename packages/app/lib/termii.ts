@@ -6,8 +6,11 @@
  * store or compare codes ourselves. A successful verify just hands back a
  * `verified: true/false` for the `pinId` we were given at send time.
  *
- * Sender ID must be a pre-approved alphanumeric name (NCC-regulated in
- * Nigeria — register it in the Termii dashboard, approval can take days).
+ * Sender ID: a custom alphanumeric name (e.g. "Opinionsng") needs NCC
+ * approval in Nigeria, which can take days. Until TERMII_SENDER_ID is set,
+ * we fall back to Termii's shared default sender ID ("Termii") on the
+ * "generic" channel — no registration required, codes go out immediately.
+ * Swap in the approved custom ID later by just setting the env var.
  */
 
 const BASE = 'https://api.ng.termii.com/api';
@@ -41,9 +44,10 @@ export function normalizeNigerianPhone(input: string): string | null {
 
 export type OtpSendResult = { pinId: string; to: string };
 
+const SHARED_FALLBACK_SENDER_ID = 'Termii';
+
 export async function sendOtp(phoneE164: string): Promise<OtpSendResult> {
-  const senderId = process.env.TERMII_SENDER_ID;
-  if (!senderId) throw new Error('TERMII_SENDER_ID not configured');
+  const senderId = process.env.TERMII_SENDER_ID || SHARED_FALLBACK_SENDER_ID;
 
   const data = await termiiRequest('/sms/otp/send', {
     message_type: 'NUMERIC',
