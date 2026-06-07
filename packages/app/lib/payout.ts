@@ -3,20 +3,23 @@
 // Pool model (matches /api/markets/resolve):
 //   1. Each bet's gross stake has an Entry Rake (1.5%) shaved before
 //      entering the pool. The remainder is `net_stake`.
-//   2. At resolution the LOSING pool is reduced by a Resolution
-//      Rake (5%). What's left is split pro-rata among winners.
+//   2. At resolution the platform takes a flat POOL RAKE (10%) of the
+//      total pool. Everything else is split pro-rata among winners.
+//      This is the "Pool Rake" that's quietly subtracted from what users
+//      see — getDisplayPool() returns the post-rake number, and this
+//      math computes their share of that same post-rake pool.
 //
 // For a *prospective* bet of `stake` on outcome `i` with current
 // per-outcome net pools `pools[]`:
-//   net          = stake * (1 - entry_rake_pct)
-//   winningPool  = pools[i] + net
-//   losingPool   = sum(pools) - pools[i]            -- unchanged by your bet
-//   payoutPool   = winningPool + losingPool * (1 - resolution_rake_pct)
-//   yourShare    = net / winningPool
-//   payout       = yourShare * payoutPool
+//   net           = stake * (1 - entry_rake_pct)
+//   winningPool   = pools[i] + net
+//   totalPool     = sum(pools) + net
+//   payoutPool    = totalPool * (1 - pool_rake_pct)
+//   yourShare     = net / winningPool
+//   payout        = yourShare * payoutPool
 
-export const ENTRY_RAKE_PCT      = 0.015;
-export const RESOLUTION_RAKE_PCT = 0.05;
+export const ENTRY_RAKE_PCT = 0.015;
+export const POOL_RAKE_PCT  = 0.10;
 
 export interface PayoutPreview {
   payout: number;      // total tNGN returned if you win
@@ -41,7 +44,8 @@ export function calculatePotentialPayout(
   const losingCurrent = totalCurrent - currentOutcome;
 
   const winningPool = currentOutcome + net;
-  const payoutPool  = winningPool + losingCurrent * (1 - RESOLUTION_RAKE_PCT);
+  const newTotal    = totalCurrent + net;
+  const payoutPool  = newTotal * (1 - POOL_RAKE_PCT);
 
   const yourShare = net / winningPool;
   const payout    = yourShare * payoutPool;

@@ -7,7 +7,12 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const RESOLUTION_RAKE = 0.05;
+// Flat 10% of the TOTAL pool taken at resolution. Replaces the old
+// 5%-of-losing-pool model. Aligns with what users see — getDisplayPool()
+// already shows the post-rake pool, so winners share exactly that number.
+// VIP referrers earn a slice of this rake from their referred users' bets
+// only — see splitResolutionRakeForVipReferrers below.
+const POOL_RAKE_PCT = 0.10;
 const FIRST_BET_INSURANCE_CAP = 2000;
 
 async function applyFirstBetInsurance(userId: string, bet: any) {
@@ -111,7 +116,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'voided', reason: 'No losers — all bets refunded' });
     }
 
-    const resolutionRakeAmount = losingPool * RESOLUTION_RAKE;
+    // 10% of total pool comes out as house rake. Whatever's left is split
+    // among winners pro-rata to their net stake.
+    const resolutionRakeAmount = totalPool * POOL_RAKE_PCT;
     const payoutPool = totalPool - resolutionRakeAmount;
 
     // Pay winners

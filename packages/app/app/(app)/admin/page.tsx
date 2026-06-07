@@ -1326,7 +1326,7 @@ export default function AdminPage() {
     <div className="max-w-6xl mx-auto p-4 sm:p-8 pb-24 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <Shield className="w-6 h-6 text-amber-400" /> Odds.ng Admin
+          <Shield className="w-6 h-6 text-amber-400" /> Opinions.ng Admin
         </h1>
         <Badge variant="outline" className="text-emerald-400 border-emerald-400/30">Live</Badge>
       </div>

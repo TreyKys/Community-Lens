@@ -157,7 +157,7 @@ export async function initiateTransfer(params: {
     account_number: params.accountNumber,
     account_name: params.accountName,
     currency_id: 'NGN',
-    remark: params.remark || `Odds.ng payout ${params.transactionRef}`,
+    remark: params.remark || `Opinions.ng payout ${params.transactionRef}`,
   });
   return {
     transactionRef: data?.transaction_reference || params.transactionRef,

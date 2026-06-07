@@ -64,7 +64,7 @@ export async function POST(request: Request) {
           recipientCode,
           amountNGN: Number(w.naira_to_send),
           reference: transactionRef,
-          reason: `Odds.ng withdrawal ${withdrawalId.slice(0, 8)}`,
+          reason: `Opinions.ng withdrawal ${withdrawalId.slice(0, 8)}`,
         });
         transferCode = t.transferCode;
         transferStatus = t.status;
@@ -74,9 +74,9 @@ export async function POST(request: Request) {
           amountKobo,
           bankCode: w.bank_code,
           accountNumber: w.account_number,
-          accountName: w.account_name || 'Odds.ng User',
+          accountName: w.account_name || 'Opinions.ng User',
           transactionRef,
-          remark: `Odds.ng withdrawal ${withdrawalId.slice(0, 8)}`,
+          remark: `Opinions.ng withdrawal ${withdrawalId.slice(0, 8)}`,
         });
         transferCode = t.transactionRef;
         transferStatus = t.status;

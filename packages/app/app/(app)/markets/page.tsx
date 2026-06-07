@@ -3,6 +3,7 @@ import { JackpotBanner } from "@/components/JackpotBanner";
 import { MarketsBackdrop } from "@/components/MarketsBackdrop";
 import { PopularMarketsScroll } from "@/components/PopularMarketsScroll";
 import { CategoryTabs } from "@/components/CategoryTabs";
+import { MarketsToolbar } from "@/components/MarketsToolbar";
 import { Suspense } from "react";
 
 export default function MarketsPage() {
@@ -21,6 +22,9 @@ export default function MarketsPage() {
           </Suspense>
           <Suspense fallback={null}>
             <CategoryTabs />
+          </Suspense>
+          <Suspense fallback={<div className="h-10 rounded-lg shimmer" />}>
+            <MarketsToolbar />
           </Suspense>
           <Suspense fallback={
             <div className="space-y-3">

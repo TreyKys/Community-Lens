@@ -1,37 +1,59 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Loader2 } from 'lucide-react';
+import Link from 'next/link';
 
-export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon' }) {
+interface AuthModalProps {
+  variant?: 'default' | 'icon';
+  trigger?: ReactNode;
+}
+
+export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'request' | 'verify'>('request');
   const [isLoading, setIsLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [referralCode, setReferralCode] = useState('');
   const { toast } = useToast();
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!acceptedTerms) {
+      toast({
+        title: 'Accept the terms',
+        description: 'You need to agree to our Terms & Privacy Policy to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsLoading(true);
 
     try {
       if (!email.includes('@')) throw new Error('Invalid email address');
+
+      // Stash the referral code locally so the post-signup hook can redeem
+      // it once the user_id is known.
+      const trimmedRef = referralCode.trim().toUpperCase();
+      if (trimmedRef) {
+        try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
+      }
 
       // signInWithOtp with shouldCreateUser:true sends a 6-digit code
       // (NOT a magic link) as long as "Confirm email" is OFF in Supabase dashboard.
       // Dashboard path: Authentication → Providers → Email → disable "Confirm email"
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim().toLowerCase(),
-        options: {
-          shouldCreateUser: true,
-        },
+        options: { shouldCreateUser: true },
       });
 
       if (error) throw error;
@@ -57,37 +79,46 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
     setIsLoading(true);
 
     try {
-      const { data: { session }, error } = await supabase.auth.verifyOtp({
+      const { error } = await supabase.auth.verifyOtp({
         email: email.trim().toLowerCase(),
-        token: otp.trim(),
+        token: otp,
         type: 'email',
       });
-
       if (error) throw error;
 
-      if (session?.user) {
-        // Sync user record to our backend — creates the users row + derives wallet address
-        const res = await fetch('/api/auth/verify-otp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ email }),
-        });
+      // Mark the T&C acceptance + redeem any pending referral, fire-and-forget.
+      // Both endpoints are idempotent.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          fetch('/api/user/accept-terms', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${session.access_token}` },
+          }).catch(() => {});
 
-        if (!res.ok) {
-          console.error('Backend sync failed — user will still be logged in');
+          const pendingRef = typeof window !== 'undefined' ? localStorage.getItem('pending_referral_code') : null;
+          if (pendingRef) {
+            fetch('/api/referral/redeem', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ code: pendingRef }),
+            }).finally(() => {
+              try { localStorage.removeItem('pending_referral_code'); } catch {}
+            });
+          }
         }
-      }
+      } catch {}
 
+      toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
       setIsOpen(false);
-      resetForm();
-      window.location.reload();
+      window.location.href = '/markets';
     } catch (error: any) {
       toast({
-        title: 'Invalid Code',
-        description: error.message || 'The code is incorrect or expired. Try again.',
+        title: 'Verification failed',
+        description: error.message || 'Invalid or expired code.',
         variant: 'destructive',
       });
     } finally {
@@ -111,7 +142,9 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
       }}
     >
       <DialogTrigger asChild>
-        {variant === 'icon' ? (
+        {trigger ? (
+          trigger
+        ) : variant === 'icon' ? (
           <button className="flex flex-col items-center justify-center w-full h-full gap-1 text-muted-foreground transition-colors hover:text-foreground">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             <span className="text-[10px] font-medium">Log In</span>
@@ -125,7 +158,7 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
           <DialogTitle>
-            {step === 'request' ? 'Welcome to Odds.ng' : 'Enter Your Code'}
+            {step === 'request' ? 'Welcome to Opinions.ng' : 'Enter Your Code'}
           </DialogTitle>
           <DialogDescription>
             {step === 'request'
@@ -148,8 +181,43 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
                 autoComplete="email"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Sending...' : 'Continue with Email'}
+            <div className="space-y-2">
+              <Label htmlFor="ref" className="flex items-center justify-between">
+                <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+              </Label>
+              <Input
+                id="ref"
+                type="text"
+                placeholder="e.g. ALEX25"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                maxLength={20}
+                className="uppercase tracking-wider"
+              />
+            </div>
+            <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+              <Checkbox
+                checked={acceptedTerms}
+                onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                className="mt-0.5"
+              />
+              <span>
+                I&apos;m 18+ and agree to the{' '}
+                <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                  Terms of Service
+                </Link>
+                {' '}and{' '}
+                <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                  Privacy Policy
+                </Link>.
+              </span>
+            </label>
+            <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms}>
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Sending code…
+                </span>
+              ) : 'Continue with Email'}
             </Button>
             <p className="text-xs text-center text-muted-foreground">
               Phone login coming soon via SMS
@@ -177,7 +245,11 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
               className="w-full"
               disabled={isLoading || otp.length < 6}
             >
-              {isLoading ? 'Verifying...' : 'Verify Code'}
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
+                </span>
+              ) : 'Verify Code'}
             </Button>
             <div className="text-center">
               <Button

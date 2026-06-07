@@ -7,7 +7,6 @@ import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { OnboardingIntercept } from "@/components/OnboardingIntercept";
 import { BottomTabBar } from "@/components/BottomTabBar";
-import Script from "next/script";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -21,12 +20,12 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Odds.ng — Nigeria's Event-Derivative Market",
-  description: "Take positions on football, politics, pop culture and crypto. Smart-money traders. Instant Naira settlement. Cryptographically sealed on Polygon.",
+  title: "Opinions.ng — Nigeria's Event-Prediction Market",
+  description: "Predict football, politics, pop culture and the economy. Smart-money traders. Instant Naira settlement. Cryptographically sealed on Polygon.",
   openGraph: {
-    title: "Odds.ng",
-    description: "Nigeria's first cryptographically transparent event-derivative market. Trade positions. Earn yield.",
-    siteName: "Odds.ng",
+    title: "Opinions.ng",
+    description: "Nigeria's first cryptographically transparent event-prediction market. Take positions. Earn yield.",
+    siteName: "Opinions.ng",
   },
 };
 
@@ -39,19 +38,16 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Saira+Stencil:wght@100..900&display=swap" rel="stylesheet" />
-        {/* Paystack inline JS — loaded here so it's available app-wide */}
-        <Script
-          src="https://js.paystack.co/v1/inline.js"
-          strategy="afterInteractive"
-        />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-saira antialiased`}
         suppressHydrationWarning
       >
         <Providers>
+          {/* Living emerald gradient backdrop, anchored behind every page */}
+          <div className="opinions-bg" aria-hidden="true" />
           <Navbar />
-          <main className="min-h-screen">
+          <main className="min-h-screen relative">
             {children}
           </main>
           <Footer />

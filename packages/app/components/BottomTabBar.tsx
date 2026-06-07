@@ -32,7 +32,7 @@ export function BottomTabBar() {
         <SheetContent side="left" className="p-0 w-64 bg-background border-r">
           <div className="p-4 border-b flex items-center gap-4">
             <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 text-black font-extrabold rounded-md shadow-lg shadow-emerald-500/20 tracking-tighter text-xs">O/N</div>
-            <span className="font-bold">Odds.ng</span>
+            <span className="font-bold">Opinions.ng</span>
           </div>
           <Sidebar />
         </SheetContent>

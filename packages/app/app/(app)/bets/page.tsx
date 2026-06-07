@@ -187,7 +187,7 @@ async function generateTraderCard(bet: Bet, username: string): Promise<string> {
 
   ctx.fillStyle = '#ffffff';
   ctx.font = '700 36px system-ui, -apple-system, "Segoe UI", sans-serif';
-  ctx.fillText('Odds.ng', 100, 132);
+  ctx.fillText('Opinions.ng', 100, 132);
 
   ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
   ctx.font = '500 18px system-ui, -apple-system, "Segoe UI", sans-serif';

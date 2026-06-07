@@ -13,6 +13,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
+import { getDisplayPool } from '@/lib/displayPool';
 
 interface Market {
   id: number;
@@ -363,7 +364,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
         <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1 mb-3">
           <span className="flex items-center gap-1 min-w-0">
             <TrendingUp className="w-3 h-3 shrink-0" />
-            <span className="truncate">Pool: ₦{(market.total_pool || 0).toLocaleString()} tNGN</span>
+            <span className="truncate">Pool: ₦{getDisplayPool(market.total_pool).toLocaleString()} tNGN</span>
           </span>
           <span className="flex items-center gap-1 shrink-0">
             <Clock className="w-3 h-3" />
@@ -483,6 +484,12 @@ type CategoryFilter = {
 function buildCategoryFilter(category: string, subcategory: string | null): CategoryFilter {
   const base: CategoryFilter = { category: null, sport: null, leagueCode: null, questionFilter: null };
 
+  // 4-category board model:
+  //   ball  -> any sports category (football, basketball, etc.) excluding combat sports
+  //   fight -> sports.sport='fight' (boxing, MMA, UFC)
+  //   politics -> politics + geo (world events)
+  //   economy -> economics + finance + crypto + tech (everything money-adjacent)
+  //   trending -> no category filter (show everything)
   const LEAGUE_CODE_MAP: Record<string, string> = {
     pl: 'PL', pd: 'PD', sa: 'SA', bl1: 'BL1', fl1: 'FL1',
     cl: 'CL', wc: 'WC', ec: 'EC', ded: 'DED', bsa: 'BSA',
@@ -490,50 +497,47 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
     nba: 'NBA', euroleague: 'EUROLEAGUE',
     lol: 'LOL', csgo: 'CSGO', dota2: 'DOTA2', valorant: 'VAL', r6s: 'R6S',
   };
-
   const SUBCATEGORY_TO_SPORT: Record<string, string> = {
     football: 'football',
     basketball: 'basketball',
     esports: 'esports',
-    fight: 'fight',
     motorsport: 'motorsport',
   };
 
-  if (category === 'sports' || category === 'trending') {
-    base.category = 'sports';
-    if (subcategory) {
-      if (LEAGUE_CODE_MAP[subcategory]) {
-        base.leagueCode = LEAGUE_CODE_MAP[subcategory];
-      } else if (SUBCATEGORY_TO_SPORT[subcategory]) {
-        base.sport = SUBCATEGORY_TO_SPORT[subcategory];
-      }
-    }
-  } else if (category === 'politics') {
-    base.category = 'politics';
-  } else if (category === 'crypto') {
-    base.category = 'finance';
-  } else if (category === 'entertainment') {
-    base.category = 'entertainment';
-    const ENTERTAINMENT_TAG_MAP: Record<string, string> = {
-      pop: '[POP]',
-      reality: '[REALITY]',
-      nollywood: '[NOLLY]',
-      afrobeats: '[AFRO]',
-      music: '[MUSIC]',
-    };
-    if (subcategory && ENTERTAINMENT_TAG_MAP[subcategory]) {
-      base.questionFilter = ENTERTAINMENT_TAG_MAP[subcategory];
-    }
-  } else if (category === 'economy') {
-    base.category = 'economics';
-  } else if (category === 'tech') {
-    base.category = 'finance';
-  } else if (category === 'geo') {
-    base.category = 'politics';
-  } else {
-    base.category = category;
+  if (category === 'trending') {
+    // no filter — caller treats null category as "all"
+    return base;
   }
 
+  if (category === 'ball') {
+    base.category = 'sports';
+    base.sport = subcategory && SUBCATEGORY_TO_SPORT[subcategory] ? SUBCATEGORY_TO_SPORT[subcategory] : null;
+    if (subcategory && LEAGUE_CODE_MAP[subcategory]) {
+      base.leagueCode = LEAGUE_CODE_MAP[subcategory];
+    }
+    return base;
+  }
+
+  if (category === 'fight') {
+    base.category = 'sports';
+    base.sport = 'fight';
+    return base;
+  }
+
+  if (category === 'politics') {
+    base.category = 'politics';
+    return base;
+  }
+
+  if (category === 'economy') {
+    // "Everything Economy" — economics + finance + crypto-tagged markets.
+    // The list-fetch logic handles this OR by using the multi-category filter.
+    base.category = 'economy_or_finance'; // sentinel handled in the query
+    return base;
+  }
+
+  // Backward-compat for any legacy params (sports, entertainment, crypto, geo, tech)
+  base.category = category;
   return base;
 }
 
@@ -551,6 +555,9 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   const [markets, setMarkets] = useState<Market[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
+  const sortParam = searchParams.get('sort') || 'new';
+  const statusParam = searchParams.get('status') || 'open';
+  const searchQuery = (searchParams.get('q') || '').trim();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -568,8 +575,13 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
         .from('markets')
         .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at')
         .not('status', 'eq', 'voided')
-        .or(`status.neq.resolved,resolved_at.gte.${cutoff}`)
-        .order('closes_at', { ascending: true });
+        .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
+
+      // Sort: 'new' = newest first by id (id is a serial), 'closing' = soonest closing,
+      // 'pool' = biggest pool first.
+      if (sortParam === 'closing') query = query.order('closes_at', { ascending: true });
+      else if (sortParam === 'pool') query = query.order('total_pool', { ascending: false });
+      else query = query.order('id', { ascending: false });
 
       if (filterExactMarketId !== undefined) {
         query = query.eq('id', filterExactMarketId);
@@ -587,10 +599,32 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
         query = query.is('parent_market_id', null);
 
         const filter = buildCategoryFilter(category, subcategory);
-        if (filter.category) query = query.eq('category', filter.category);
+        // Sentinel: 'Everything Economy' tab spans multiple legacy categories.
+        if (filter.category === 'economy_or_finance') {
+          query = query.in('category', ['economy', 'economics', 'finance']);
+        } else if (filter.category) {
+          query = query.eq('category', filter.category);
+        }
         if (filter.sport) query = query.eq('sport', filter.sport);
         if (filter.leagueCode) query = query.eq('league_code', filter.leagueCode);
         if (filter.questionFilter) query = query.ilike('question', `%${filter.questionFilter}%`);
+
+        // Status filter (Open / Locked / Resolved / All)
+        if (statusParam === 'open') query = query.eq('status', 'open');
+        else if (statusParam === 'locked') query = query.eq('status', 'locked');
+        else if (statusParam === 'resolved') query = query.eq('status', 'resolved');
+        // 'all' = no further status filter
+
+        // Fuzzy-ish search: split into tokens, require each to appear in question OR title.
+        // Postgres ilike with % wildcards gives us substring matching that tolerates
+        // word-order shuffling. Good enough for typo-light, partial-word queries.
+        if (searchQuery) {
+          const tokens = searchQuery.split(/\s+/).filter(Boolean).slice(0, 4);
+          for (const tok of tokens) {
+            const safe = tok.replace(/[%_]/g, '');
+            query = query.or(`question.ilike.%${safe}%,title.ilike.%${safe}%`);
+          }
+        }
       }
 
       const { data, error } = await query.limit(50);
@@ -601,7 +635,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     } finally {
       setIsLoading(false);
     }
-  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory, leagueCode]);
+  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory, leagueCode, sortParam, statusParam, searchQuery]);
 
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 

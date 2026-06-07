@@ -48,7 +48,7 @@ export function WalletModal() {
     }
   }, []);
 
-  const handleCardDeposit = async (gateway: 'paystack' | 'squad') => {
+  const handleCardDeposit = async () => {
     const amount = Number(depositAmount);
     if (!amount || amount < 500) {
       toast({ title: 'Minimum deposit is ₦500', variant: 'destructive' });
@@ -62,8 +62,8 @@ export function WalletModal() {
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
       if (!s?.access_token) throw new Error('Sign in to deposit');
-      const path = gateway === 'paystack' ? '/api/paystack/initiate' : '/api/squad/initiate-card';
-      const res = await fetch(path, {
+      // Squad is the only active payment provider — Paystack scrapped per board decision.
+      const res = await fetch('/api/squad/initiate-card', {
         method: 'POST',
         headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
@@ -186,37 +186,27 @@ export function WalletModal() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Choose payment provider</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  onClick={() => handleCardDeposit('paystack')}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
-                  variant="outline"
-                  className="h-auto py-3 flex-col gap-1"
-                >
-                  <span className="font-semibold">Paystack</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
-                </Button>
-                <Button
-                  onClick={() => handleCardDeposit('squad')}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
-                  variant="outline"
-                  className="h-auto py-3 flex-col gap-1"
-                >
-                  <span className="font-semibold">Squad</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
-                </Button>
-              </div>
-              {isDepositLoading && (
-                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 pt-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Redirecting to checkout…
-                </p>
+            <Button
+              onClick={handleCardDeposit}
+              disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
+              className="w-full h-12 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+            >
+              {isDepositLoading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Redirecting to checkout…
+                </span>
+              ) : (
+                <span>Continue to Secure Checkout</span>
               )}
-            </div>
+            </Button>
+            {isDepositLoading && (
+              <div className="h-1 bg-muted/50 rounded-full overflow-hidden">
+                <div className="h-full w-full progress-stripe" />
+              </div>
+            )}
 
             <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-              <Shield className="w-3 h-3" /> Secured by Paystack &amp; Squad
+              <Shield className="w-3 h-3" /> Secured by Squad · Card · Bank · USSD
             </p>
           </TabsContent>
 

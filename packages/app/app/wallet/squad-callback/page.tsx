@@ -71,7 +71,7 @@ function CallbackContent() {
           <p className="text-sm text-muted-foreground">
             {amount ? `${Number(amount).toLocaleString()} tNGN credited to your wallet.` : 'Your wallet has been credited.'}
           </p>
-          <Button onClick={() => router.push('/')} className="w-full">Back to Odds.ng</Button>
+          <Button onClick={() => router.push('/markets')} className="w-full">Back to Opinions.ng</Button>
         </>
       )}
       {status === 'pending' && (
@@ -81,7 +81,7 @@ function CallbackContent() {
           <p className="text-sm text-muted-foreground">
             Squad hasn&apos;t confirmed the payment yet. Your balance will update shortly.
           </p>
-          <Button variant="outline" onClick={() => router.push('/')} className="w-full">Back to Odds.ng</Button>
+          <Button variant="outline" onClick={() => router.push('/markets')} className="w-full">Back to Opinions.ng</Button>
         </>
       )}
       {status === 'failed' && (
@@ -89,7 +89,7 @@ function CallbackContent() {
           <AlertTriangle className="w-10 h-10 mx-auto text-destructive" />
           <h1 className="text-lg font-semibold">Payment not completed</h1>
           <p className="text-sm text-muted-foreground">{errorMsg || 'No charge was made.'}</p>
-          <Button onClick={() => router.push('/')} className="w-full">Back to Odds.ng</Button>
+          <Button onClick={() => router.push('/markets')} className="w-full">Back to Opinions.ng</Button>
         </>
       )}
     </div>

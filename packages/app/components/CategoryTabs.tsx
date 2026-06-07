@@ -4,20 +4,17 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
-  Sparkles, Trophy, Music2, Landmark, Cpu, Bitcoin, MapPin, Tv,
+  Sparkles, Trophy, Swords, Landmark, Coins,
 } from 'lucide-react';
 
-// Polymarket-style horizontal tab bar that drives the ?category= query param
-// the existing MarketList already understands.
+// The 4 categories the board signed off on. "Trending" stays as a meta-tab
+// so users have a home-feed view. Filter mapping happens in MarketList.
 const TABS = [
   { id: 'trending', label: 'Trending', Icon: Sparkles },
-  { id: 'sports', label: 'Sports', Icon: Trophy },
-  { id: 'entertainment', label: 'Pop Culture', Icon: Music2 },
+  { id: 'ball', label: 'Ball', Icon: Trophy },
+  { id: 'fight', label: 'Fight', Icon: Swords },
   { id: 'politics', label: 'Politics', Icon: Landmark },
-  { id: 'tech', label: 'Tech', Icon: Cpu },
-  { id: 'crypto', label: 'Crypto', Icon: Bitcoin },
-  { id: 'economy', label: 'Naija', Icon: MapPin },
-  { id: 'geo', label: 'World', Icon: Tv },
+  { id: 'economy', label: 'Everything Economy', Icon: Coins },
 ] as const;
 
 export function CategoryTabs() {
