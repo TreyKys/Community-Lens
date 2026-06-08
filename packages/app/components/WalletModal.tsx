@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Wallet, Loader2, Shield, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Wallet, Loader2, Shield, AlertTriangle } from 'lucide-react';
 import { APPROVED_BANKS } from '@/lib/banks';
 
 export function WalletModal() {
@@ -21,9 +21,7 @@ export function WalletModal() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
-  const [resolvedAccountName, setResolvedAccountName] = useState<string | null>(null);
-  const [isResolvingAccount, setIsResolvingAccount] = useState(false);
-  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [accountName, setAccountName] = useState('');
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
 
@@ -83,39 +81,6 @@ export function WalletModal() {
     }
   };
 
-  // Resolve the account name once bank + 10-digit NUBAN are both present.
-  const resolveAccount = useCallback(async (code: string, acct: string) => {
-    if (!code || acct.length !== 10) {
-      setResolvedAccountName(null);
-      setResolveError(null);
-      return;
-    }
-    setIsResolvingAccount(true);
-    setResolveError(null);
-    setResolvedAccountName(null);
-    try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (!s?.access_token) throw new Error('Sign in to verify your account');
-      const res = await fetch('/api/squad/resolve-account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.access_token}` },
-        body: JSON.stringify({ bankCode: code, accountNumber: acct }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Could not verify account');
-      setResolvedAccountName(body.accountName);
-    } catch (e: any) {
-      setResolveError(e.message || 'Could not verify account');
-    } finally {
-      setIsResolvingAccount(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => resolveAccount(bankCode, accountNumber), 500);
-    return () => clearTimeout(t);
-  }, [bankCode, accountNumber, resolveAccount]);
-
   const handleWithdraw = async () => {
     const amount = Number(withdrawAmount);
     if (amount < 200) {
@@ -126,8 +91,8 @@ export function WalletModal() {
       toast({ title: 'Enter valid bank details', description: '10-digit NUBAN required', variant: 'destructive' });
       return;
     }
-    if (!resolvedAccountName) {
-      toast({ title: 'Verify your account first', description: 'We need to confirm the account name before sending funds', variant: 'destructive' });
+    if (!accountName.trim()) {
+      toast({ title: 'Enter your account name', description: 'Exactly as it appears in your bank', variant: 'destructive' });
       return;
     }
     if (amount > balance) {
@@ -140,7 +105,7 @@ export function WalletModal() {
       const res = await fetch('/api/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
-        body: JSON.stringify({ amountTNGN: amount, bankCode, accountNumber, accountName: resolvedAccountName }),
+        body: JSON.stringify({ amountTNGN: amount, bankCode, accountNumber, accountName: accountName.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
@@ -153,8 +118,7 @@ export function WalletModal() {
       setWithdrawAmount('');
       setBankCode('');
       setAccountNumber('');
-      setResolvedAccountName(null);
-      setResolveError(null);
+      setAccountName('');
     } catch (err: any) {
       toast({ title: 'Withdrawal failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -261,10 +225,7 @@ export function WalletModal() {
             </div>
             <div className="space-y-2">
               <Label>Bank</Label>
-              <Select
-                value={bankCode}
-                onValueChange={(v) => { setBankCode(v); setResolvedAccountName(null); setResolveError(null); }}
-              >
+              <Select value={bankCode} onValueChange={setBankCode}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select your bank" />
                 </SelectTrigger>
@@ -282,31 +243,22 @@ export function WalletModal() {
                 placeholder="10-digit NUBAN"
                 maxLength={10}
                 value={accountNumber}
-                onChange={e => {
-                  setAccountNumber(e.target.value.replace(/\D/g, ''));
-                  setResolvedAccountName(null);
-                  setResolveError(null);
-                }}
+                onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
               />
             </div>
-
-            {/* Account verification feedback */}
-            {bankCode && accountNumber.length === 10 && (
-              <div className="text-xs rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors"
-                style={{
-                  borderColor: resolvedAccountName ? 'rgba(16,185,129,0.3)' : resolveError ? 'rgba(239,68,68,0.3)' : 'rgba(148,163,184,0.2)',
-                  background: resolvedAccountName ? 'rgba(16,185,129,0.08)' : resolveError ? 'rgba(239,68,68,0.08)' : 'rgba(148,163,184,0.06)',
-                }}
-              >
-                {isResolvingAccount ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" /> Verifying account…</>
-                ) : resolvedAccountName ? (
-                  <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> <span className="text-emerald-300 font-medium">{resolvedAccountName}</span></>
-                ) : resolveError ? (
-                  <><AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" /> <span className="text-red-300">{resolveError}</span></>
-                ) : null}
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label>Account Name</Label>
+              <Input
+                type="text"
+                placeholder="Exactly as it appears in your bank"
+                value={accountName}
+                onChange={e => setAccountName(e.target.value)}
+                autoComplete="off"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Double-check this — withdrawals to the wrong account can&apos;t be reversed.
+              </p>
+            </div>
 
             {wp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
@@ -324,7 +276,7 @@ export function WalletModal() {
             )}
             <Button
               onClick={handleWithdraw}
-              disabled={isWithdrawLoading || isResolvingAccount || !withdrawAmount || !bankCode || accountNumber.length !== 10 || !resolvedAccountName}
+              disabled={isWithdrawLoading || !withdrawAmount || !bankCode || accountNumber.length !== 10 || !accountName.trim()}
               variant="secondary"
               className="w-full"
             >
