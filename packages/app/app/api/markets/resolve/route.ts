@@ -70,10 +70,12 @@ async function applyFirstBetInsurance(userId: string, bet: any, marketId: number
 
   const refundAmount = Math.min(bet.stake_tngn, BET_INSURANCE_CAP);
 
-  const { data: user } = await supabaseAdmin.from('users').select('bonus_balance').eq('id', userId).single();
-  await supabaseAdmin.from('users').update({
-    bonus_balance: (user?.bonus_balance || 0) + refundAmount,
-  }).eq('id', userId);
+  // Atomic increment via credit_user RPC — no read-then-write race.
+  await supabaseAdmin.rpc('credit_user', {
+    p_user_id: userId,
+    p_tngn_delta: 0,
+    p_bonus_delta: refundAmount,
+  });
 
   // Legacy flag — kept for back-compat with the bets-page UI badge.
   if (trigger === 'first_bet') {
@@ -149,8 +151,11 @@ export async function POST(request: Request) {
     // Void if no losers or no winners
     if (winningPool === 0 || losingPool === 0) {
       for (const bet of bets) {
-        const { data: u } = await supabaseAdmin.from('users').select('tngn_balance').eq('id', bet.user_id).single();
-        if (u) await supabaseAdmin.from('users').update({ tngn_balance: (u.tngn_balance || 0) + bet.net_stake_tngn }).eq('id', bet.user_id);
+        await supabaseAdmin.rpc('credit_user', {
+          p_user_id: bet.user_id,
+          p_tngn_delta: bet.net_stake_tngn,
+          p_bonus_delta: 0,
+        });
         await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', bet.id);
       }
       await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
@@ -206,8 +211,11 @@ export async function POST(request: Request) {
     for (const bet of winningBets) {
       const share = bet.net_stake_tngn / winningPool;
       const payout = share * payoutPool;
-      const { data: u } = await supabaseAdmin.from('users').select('tngn_balance').eq('id', bet.user_id).single();
-      if (u) await supabaseAdmin.from('users').update({ tngn_balance: (u.tngn_balance || 0) + payout }).eq('id', bet.user_id);
+      await supabaseAdmin.rpc('credit_user', {
+        p_user_id: bet.user_id,
+        p_tngn_delta: payout,
+        p_bonus_delta: 0,
+      });
       await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
 
       // Win points: 1 pt per ₦100 of profit (payout above stake)
@@ -247,15 +255,11 @@ export async function POST(request: Request) {
       if (ref && ref.sharePct > 0 && betRakeContribution > 0) {
         const vipCut = betRakeContribution * (ref.sharePct / 100);
         if (vipCut > 0) {
-          const { data: vu } = await supabaseAdmin
-            .from('users')
-            .select('bonus_balance')
-            .eq('id', ref.vipId)
-            .single();
-          await supabaseAdmin
-            .from('users')
-            .update({ bonus_balance: (vu?.bonus_balance || 0) + vipCut })
-            .eq('id', ref.vipId);
+          await supabaseAdmin.rpc('credit_user', {
+            p_user_id: ref.vipId,
+            p_tngn_delta: 0,
+            p_bonus_delta: vipCut,
+          });
           await supabaseAdmin.from('vip_referral_earnings').insert({
             vip_user_id: ref.vipId,
             referred_user_id: bet.user_id,
