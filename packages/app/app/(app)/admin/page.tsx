@@ -200,6 +200,8 @@ function CreateMarketPanel() {
   const [optionsText, setOptionsText] = useState('Home Win, Draw, Away Win');
   const [closesAt, setClosesAt] = useState('');
   const [fixtureId, setFixtureId] = useState('');
+  const [parentMarketId, setParentMarketId] = useState<string>('');
+  const [parentOptions, setParentOptions] = useState<Array<{ id: number; question: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const PRESETS = [
@@ -209,6 +211,19 @@ function CreateMarketPanel() {
     { label: 'BTTS', options: 'Yes - Both Score, No - Both Score' },
     { label: 'Win/Lose', options: 'Win, Lose' },
   ];
+
+  // Top-level parent markets in open/locked status — the only valid sub-market
+  // parents. We don't allow nesting under a resolved/voided market.
+  useEffect(() => {
+    supabase
+      .from('markets')
+      .select('id, question, status, parent_market_id')
+      .in('status', ['open', 'locked'])
+      .is('parent_market_id', null)
+      .order('id', { ascending: false })
+      .limit(100)
+      .then(({ data }) => setParentOptions((data as any[]) || []));
+  }, []);
 
   const handleCreate = async () => {
     if (!question || !closesAt) {
@@ -233,16 +248,21 @@ function CreateMarketPanel() {
           options,
           closesAt: new Date(closesAt).toISOString(),
           fixtureId: fixtureId ? parseInt(fixtureId) : null,
+          parentMarketId: parentMarketId ? parseInt(parentMarketId) : null,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      toast({ title: `Market created! ID: ${data.market.id}` });
+      toast({
+        title: `Market created! ID: ${data.market.id}`,
+        description: parentMarketId ? `Linked as sub-market under #${parentMarketId}` : undefined,
+      });
       setQuestion('');
       setClosesAt('');
       setFixtureId('');
+      setParentMarketId('');
     } catch (err: any) {
       toast({ title: 'Failed to create market', description: err.message, variant: 'destructive' });
     } finally { setIsSubmitting(false); }
@@ -307,6 +327,26 @@ function CreateMarketPanel() {
               onChange={e => setFixtureId(e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Parent Market (optional — makes this a sub-market)</Label>
+          <Select value={parentMarketId || 'none'} onValueChange={(v) => setParentMarketId(v === 'none' ? '' : v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Top-level market (no parent)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">— None (top-level market) —</SelectItem>
+              {parentOptions.map((m) => (
+                <SelectItem key={m.id} value={m.id.toString()}>
+                  #{m.id}: {m.question.slice(0, 60)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground">
+            Sub-markets appear under their parent on the event detail page.
+          </p>
         </div>
 
         <Button onClick={handleCreate} disabled={isSubmitting} className="w-full">
@@ -1331,6 +1371,20 @@ function AIMarketGenerator() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [drafts, setDrafts] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [parentOptions, setParentOptions] = useState<Array<{ id: number; question: string }>>([]);
+
+  // Load eligible parent markets once so each draft can opt to attach itself
+  // as a sub-market on submit.
+  useEffect(() => {
+    supabase
+      .from('markets')
+      .select('id, question, status, parent_market_id')
+      .in('status', ['open', 'locked'])
+      .is('parent_market_id', null)
+      .order('id', { ascending: false })
+      .limit(100)
+      .then(({ data }) => setParentOptions((data as any[]) || []));
+  }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1400,6 +1454,7 @@ function AIMarketGenerator() {
             homeTeam: draft.home_team,
             awayTeam: draft.away_team,
             description: draft.description,
+            parentMarketId: draft.parent_market_id || null,
           }),
         });
         if (res.ok) { created++; } else { failed++; }
@@ -1553,6 +1608,25 @@ function AIMarketGenerator() {
                         onChange={e => updateDraft(draft.id, 'options', e.target.value.split(',').map((o: string) => o.trim()).filter(Boolean))}
                         className="h-7 text-xs mt-1"
                       />
+                    </div>
+                    <div className="col-span-2 md:col-span-4">
+                      <Label className="text-xs">Parent Market (optional — makes this a sub-market)</Label>
+                      <Select
+                        value={draft.parent_market_id ? String(draft.parent_market_id) : 'none'}
+                        onValueChange={(v) => updateDraft(draft.id, 'parent_market_id', v === 'none' ? null : parseInt(v))}
+                      >
+                        <SelectTrigger className="h-7 text-xs mt-1">
+                          <SelectValue placeholder="Top-level (no parent)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— None (top-level) —</SelectItem>
+                          {parentOptions.map((m) => (
+                            <SelectItem key={m.id} value={m.id.toString()}>
+                              #{m.id}: {m.question.slice(0, 60)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
