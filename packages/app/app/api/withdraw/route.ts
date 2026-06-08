@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { findBankByCode } from '@/lib/banks';
+import { sendOpsEmail, formatNaira } from '@/lib/ops-email';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -122,6 +123,34 @@ export async function POST(request: Request) {
     });
 
     console.log(`Withdrawal queued: user=${user.id}, tNGN=${amountTNGN}, NGN to send=${nairaToSend}, large=${isLargeWithdrawal}`);
+
+    // Fire-and-forget — never block the user response on email delivery.
+    sendOpsEmail({
+      subject: `${isLargeWithdrawal ? '🔒 LARGE ' : ''}New withdrawal · ${formatNaira(nairaToSend)} · ${bank.name}`,
+      html: `
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;color:#111">
+          <h2 style="margin:0 0 12px;font-size:18px">${isLargeWithdrawal ? '🔒 Large withdrawal — security audit required' : 'New withdrawal request'}</h2>
+          <table style="border-collapse:collapse;width:100%;font-size:14px">
+            <tr><td style="padding:6px 0;color:#666">User</td><td style="padding:6px 0;font-weight:600">${user.email || user.id.slice(0, 8)}</td></tr>
+            <tr><td style="padding:6px 0;color:#666">Amount to send</td><td style="padding:6px 0;font-weight:700;font-size:18px;color:#059669">${formatNaira(nairaToSend)}</td></tr>
+            <tr><td style="padding:6px 0;color:#666">From wallet</td><td style="padding:6px 0">${formatNaira(amountTNGN)} tNGN</td></tr>
+            <tr><td style="padding:6px 0;color:#666">Bank</td><td style="padding:6px 0;font-weight:600">${bank.name}</td></tr>
+            <tr><td style="padding:6px 0;color:#666">NUBAN</td><td style="padding:6px 0;font-family:ui-monospace,monospace;font-weight:600">${accountNumber}</td></tr>
+            ${accountName ? `<tr><td style="padding:6px 0;color:#666">Account name</td><td style="padding:6px 0">${accountName}</td></tr>` : ''}
+            <tr><td style="padding:6px 0;color:#666">Withdrawal ID</td><td style="padding:6px 0;font-family:ui-monospace,monospace;font-size:12px;color:#888">${withdrawal.id}</td></tr>
+          </table>
+          <p style="margin:20px 0 8px;font-size:13px;color:#555">
+            ${isLargeWithdrawal
+              ? '⚠️ Large withdrawal — review carefully before sending. Confirm user identity if anything looks off.'
+              : 'Open the admin dashboard to mark this as paid once you\'ve sent the transfer.'}
+          </p>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://truthmarket.netlify.app'}/admin?tab=withdrawals"
+             style="display:inline-block;margin-top:8px;padding:10px 16px;background:#059669;color:white;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">
+            Open Admin Dashboard
+          </a>
+        </div>
+      `,
+    }).catch(() => {}); // truly fire-and-forget
 
     return NextResponse.json({
       status: 'under_review',
