@@ -116,16 +116,20 @@ export async function verifyTransaction(reference: string): Promise<any> {
 }
 
 /**
- * Look up a Nigerian bank account name from NUBAN + bank code (Squad's
- * name-enquiry endpoint). Used by admin treasury dashboard before approving
- * a payout to confirm the destination is correct.
+ * Look up a Nigerian bank account name from NUBAN + NIP institution code
+ * (Squad's name-enquiry endpoint). Used by admin treasury dashboard before
+ * approving a payout to confirm the destination is correct.
+ *
+ * NOTE: Squad validates this as `nip_code` — a 6-digit NIBSS NIP institution
+ * code, NOT the legacy 3-digit CBN bank code (e.g. Zenith is `000015`, not
+ * `057`). lib/banks.ts must hold the NIP codes for this to work.
  */
 export async function resolveBankAccount(params: {
   bankCode: string;
   accountNumber: string;
 }): Promise<{ accountName: string; bankCode: string; accountNumber: string }> {
   const data = await squadRequest('/payout/account/lookup', 'POST', {
-    bank_code: params.bankCode,
+    nip_code: params.bankCode,
     account_number: params.accountNumber,
   });
   return {
@@ -153,7 +157,7 @@ export async function initiateTransfer(params: {
   const data = await squadRequest('/payout/transfer', 'POST', {
     transaction_reference: params.transactionRef,
     amount: params.amountKobo,
-    bank_code: params.bankCode,
+    nip_code: params.bankCode,
     account_number: params.accountNumber,
     account_name: params.accountName,
     currency_id: 'NGN',

@@ -231,20 +231,11 @@ function BettingInterface({
               {payoutPreview.multiplier.toFixed(2)}× stake
             </span>
           </div>
-          <div className="flex items-center justify-between text-[11px] mt-1.5">
-            <span className="text-muted-foreground">
-              Profit{' '}
-              <span className={cn(
-                'font-semibold tabular-nums',
-                payoutPreview.profit >= 0 ? 'text-emerald-400' : 'text-red-400'
-              )}>
-                {payoutPreview.profit >= 0 ? '+' : ''}₦{Math.round(payoutPreview.profit).toLocaleString()}
-              </span>
-            </span>
-            {payoutPreview.isFirstMover && (
+          {payoutPreview.isFirstMover && (
+            <div className="flex items-center justify-end text-[11px] mt-1.5">
               <span className="text-[10px] text-amber-300/80">First mover — needs an opposing bet</span>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
