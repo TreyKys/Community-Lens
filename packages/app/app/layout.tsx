@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
@@ -27,6 +27,15 @@ export const metadata: Metadata = {
     description: "Nigeria's first cryptographically transparent event-prediction market. Take positions. Earn yield.",
     siteName: "Opinions.ng",
   },
+};
+
+// Without this Android Chrome renders the page at ~980px desktop width and
+// shrinks the whole layout to fit the device, which compresses 10-11px labels
+// into sub-pixel rows and surfaces them as horizontal "no signal" scanlines.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
