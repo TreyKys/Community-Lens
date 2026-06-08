@@ -15,6 +15,14 @@ const MIN_WITHDRAWAL_TNGN = 200;   // ₦200 floor
 // Large withdrawal threshold — routes to manual admin approval
 const LARGE_WITHDRAWAL_THRESHOLD = 500000; // ₦500,000 in tNGN
 
+// VIP skin-in-the-game gate. VIPs earn rake share from their referees'
+// losing bets (credited to bonus_balance, see /api/markets/resolve). To
+// stop a VIP from churning bonus → win → cash-out without ever betting
+// their own money, we block withdrawals until they've personally staked
+// at least this much lifetime. Once met, the gate stays open forever
+// for that VIP — we don't reset on each withdrawal.
+const VIP_WITHDRAWAL_UNLOCK_TNGN = 10000;
+
 export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization');
@@ -44,6 +52,34 @@ export async function POST(request: Request) {
 
     if (amountTNGN < MIN_WITHDRAWAL_TNGN) {
       return NextResponse.json({ error: `Minimum withdrawal is ₦${MIN_WITHDRAWAL_TNGN}` }, { status: 400 });
+    }
+
+    // VIP skin-in-the-game gate — block before the RPC so we surface a
+    // useful error instead of charging through the balance check first.
+    const { data: profile } = await supabaseAdmin
+      .from('users')
+      .select('is_vip')
+      .eq('id', user.id)
+      .single();
+
+    if (profile?.is_vip) {
+      const { data: stakeRows } = await supabaseAdmin
+        .from('user_bets')
+        .select('stake_tngn')
+        .eq('user_id', user.id);
+      const lifetimeStake = (stakeRows || [])
+        .reduce((s, r: any) => s + Number(r.stake_tngn || 0), 0);
+
+      if (lifetimeStake < VIP_WITHDRAWAL_UNLOCK_TNGN) {
+        const remaining = VIP_WITHDRAWAL_UNLOCK_TNGN - lifetimeStake;
+        return NextResponse.json({
+          error: `VIPs need to wager ₦${VIP_WITHDRAWAL_UNLOCK_TNGN.toLocaleString()} in lifetime bets before withdrawing. You've staked ₦${Math.round(lifetimeStake).toLocaleString()}. Wager ₦${Math.round(remaining).toLocaleString()} more to unlock withdrawals.`,
+          code: 'VIP_STAKE_THRESHOLD_NOT_MET',
+          lifetimeStake,
+          required: VIP_WITHDRAWAL_UNLOCK_TNGN,
+          remaining,
+        }, { status: 403 });
+      }
     }
 
     // Fee math up front (so we can pass net values into the atomic RPC).

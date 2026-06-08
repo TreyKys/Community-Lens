@@ -24,6 +24,7 @@ const supabaseAdmin = createClient(
  *   { action: 'purge-paystack',           confirm: 'PURGE PAYSTACK' }
  *   { action: 'reset-user-balances',      confirm: 'RESET BALANCES' }
  *   { action: 'reset-bets-and-markets',   confirm: 'RESET MARKETS' }
+ *   { action: 'reset-launch-data',        confirm: 'RESET LAUNCH DATA' }
  *   { action: 'reset-notifications',      confirm: 'RESET NOTIFICATIONS' }
  *
  * Returns the number of affected rows per table so you can sanity-check.
@@ -119,6 +120,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, results });
     }
 
+    if (action === 'reset-launch-data' && confirm === 'RESET LAUNCH DATA') {
+      // Sandbox cleanup before public launch. The goal is to make the
+      // analytics dashboard reflect a true zero state without nuking the
+      // market catalogue you've already curated.
+      //
+      // What this does:
+      //   1. Delete bet-derived audit rows (bet_insurance_events,
+      //      vip_referral_earnings) — they FK to user_bets.bet_id; clear
+      //      them first to avoid orphans when we delete the bets.
+      //   2. Delete all user_bets — wipes Vol 24h/7d/Lifetime + won/lost
+      //      counters in the analytics endpoint.
+      //   3. Delete every voided market — the 700+ sandbox-test rows that
+      //      bloat the "Voided" tile. Resolved/locked/open markets stay.
+      //   4. Zero pool_by_outcome + total_pool on the surviving markets so
+      //      they don't display stale pool values now that the backing
+      //      bets are gone. Status/options/question/etc. are left alone.
+      //
+      // What this does NOT touch:
+      //   - User balances (tngn_balance, bonus_balance)
+      //   - treasury_log (deposits + rake history kept as audit trail)
+      //   - users / referral_codes / vip flags
+      const results: ResetResult[] = [];
+
+      results.push(await deleteAll('bet_insurance_events'));
+      results.push(await deleteAll('vip_referral_earnings'));
+      results.push(await deleteAll('user_bets'));
+      results.push(await deleteAll('markets', { status: 'voided' }));
+
+      const { error: poolErr, count: poolCount } = await supabaseAdmin
+        .from('markets')
+        .update({ total_pool: 0, pool_by_outcome: {} }, { count: 'exact' })
+        .not('id', 'is', null);
+      if (poolErr) throw new Error(`markets pool zero: ${poolErr.message}`);
+      results.push({ table: 'markets (pool zeroed)', deleted: poolCount });
+
+      return NextResponse.json({ ok: true, results });
+    }
+
     if (action === 'reset-notifications' && confirm === 'RESET NOTIFICATIONS') {
       const r = await deleteAll('notifications');
       return NextResponse.json({ ok: true, results: [r] });
@@ -134,6 +173,7 @@ export async function POST(request: Request) {
           'purge-paystack             (confirm: "PURGE PAYSTACK")',
           'reset-user-balances        (confirm: "RESET BALANCES")',
           'reset-bets-and-markets     (confirm: "RESET MARKETS")',
+          'reset-launch-data          (confirm: "RESET LAUNCH DATA")',
           'reset-notifications        (confirm: "RESET NOTIFICATIONS")',
         ],
       },

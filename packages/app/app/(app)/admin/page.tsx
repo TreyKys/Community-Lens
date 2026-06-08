@@ -1754,6 +1754,11 @@ function VIPPanel() {
               <p className="text-[10px] text-muted-foreground">Credited to bonus_balance (non-withdrawable).</p>
             </div>
           </div>
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-200/90">
+            <strong className="text-amber-300">VIP withdrawal gate:</strong> VIPs cannot withdraw until they&apos;ve
+            personally wagered ₦10,000 lifetime. Stops bonus → win → cash-out without
+            skin-in-the-game. Threshold enforced server-side in <code className="bg-amber-500/10 px-1 rounded">/api/withdraw</code>.
+          </div>
           <Button
             onClick={handleCreate}
             disabled={isSubmitting || !email || !code}
@@ -1803,8 +1808,10 @@ function ResetPanel() {
   const { toast } = useToast();
   const [isResettingSquad, setIsResettingSquad] = useState(false);
   const [isResettingPaystack, setIsResettingPaystack] = useState(false);
+  const [isResettingLaunch, setIsResettingLaunch] = useState(false);
   const [confirmSquad, setConfirmSquad] = useState(false);
   const [confirmPaystack, setConfirmPaystack] = useState(false);
+  const [confirmLaunch, setConfirmLaunch] = useState(false);
 
   const executeReset = async (action: string, confirm: string, setIsLoading: any, setConfirm: any) => {
     setIsLoading(true);
@@ -1886,6 +1893,53 @@ function ResetPanel() {
                   >
                     {isResettingSquad ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                     Confirm Reset Squad
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Reset Launch Data (bets + voided markets) */}
+            <Dialog open={confirmLaunch} onOpenChange={setConfirmLaunch}>
+              <div className="border border-red-500/30 rounded-lg p-4 space-y-2">
+                <h4 className="text-sm font-semibold">Reset Launch Data (bets + voided markets)</h4>
+                <p className="text-xs text-muted-foreground">
+                  Clears every user_bet, deletes voided markets, and zeroes pool totals on
+                  surviving markets. Leaves market catalogue (open/locked/resolved), user
+                  balances, and treasury history intact. Fixes inflated Vol / Voided counts.
+                </p>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setConfirmLaunch(true)}
+                  disabled={isResettingLaunch}
+                  className="w-full"
+                >
+                  {isResettingLaunch ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Resetting…</> : 'Reset Launch Data'}
+                </Button>
+              </div>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Confirm Launch Data Reset</DialogTitle>
+                  <DialogDescription>
+                    This will delete ALL user_bets, ALL voided markets, and zero pool totals on
+                    every remaining market. Balances and treasury history are NOT touched. This
+                    cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-300">Are you absolutely sure?</p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setConfirmLaunch(false)} disabled={isResettingLaunch}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => executeReset('reset-launch-data', 'RESET LAUNCH DATA', setIsResettingLaunch, setConfirmLaunch)}
+                    disabled={isResettingLaunch}
+                  >
+                    {isResettingLaunch ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Confirm Reset Launch Data
                   </Button>
                 </DialogFooter>
               </DialogContent>
