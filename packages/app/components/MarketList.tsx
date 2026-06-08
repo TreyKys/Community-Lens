@@ -37,6 +37,7 @@ interface MarketCardProps {
   session: any;
   onBetPlaced: (marketId: number) => void;
   hideViewMore?: boolean;
+  isStaked?: boolean;
 }
 
 // Color coding by option type — Polymarket style
@@ -269,7 +270,7 @@ function BettingInterface({
   );
 }
 
-function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: MarketCardProps) {
+function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStaked = false }: MarketCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
@@ -320,7 +321,17 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false }: Mark
           <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug">
             {displayQuestion}
           </CardTitle>
-          <div className="shrink-0">{statusBadge()}</div>
+          <div className="shrink-0 flex items-center gap-1.5">
+            {isStaked && (
+              <Badge
+                className="text-[10px] gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-semibold"
+                variant="outline"
+              >
+                <CheckCircle2 className="w-2.5 h-2.5" /> STAKED
+              </Badge>
+            )}
+            {statusBadge()}
+          </div>
         </div>
         {market.description && (
           <div className="mt-2">
@@ -552,6 +563,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   const [markets, setMarkets] = useState<Market[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
+  const [stakedMarketIds, setStakedMarketIds] = useState<Set<number>>(new Set());
   const sortParam = searchParams.get('sort') || 'new';
   const statusParam = searchParams.get('status') || 'open';
   const searchQuery = (searchParams.get('q') || '').trim();
@@ -561,6 +573,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Pull the set of market IDs the current user has any active stake on,
+  // so we can flag those cards with a "STAKED" badge.
+  const fetchStakedMarkets = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from('user_bets')
+      .select('market_id')
+      .eq('user_id', userId)
+      .in('status', ['active', 'won', 'lost']);
+    setStakedMarketIds(new Set((data || []).map((b: any) => b.market_id)));
+  }, []);
+
+  useEffect(() => {
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    else setStakedMarketIds(new Set());
+  }, [session, fetchStakedMarkets]);
 
   const fetchMarkets = useCallback(async () => {
     setIsLoading(true);
@@ -663,8 +691,12 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           key={market.id}
           market={market}
           session={session}
-          onBetPlaced={fetchMarkets}
+          onBetPlaced={(id) => {
+            fetchMarkets();
+            if (session?.user?.id) fetchStakedMarkets(session.user.id);
+          }}
           hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
+          isStaked={stakedMarketIds.has(market.id)}
         />
       ))}
     </div>

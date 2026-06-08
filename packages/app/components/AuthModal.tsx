@@ -338,14 +338,16 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
               >
                 Password
               </Button>
-              <Button
-                type="button"
-                variant={authMethod === 'phone' ? 'default' : 'outline'}
-                className="flex-1"
-                onClick={() => setAuthMethod('phone')}
-              >
-                Phone Code
-              </Button>
+              {process.env.NEXT_PUBLIC_ENABLE_PHONE_AUTH === 'true' && (
+                <Button
+                  type="button"
+                  variant={authMethod === 'phone' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setAuthMethod('phone')}
+                >
+                  Phone Code
+                </Button>
+              )}
             </div>
 
             {authMethod === 'otp' ? (
