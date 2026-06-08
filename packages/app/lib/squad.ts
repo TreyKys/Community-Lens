@@ -128,12 +128,13 @@ export async function resolveBankAccount(params: {
   bankCode: string;
   accountNumber: string;
 }): Promise<{ accountName: string; bankCode: string; accountNumber: string }> {
-  // Squad's docs name this field `bank_code` but their live validator
-  // rejects with "nip_code length must be 6 characters". Send both — same
-  // value — to be robust against either API version.
+  // Send only `bank_code` per Squad's docs. Their validator renames this
+  // internally to `nip_code` and length-checks it — which is why a bad value
+  // surfaces as "nip_code length must be 6 characters" rather than
+  // "bank_code length…". Adding an explicit `nip_code` is rejected as
+  // "nip_code not allowed" (strict schema).
   const data = await squadRequest('/payout/account/lookup', 'POST', {
     bank_code: params.bankCode,
-    nip_code: params.bankCode,
     account_number: params.accountNumber,
   });
   return {
@@ -162,7 +163,6 @@ export async function initiateTransfer(params: {
     transaction_reference: params.transactionRef,
     amount: params.amountKobo,
     bank_code: params.bankCode,
-    nip_code: params.bankCode,
     account_number: params.accountNumber,
     account_name: params.accountName,
     currency_id: 'NGN',
