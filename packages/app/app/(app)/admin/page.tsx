@@ -1724,6 +1724,153 @@ function VIPPanel() {
   );
 }
 
+// ── Data Reset Panel (pre-launch cleanup) ────────────────────────────────
+function ResetPanel() {
+  const { toast } = useToast();
+  const [isResettingSquad, setIsResettingSquad] = useState(false);
+  const [isResettingPaystack, setIsResettingPaystack] = useState(false);
+  const [confirmSquad, setConfirmSquad] = useState(false);
+  const [confirmPaystack, setConfirmPaystack] = useState(false);
+
+  const executeReset = async (action: string, confirm: string, setIsLoading: any, setConfirm: any) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/admin/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, confirm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Reset failed');
+
+      const results = data.results || [];
+      const summary = results.map((r: any) => `${r.table}: ${r.deleted ?? 'updated'} rows`).join(', ');
+      toast({
+        title: `${action.replace(/-/g, ' ')} completed`,
+        description: summary || 'No changes.',
+      });
+      setConfirm(false);
+    } catch (err: any) {
+      toast({ title: 'Reset failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-red-500/20 bg-red-500/5">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2 text-red-400">
+            <Trash2 className="w-4 h-4" />
+            Data Reset (Pre-Launch Only)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-red-300/80">
+            ⚠️ These operations are <strong>irreversible</strong>. Only use before launch to clear test/sandbox ledgers.
+            After launch, decommission this endpoint entirely.
+          </p>
+
+          <div className="space-y-3">
+            {/* Reset Squad + Treasury */}
+            <Dialog open={confirmSquad} onOpenChange={setConfirmSquad}>
+              <div className="border border-red-500/30 rounded-lg p-4 space-y-2">
+                <h4 className="text-sm font-semibold">Reset Squad Deposits & Treasury</h4>
+                <p className="text-xs text-muted-foreground">
+                  Deletes all squad_transactions and Squad gateway treasury_movements.
+                  Use to clear sandbox deposits before public launch.
+                </p>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setConfirmSquad(true)}
+                  disabled={isResettingSquad}
+                  className="w-full"
+                >
+                  {isResettingSquad ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Resetting…</> : 'Reset Squad'}
+                </Button>
+              </div>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Confirm Squad Reset</DialogTitle>
+                  <DialogDescription>
+                    This will delete ALL squad_transactions and Squad treasury entries. This cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-300">Are you absolutely sure?</p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setConfirmSquad(false)} disabled={isResettingSquad}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => executeReset('reset-deposits-squad', 'RESET DEPOSITS SQUAD', setIsResettingSquad, setConfirmSquad)}
+                    disabled={isResettingSquad}
+                  >
+                    {isResettingSquad ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Confirm Reset Squad
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Purge Paystack */}
+            <Dialog open={confirmPaystack} onOpenChange={setConfirmPaystack}>
+              <div className="border border-red-500/30 rounded-lg p-4 space-y-2">
+                <h4 className="text-sm font-semibold">Purge Paystack Entirely</h4>
+                <p className="text-xs text-muted-foreground">
+                  Deletes paystack_transactions, Paystack treasury_movements, and any Paystack withdrawal records.
+                  One-way operation — no Paystack residue will remain.
+                </p>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setConfirmPaystack(true)}
+                  disabled={isResettingPaystack}
+                  className="w-full"
+                >
+                  {isResettingPaystack ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Purging…</> : 'Purge Paystack'}
+                </Button>
+              </div>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Confirm Paystack Purge</DialogTitle>
+                  <DialogDescription>
+                    This will delete ALL Paystack transactions, treasury entries, and withdrawal records. This cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-300">Are you absolutely sure?</p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setConfirmPaystack(false)} disabled={isResettingPaystack}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => executeReset('purge-paystack', 'PURGE PAYSTACK', setIsResettingPaystack, setConfirmPaystack)}
+                    disabled={isResettingPaystack}
+                  >
+                    {isResettingPaystack ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Confirm Purge Paystack
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <p className="text-[10px] text-muted-foreground pt-2 border-t border-muted">
+            These are one-time operations. The endpoint will be disabled post-launch.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ── Main Admin Page ───────────────────────────────────────────────────────
 export default function AdminPage() {
   const [session, setSession] = useState<any>(null);
@@ -1809,6 +1956,7 @@ export default function AdminPage() {
           <TabsTrigger value="override">Override</TabsTrigger>
           <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
           <TabsTrigger value="credits">Credits</TabsTrigger>
+          <TabsTrigger value="reset">Reset</TabsTrigger>
         </TabsList>
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
@@ -1819,6 +1967,7 @@ export default function AdminPage() {
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
         <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>
         <TabsContent value="credits" className="pt-4"><CreditsPanel /></TabsContent>
+        <TabsContent value="reset" className="pt-4"><ResetPanel /></TabsContent>
       </Tabs>
     </div>
   );
