@@ -137,12 +137,12 @@ export function WalletModal() {
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-2 bg-muted/50 border-muted hover:bg-muted">
           <Wallet className="h-4 w-4" />
-          {balance > 0 ? `₦${balance.toLocaleString()} tNGN` : 'Cashier'}
+          {balance > 0 ? `₦${balance.toLocaleString()} tNGN` : 'Wallet'}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[420px] border-muted">
         <DialogHeader>
-          <DialogTitle>Cashier</DialogTitle>
+          <DialogTitle>Wallet</DialogTitle>
           <DialogDescription>
             Balance: <strong>₦{balance.toLocaleString()} tNGN</strong>
             {bonusBalance > 0 && <span className="text-amber-400"> + ₦{bonusBalance.toLocaleString()} bonus</span>}
@@ -177,7 +177,7 @@ export function WalletModal() {
 
             {Number(depositAmount) >= 500 && (
               <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/50">
-                Bet a lot, lose a lot? Get up to ₦5,000 back every Monday.
+                New here? Get up to ₦5,000 back in protection credits every Monday.
               </div>
             )}
 
@@ -262,8 +262,7 @@ export function WalletModal() {
 
             {wp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                <div className="flex justify-between"><span>Fees (1% spread + ₦50)</span><span>₦{wp.fees}</span></div>
-                <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
+                <div className="flex justify-between font-semibold text-foreground">
                   <span>You receive</span><span className="text-emerald-400">₦{wp.naira}</span>
                 </div>
                 {Number(withdrawAmount) >= 500000 && (

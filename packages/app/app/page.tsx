@@ -64,6 +64,15 @@ export default function Home() {
           Event-prediction market · Made in Naija
         </motion.div>
 
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.05 }}
+          className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-xs font-medium text-emerald-300"
+        >
+          🎁 Launch offer — the first 500 members get ₦500 in free credits. Ends Friday.
+        </motion.div>
+
         <motion.h1
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -133,7 +142,7 @@ export default function Home() {
       </main>
 
       <footer className="mt-16 text-center text-xs text-muted-foreground pt-8 relative z-10">
-        <p>Opinions.ng © {new Date().getFullYear()} · Powered by NeuroDev. Polygon-sealed bet book.</p>
+        <p>Opinions.ng © {new Date().getFullYear()} · A NeuroDev Labs product. Polygon-sealed prediction ledger.</p>
       </footer>
     </div>
   );

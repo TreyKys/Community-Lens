@@ -64,7 +64,7 @@ function HeatmapGrid({ data }: { data: Record<string, { pnl: number; count: numb
       <div className="flex gap-1 flex-wrap">
         {days.map(([date, { pnl, count }]) => {
           let bg = 'bg-muted/30';
-          let title = `${date}: No bets`;
+          let title = `${date}: No activity`;
           if (count > 0) {
             if (pnl > 0) {
               const i = Math.min(pnl / 5000, 1);
@@ -73,13 +73,13 @@ function HeatmapGrid({ data }: { data: Record<string, { pnl: number; count: numb
               const i = Math.min(Math.abs(pnl) / 5000, 1);
               bg = i > 0.6 ? 'bg-red-400' : i > 0.3 ? 'bg-red-500/70' : 'bg-red-600/40';
             } else { bg = 'bg-blue-500/40'; }
-            title = `${date}: ${pnl >= 0 ? '+' : ''}₦${pnl.toLocaleString()} (${count} bet${count !== 1 ? 's' : ''})`;
+            title = `${date}: ${pnl >= 0 ? '+' : ''}₦${pnl.toLocaleString()} (${count} prediction${count !== 1 ? 's' : ''})`;
           }
           return <div key={date} title={title} className={cn('w-[10px] h-[10px] rounded-[2px] cursor-pointer transition-transform hover:scale-125', bg)} />;
         })}
       </div>
       <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
-        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-sm bg-muted/30" /> No bets</div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-sm bg-muted/30" /> No activity</div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-sm bg-emerald-500/70" /> Profitable</div>
         <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-sm bg-red-500/70" /> Loss</div>
       </div>
@@ -209,21 +209,21 @@ export default function ProfilePage() {
 
       {/* Ego Metrics */}
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Win Rate" value={`${stats?.winRate || 0}%`} sub={`${stats?.wonBets || 0}/${stats?.resolvedBets || 0} resolved`} icon={Target} color={stats?.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'} />
-        <StatCard label="Total Volume" value={`₦${((stats?.totalVolume || 0) / 1000).toFixed(1)}k`} sub="All-time staked" icon={BarChart3} color="text-blue-400" />
-        <StatCard label="Net P&L" value={`${netProfit >= 0 ? '+' : ''}₦${Math.abs(netProfit).toLocaleString()}`} sub="Winnings minus stakes" icon={netProfit >= 0 ? TrendingUp : TrendingDown} color={netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'} />
-        <StatCard label="Active Slips" value={stats?.activeBets || 0} sub="Bets in play right now" icon={Zap} color="text-amber-400" />
+        <StatCard label="Accuracy" value={`${stats?.winRate || 0}%`} sub={`${stats?.wonBets || 0}/${stats?.resolvedBets || 0} resolved`} icon={Target} color={stats?.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'} />
+        <StatCard label="Total Volume" value={`₦${((stats?.totalVolume || 0) / 1000).toFixed(1)}k`} sub="All-time committed" icon={BarChart3} color="text-blue-400" />
+        <StatCard label="Net P&L" value={`${netProfit >= 0 ? '+' : ''}₦${Math.abs(netProfit).toLocaleString()}`} sub="Returns minus commitments" icon={netProfit >= 0 ? TrendingUp : TrendingDown} color={netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'} />
+        <StatCard label="Live Predictions" value={stats?.activeBets || 0} sub="Predictions live right now" icon={Zap} color="text-amber-400" />
       </div>
 
       {/* Heatmap */}
       <div className="bg-card border border-border rounded-xl p-5">
         <div className="flex items-center gap-2 mb-4">
           <Trophy className="w-4 h-4 text-amber-400" />
-          <h2 className="font-semibold text-sm">30-Day Betting Activity</h2>
+          <h2 className="font-semibold text-sm">30-Day Activity</h2>
         </div>
         {Object.keys(heatmap).length > 0
           ? <HeatmapGrid data={heatmap} />
-          : <p className="text-sm text-muted-foreground">Place your first bet to see activity here.</p>
+          : <p className="text-sm text-muted-foreground">Make your first prediction to see activity here.</p>
         }
       </div>
 
@@ -252,7 +252,7 @@ export default function ProfilePage() {
           <div className="flex items-center justify-between px-5 py-4">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center"><Bell className="w-4 h-4 text-muted-foreground" /></div>
-              <div><p className="text-sm font-medium">Notifications</p><p className="text-xs text-muted-foreground">Bet results, payouts, deposits</p></div>
+              <div><p className="text-sm font-medium">Notifications</p><p className="text-xs text-muted-foreground">Prediction results, returns, deposits</p></div>
             </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
           </div>

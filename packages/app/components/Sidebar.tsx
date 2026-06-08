@@ -65,7 +65,7 @@ export function Sidebar() {
           <User className="h-4 w-4" /> Profile
         </Button>
         <Button variant="ghost" className="w-full justify-start gap-2 hover:bg-muted/50" onClick={() => router.push('/bets')}>
-          <Receipt className="h-4 w-4" /> Bets
+          <Receipt className="h-4 w-4" /> Picks
         </Button>
       </div>
 

@@ -13,7 +13,8 @@ export default function PrivacyPage() {
         </div>
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Privacy Policy</h1>
         <p className="text-muted-foreground text-sm mt-2">
-          This policy explains what data Opinions.ng collects, why we collect it, how we use it,
+          This policy explains what data Opinions.ng — a product operated by{' '}
+          <strong>NeuroDev Labs Technologies</strong> — collects, why we collect it, how we use it,
           and the rights you have over it. It applies to all users of the platform.
         </p>
       </header>

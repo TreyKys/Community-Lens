@@ -60,7 +60,7 @@ export function UserStakeBanner({ marketId }: { marketId: number }) {
       <div className="flex items-center gap-2 mb-2">
         <CheckCircle2 className="w-4 h-4 text-emerald-400" />
         <p className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">
-          You&apos;ve staked on this market
+          Your position on this market
         </p>
       </div>
       <div className="flex items-center justify-between text-sm">
@@ -68,8 +68,8 @@ export function UserStakeBanner({ marketId }: { marketId: number }) {
           <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="font-bold tabular-nums">₦{totalStaked.toLocaleString()}</span>
           <span className="text-muted-foreground text-xs">
-            across {stakes.length} bet{stakes.length !== 1 ? 's' : ''}
-            {activeCount > 0 && activeCount !== stakes.length && ` (${activeCount} active)`}
+            across {stakes.length} prediction{stakes.length !== 1 ? 's' : ''}
+            {activeCount > 0 && activeCount !== stakes.length && ` (${activeCount} live)`}
           </span>
         </div>
       </div>

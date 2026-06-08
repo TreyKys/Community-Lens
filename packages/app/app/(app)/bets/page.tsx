@@ -73,9 +73,9 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
   const isExpired = closesAt < new Date();
 
   const statusConfig = {
-    active: { icon: Clock, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', label: isExpired ? 'Awaiting Result' : 'In Play' },
-    won: { icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Won' },
-    lost: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', label: 'Lost' },
+    active: { icon: Clock, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', label: isExpired ? 'Awaiting Result' : 'Live' },
+    won: { icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Correct' },
+    lost: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', label: 'Missed' },
     refunded: { icon: Shield, color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', label: 'Refunded' },
   };
 
@@ -95,9 +95,6 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
           <span className={cn('text-xs font-semibold uppercase tracking-wider', cfg.color)}>{cfg.label}</span>
         </div>
         <div className="flex items-center gap-2">
-          {bet.is_jackpot_eligible && (
-            <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 text-[9px] px-1.5 py-0">🏆 Jackpot</Badge>
-          )}
           {isLocked && (
             <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 text-[9px] px-1.5 py-0">🔐 On-Chain</Badge>
           )}
@@ -113,12 +110,12 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
 
         <div className={cn('grid gap-3 text-center', isResolved ? 'grid-cols-3' : 'grid-cols-1')}>
           <div className="bg-muted/30 rounded-lg p-2">
-            <p className="text-xs text-muted-foreground mb-0.5">Staked</p>
+            <p className="text-xs text-muted-foreground mb-0.5">Committed</p>
             <p className="text-sm font-bold">₦{bet.stake_tngn.toLocaleString()}</p>
           </div>
           {bet.status === 'won' && (
             <div className="bg-emerald-500/10 rounded-lg p-2">
-              <p className="text-xs text-emerald-400 mb-0.5">Payout</p>
+              <p className="text-xs text-emerald-400 mb-0.5">Return</p>
               <p className="text-sm font-bold text-emerald-400">₦{(bet.payout_tngn || 0).toLocaleString()}</p>
             </div>
           )}
@@ -136,7 +133,7 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
         {bet.is_first_bet_refunded && (
           <div className="mt-3 flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg px-3 py-2">
             <Shield className="w-3.5 h-3.5 shrink-0" />
-            Bet Insurance applied — stake refunded as credit
+            Protection applied — amount returned as credit
           </div>
         )}
 
@@ -146,7 +143,7 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
           return (
             <div className="mt-3 flex items-center justify-between bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2">
               <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-emerald-300/90 font-semibold">
-                <Target className="w-3 h-3" /> Pot Win
+                <Target className="w-3 h-3" /> Projected Return
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-emerald-400 font-black text-base tabular-nums">
@@ -236,7 +233,7 @@ async function generateTraderCard(bet: Bet, username: string): Promise<string> {
 
   ctx.fillStyle = 'rgba(148, 163, 184, 0.85)';
   ctx.font = '500 18px system-ui, -apple-system, "Segoe UI", sans-serif';
-  const eyebrow = won ? 'VERIFIED WIN — I TOLD YOU SO' : 'VERIFIED PREDICTION RECEIPT';
+  const eyebrow = won ? 'VERIFIED CALL — I TOLD YOU SO' : 'VERIFIED PREDICTION RECEIPT';
   ctx.fillText(eyebrow, 100, 158);
 
   // ── User badge (top-right) ───────────────────────────────────────
@@ -279,7 +276,7 @@ async function generateTraderCard(bet: Bet, username: string): Promise<string> {
 
   // ── HERO — the win/loss number ───────────────────────────────────
   const profit = (bet.payout_tngn || 0) - bet.stake_tngn;
-  const heroLabel = won ? 'PROFIT' : 'STAKED';
+  const heroLabel = won ? 'PROFIT' : 'COMMITTED';
   const heroValue = won ? `+₦${profit.toLocaleString()}` : `₦${bet.stake_tngn.toLocaleString()}`;
 
   ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
@@ -293,14 +290,14 @@ async function generateTraderCard(bet: Bet, username: string): Promise<string> {
   // ── Stats row (3-up) ─────────────────────────────────────────────
   const stats: { label: string; value: string }[] = won
     ? [
-        { label: 'STAKED', value: `₦${bet.stake_tngn.toLocaleString()}` },
-        { label: 'PAYOUT', value: `₦${(bet.payout_tngn || 0).toLocaleString()}` },
+        { label: 'COMMITTED', value: `₦${bet.stake_tngn.toLocaleString()}` },
+        { label: 'RETURN', value: `₦${(bet.payout_tngn || 0).toLocaleString()}` },
         { label: 'MULTIPLIER', value: bet.stake_tngn > 0 ? `${((bet.payout_tngn || 0) / bet.stake_tngn).toFixed(2)}×` : '—' },
       ]
     : [
-        { label: 'STATUS', value: bet.status === 'lost' ? 'Lost' : bet.status === 'active' ? 'Live' : 'Refunded' },
-        { label: 'PAYOUT', value: bet.payout_tngn ? `₦${bet.payout_tngn.toLocaleString()}` : '—' },
-        { label: 'STAKED', value: `₦${bet.stake_tngn.toLocaleString()}` },
+        { label: 'STATUS', value: bet.status === 'lost' ? 'Missed' : bet.status === 'active' ? 'Live' : 'Refunded' },
+        { label: 'RETURN', value: bet.payout_tngn ? `₦${bet.payout_tngn.toLocaleString()}` : '—' },
+        { label: 'COMMITTED', value: `₦${bet.stake_tngn.toLocaleString()}` },
       ];
 
   // Stats panel background
@@ -325,7 +322,7 @@ async function generateTraderCard(bet: Bet, username: string): Promise<string> {
   ctx.fillStyle = 'rgba(100, 116, 139, 0.7)';
   ctx.font = '500 18px system-ui, -apple-system, sans-serif';
   const datePart = new Date(bet.placed_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' });
-  ctx.fillText(`${datePart}  ·  Settled on Polygon  ·  odds.ng`, 72, 1032);
+  ctx.fillText(`${datePart}  ·  Settled on Polygon  ·  Opinions.ng`, 72, 1032);
 
   return canvas.toDataURL('image/png');
 }
@@ -414,14 +411,14 @@ export default function BetsPage() {
       if (newlyWon > 0) {
         fireWinConfetti();
         toast({
-          title: newlyWon === 1 ? '🎉 You won!' : `🎉 ${newlyWon} wins just landed!`,
-          description: 'Head to the Won tab to generate your trader card.',
+          title: newlyWon === 1 ? '🎉 You called it!' : `🎉 ${newlyWon} correct calls just landed!`,
+          description: 'Head to the Correct tab to generate your prediction card.',
         });
       }
 
       setBets(next);
     } catch {
-      toast({ title: 'Failed to load bets', variant: 'destructive' });
+      toast({ title: 'Failed to load predictions', variant: 'destructive' });
     } finally { setIsLoading(false); }
   }, [session?.user?.id, toast]);
 
@@ -476,7 +473,7 @@ export default function BetsPage() {
       a.href = dataUrl;
       a.download = `oddsng-win-${bet.id.slice(0, 8)}.png`;
       a.click();
-      toast({ title: 'Trader card saved!', description: 'Share it on Twitter or WhatsApp. Make them feel it.' });
+      toast({ title: 'Prediction card saved!', description: 'Share it on Twitter or WhatsApp. Make them feel it.' });
     } catch {
       toast({ title: 'Could not generate card', variant: 'destructive' });
     }
@@ -487,7 +484,7 @@ export default function BetsPage() {
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center space-y-3">
           <Trophy className="w-12 h-12 text-muted-foreground mx-auto" />
-          <p className="text-muted-foreground">Sign in to see your bets</p>
+          <p className="text-muted-foreground">Sign in to see your predictions</p>
         </div>
       </div>
     );
@@ -498,16 +495,16 @@ export default function BetsPage() {
   const lost = bets.filter(b => b.status === 'lost' || b.status === 'refunded');
 
   const tabs = [
-    { id: 'active', label: 'Active', count: active.length, bets: active },
-    { id: 'won', label: 'Won', count: won.length, bets: won },
-    { id: 'lost', label: 'Lost', count: lost.length, bets: lost },
+    { id: 'active', label: 'Live', count: active.length, bets: active },
+    { id: 'won', label: 'Correct', count: won.length, bets: won },
+    { id: 'lost', label: 'Missed', count: lost.length, bets: lost },
   ];
 
   return (
     <div className="max-w-2xl mx-auto p-4 sm:p-8 pb-24">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">My Bets</h1>
+          <h1 className="text-2xl font-bold tracking-tight">My Predictions</h1>
           <p className="text-sm text-muted-foreground">{bets.length} total prediction{bets.length !== 1 ? 's' : ''}</p>
         </div>
         <Button variant="ghost" size="sm" onClick={fetchBets} className="text-muted-foreground">
@@ -537,7 +534,7 @@ export default function BetsPage() {
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <AlertCircle className="w-10 h-10 text-muted-foreground/50 mb-3" />
                 <p className="text-muted-foreground">
-                  {t.id === 'active' ? 'No active bets. Go make a prediction.' : `No ${t.id} bets yet.`}
+                  {t.id === 'active' ? 'No live predictions. Make your first call.' : `No ${t.label.toLowerCase()} predictions yet.`}
                 </p>
                 {t.id === 'active' && (
                   <a href="/markets" className="mt-3">

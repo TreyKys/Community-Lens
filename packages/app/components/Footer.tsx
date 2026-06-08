@@ -11,11 +11,13 @@ export function Footer() {
         <span className="text-muted-foreground/40">·</span>
         <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
         <span className="text-muted-foreground/40">·</span>
+        <Link href="/company" className="hover:text-foreground transition-colors">Company</Link>
+        <span className="text-muted-foreground/40">·</span>
         <a href="mailto:hello@opinions.ng" className="hover:text-foreground transition-colors">Contact</a>
       </div>
       <p>© {new Date().getFullYear()} Opinions.ng. All rights reserved.</p>
       <p className="text-[11px] text-muted-foreground/70">
-        Opinions.ng is operated by <span className="font-medium">Neurodevlabs Limited</span>.
+        Opinions.ng is a product of <span className="font-medium">NeuroDev Labs Technologies</span>.
       </p>
 
       {/* Hidden RainbowKit integration for crypto-natives */}

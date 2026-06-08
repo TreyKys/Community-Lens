@@ -1,5 +1,5 @@
 import { MarketList } from "@/components/MarketList";
-import { JackpotBanner } from "@/components/JackpotBanner";
+// JackpotBanner intentionally not mounted — weekly prize feature hidden pre-launch.
 import { MarketsBackdrop } from "@/components/MarketsBackdrop";
 import { PopularMarketsScroll } from "@/components/PopularMarketsScroll";
 import { CategoryTabs } from "@/components/CategoryTabs";
@@ -13,9 +13,6 @@ export default function MarketsPage() {
         <MarketsBackdrop />
       </Suspense>
       <div className="relative z-10">
-        <Suspense fallback={null}>
-          <JackpotBanner />
-        </Suspense>
         <div className="flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
           <Suspense fallback={<div className="h-32 rounded-xl shimmer" />}>
             <PopularMarketsScroll />

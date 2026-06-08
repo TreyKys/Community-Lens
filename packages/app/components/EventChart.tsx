@@ -78,7 +78,7 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <CardTitle className="text-base font-semibold tracking-tight">
-              {mode === 'distribution' ? 'Bet Distribution' : 'Volume Over Time'}
+              {mode === 'distribution' ? 'Prediction Distribution' : 'Volume Over Time'}
             </CardTitle>
             <CardDescription className="text-xs">
               {mode === 'distribution'
@@ -151,7 +151,7 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
               </div>
             ) : (
               <div className="h-[100px] flex items-center justify-center">
-                <p className="text-sm text-muted-foreground">No bets placed yet. Be the first.</p>
+                <p className="text-sm text-muted-foreground">No predictions yet. Be the first.</p>
               </div>
             )}
 

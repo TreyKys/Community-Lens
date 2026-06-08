@@ -50,12 +50,12 @@ export async function POST(request: Request) {
       .eq('id', authUser.id)
       .single();
 
-    const email = profile?.email || authUser.email || `${authUser.id}@odds.ng`;
-    const fallbackName = profile?.username || email.split('@')[0] || 'Odds';
-    const firstName = profile?.first_name || fallbackName.split(/\s+/)[0] || 'Odds';
-    const lastName = profile?.last_name || fallbackName.split(/\s+/).slice(1).join(' ') || 'Punter';
+    const email = profile?.email || authUser.email || `${authUser.id}@neurodevlabs.cloud`;
+    const fallbackName = profile?.username || email.split('@')[0] || 'Member';
+    const firstName = profile?.first_name || fallbackName.split(/\s+/)[0] || 'Member';
+    const lastName = profile?.last_name || fallbackName.split(/\s+/).slice(1).join(' ') || 'User';
 
-    const transactionRef = `odds_${randomUUID().replace(/-/g, '')}`;
+    const transactionRef = `ndl_${randomUUID().replace(/-/g, '')}`;
     const amountKobo = Math.round(amount * 100);
     const expiresAt = new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000).toISOString();
 

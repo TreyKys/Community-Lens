@@ -24,16 +24,18 @@ export default function TermsPage() {
       <section className="space-y-6 text-sm leading-relaxed">
         <Section title="1. Nature of the Service">
           <p>
-            Opinions.ng is a product operated by <strong>Neurodevlabs Limited</strong>
-            (&quot;Neurodevlabs&quot;, &quot;we&quot;, &quot;us&quot;). References to Opinions.ng,
-            the platform, or the Service in these Terms mean Opinions.ng as operated by Neurodevlabs.
+            Opinions.ng is a product operated by <strong>NeuroDev Labs Technologies</strong>
+            (CAC Business Name No. 9430461) (&quot;NeuroDev Labs&quot;, &quot;we&quot;, &quot;us&quot;),
+            a business registered in the Federal Republic of Nigeria. References to Opinions.ng,
+            the platform, or the Service in these Terms mean Opinions.ng as operated by NeuroDev Labs.
           </p>
           <p>
-            Opinions.ng operates a pari-mutuel <strong>event-prediction market</strong>. Users take
-            positions on the outcome of public events. We are <strong>not a sportsbook,
-            casino, or licensed gaming operator</strong>. Pools are funded by users, and payouts
-            are distributed pro-rata from those pools after platform fees, exactly as described
-            on each market page.
+            Opinions.ng is a pari-mutuel <strong>event-prediction information market</strong>. Participants
+            commit funds to express a forecast on the outcome of a real-world public event, and returns are
+            determined by the distribution of forecasts across all participants — not by a counterparty house.
+            We are <strong>not a sportsbook, casino, or licensed gaming operator</strong>. Pools are funded
+            entirely by participants and distributed pro-rata among correct forecasts in accordance with the
+            rules of each market.
           </p>
           <p>
             Each market clearly states the resolution criteria and the source of truth that
@@ -48,7 +50,7 @@ export default function TermsPage() {
             <li>You must provide accurate information at sign-up and during KYC.</li>
             <li>One account per person. Multiple accounts are grounds for permanent suspension and
               forfeiture of balance.</li>
-            <li>Employees of Opinions.ng, their immediate family members, and individuals involved
+            <li>Employees of NeuroDev Labs, their immediate family members, and individuals involved
               in market resolution may not participate in those markets.</li>
           </ul>
         </Section>
@@ -56,11 +58,11 @@ export default function TermsPage() {
         <Section title="3. Wallet, Deposits and Withdrawals">
           <p>Your account has two balances:</p>
           <ul className="list-disc pl-5 space-y-1">
-            <li><strong>Actual balance (tNGN)</strong> — funded by deposits and won positions.
-              Withdrawable to any Nigerian bank account once KYC is complete.</li>
-            <li><strong>Bonus balance</strong> — credits awarded for sign-up, referrals,
-              insurance refunds and promotional events. Bonus balance is <strong>not
-              withdrawable</strong> until it is wagered through (rollover requirement).</li>
+            <li><strong>Actual balance (tNGN)</strong> — funded by deposits and returns from correct
+              forecasts. Withdrawable to any Nigerian bank account once KYC is complete.</li>
+            <li><strong>Bonus balance</strong> — promotional credits awarded for sign-up, referrals,
+              protection refunds and promotional events. Bonus balance is <strong>not
+              withdrawable</strong> until the applicable rollover requirement has been met.</li>
           </ul>
           <p>
             We reserve the right to delay withdrawals exceeding ₦500,000 by up to 24 hours for
@@ -68,14 +70,15 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="4. Fees">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>A small entry fee is automatically deducted from each position before it enters
-              the pool.</li>
-            <li>A platform fee is deducted from each pool at resolution. The remainder is
-              distributed pro-rata to winning positions.</li>
-            <li>Withdrawal fees are disclosed in the wallet UI at the moment of withdrawal.</li>
-          </ul>
+        <Section title="4. Service Fees">
+          <p>
+            Opinions.ng may apply service fees in connection with operating the platform and
+            settling markets. Any amount you receive — whether a return on a correct forecast or a
+            withdrawal to your bank — is the net figure shown to you at the relevant time, and you
+            agree to that figure when you confirm the action. We may change our fee schedule from
+            time to time; continued use of the platform constitutes acceptance of the current
+            schedule.
+          </p>
         </Section>
 
         <Section title="5. Market Resolution & Disputes">
@@ -103,10 +106,11 @@ export default function TermsPage() {
 
         <Section title="7. Risk Disclosure">
           <p>
-            Taking positions on prediction markets involves financial risk. You may lose your
-            entire stake. Past results are not indicative of future outcomes. Only stake what
-            you can afford to lose. If you feel your engagement is becoming compulsive, contact
-            <a href="https://www.responsiblegambling.org" target="_blank" rel="noopener" className="text-emerald-400 underline ml-1">a support resource</a>.
+            Taking positions on event-prediction markets involves financial risk. You may lose the
+            full amount you commit to a forecast. Past results are not indicative of future outcomes.
+            Only commit funds you can afford to lose. If you feel your engagement is becoming
+            compulsive, please take a break and reach out to{' '}
+            <a href="mailto:hello@opinions.ng" className="text-emerald-400 underline">hello@opinions.ng</a>.
           </p>
         </Section>
 
@@ -123,7 +127,7 @@ export default function TermsPage() {
             To the maximum extent permitted by law, Opinions.ng is provided on an &quot;as is&quot;
             basis. We make no warranty as to availability, accuracy or fitness for any
             particular purpose. Our aggregate liability to any user is capped at the amount
-            that user has deposited in the prior 12 months. You agree to indemnify Opinions.ng
+            that user has deposited in the prior 12 months. You agree to indemnify NeuroDev Labs
             against losses arising from your breach of these Terms.
           </p>
         </Section>

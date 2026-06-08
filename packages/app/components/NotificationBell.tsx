@@ -57,8 +57,8 @@ export function NotificationBell() {
           setNotifications(prev => [newNotif, ...prev]);
           // Show toast for new notification
           toast({
-            title: newNotif.type === 'bet_won' ? '🎉 You won!' :
-                   (newNotif.type === 'bet_insurance_refund' || newNotif.type === 'first_bet_refund') ? '🛡 Bet Insurance Applied' :
+            title: newNotif.type === 'bet_won' ? '🎉 You called it!' :
+                   (newNotif.type === 'bet_insurance_refund' || newNotif.type === 'first_bet_refund') ? '🛡 Protection Applied' :
                    'Notification',
             description: newNotif.message,
           });

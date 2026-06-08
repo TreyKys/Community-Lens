@@ -321,6 +321,9 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
 
         {step === 'request' ? (
           <>
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 mb-4 text-xs text-emerald-300 text-center font-medium">
+              🎁 First 500 members get ₦500 in free credits — ends Friday.
+            </div>
             <div className="flex gap-2 mb-4">
               <Button
                 type="button"

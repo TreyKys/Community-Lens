@@ -70,12 +70,12 @@ export function BottomTabBar() {
           className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors relative', pathname.startsWith('/bets') ? 'text-foreground' : 'text-muted-foreground')}
         >
           <Receipt className="w-5 h-5" />
-          <span className="text-[10px] font-medium">Bets</span>
+          <span className="text-[10px] font-medium">Picks</span>
         </button>
       ) : (
         <button className="flex flex-col items-center justify-center w-16 h-full gap-1 text-muted-foreground">
           <Receipt className="w-5 h-5 opacity-40" />
-          <span className="text-[10px] font-medium opacity-40">Bets</span>
+          <span className="text-[10px] font-medium opacity-40">Picks</span>
         </button>
       )}
 

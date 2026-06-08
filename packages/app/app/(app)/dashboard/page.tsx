@@ -218,7 +218,7 @@ export default function DashboardPage() {
               <p className="text-lg font-bold mt-1 tabular-nums">
                 ₦<AnimatedNumber value={profile.bonus_balance || 0} />
               </p>
-              <p className="text-[10px] text-muted-foreground/70">Wager to unlock</p>
+              <p className="text-[10px] text-muted-foreground/70">Predict to unlock</p>
             </div>
           </div>
         </CardContent>
@@ -246,13 +246,13 @@ export default function DashboardPage() {
           <Card className="border-amber-500/25">
             <CardContent className="p-4">
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
-                <Sparkles className="w-3 h-3" /> VIP Cut Earned
+                <Sparkles className="w-3 h-3" /> VIP Earnings
               </p>
               <p className="text-2xl font-bold tabular-nums mt-1 text-amber-300">
                 ₦<AnimatedNumber value={vipEarnings} />
               </p>
               <p className="text-[10px] text-muted-foreground/70 mt-1">
-                {code?.rake_share_pct ?? 0}% of rake from your referrals
+                {code?.rake_share_pct ?? 0}% commission from your referrals
               </p>
             </CardContent>
           </Card>
@@ -284,7 +284,7 @@ export default function DashboardPage() {
             </div>
             <p className="text-[10px] text-muted-foreground mt-2">
               {code.is_vip_code
-                ? `Each referee earns you 1000 pts + ${code.rake_share_pct}% of every rake from their bets.`
+                ? `Each referee earns you 1000 pts + ${code.rake_share_pct}% commission from their activity.`
                 : 'Each referee earns you 200 pts + ₦200 in bonus credits when they sign up.'}
             </p>
           </CardContent>
@@ -362,7 +362,7 @@ export default function DashboardPage() {
       <div>
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold flex items-center gap-1.5">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Your Active Stakes
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> Your Live Predictions
           </h2>
           <Link href="/bets" className="text-[11px] text-emerald-400 hover:text-emerald-300">
             See all →
@@ -370,7 +370,7 @@ export default function DashboardPage() {
         </div>
         {stakes.length === 0 ? (
           <div className="p-6 text-center border border-dashed border-border/60 rounded-xl">
-            <p className="text-sm text-muted-foreground mb-2">No active stakes yet.</p>
+            <p className="text-sm text-muted-foreground mb-2">No live predictions yet.</p>
             <Link href="/markets" className="inline-flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300 font-medium">
               Browse markets <ChevronRight className="w-4 h-4" />
             </Link>
@@ -392,7 +392,7 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <Wallet className="w-3 h-3" />
-                      Staked ₦{(s.stake_tngn || 0).toLocaleString()}
+                      Committed ₦{(s.stake_tngn || 0).toLocaleString()}
                     </span>
                     <span className="flex items-center gap-1">
                       <TrendingUp className="w-3 h-3" />

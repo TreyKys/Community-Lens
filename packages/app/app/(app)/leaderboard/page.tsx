@@ -128,7 +128,7 @@ export default function LeaderboardTeaserPage() {
             The Opinions.ng <span className="text-amber-400">Leaderboard</span>
           </h1>
           <p className="text-sm md:text-base text-muted-foreground max-w-xl mx-auto">
-            Predict smarter. Wager louder. Win cash + bonus credits every week and every day.
+            Predict smarter. Back your calls. Win cash + bonus credits every week and every day.
             Pre-register now to lock your seat — slots are limited.
           </p>
         </div>
@@ -295,7 +295,7 @@ export default function LeaderboardTeaserPage() {
             </CardContent>
           </Card>
           <p className="text-[11px] text-muted-foreground mt-2 px-1">
-            Eligibility: ₦2,000+ wagered AND 5+ resolved bets in the cycle.
+            Eligibility: ₦2,000+ committed AND 5+ resolved predictions in the cycle.
           </p>
         </div>
 
@@ -324,7 +324,7 @@ export default function LeaderboardTeaserPage() {
             </CardContent>
           </Card>
           <p className="text-[11px] text-muted-foreground mt-2 px-1">
-            Eligibility: 3+ resolved bets in the day.
+            Eligibility: 3+ resolved predictions in the day.
           </p>
         </div>
 
@@ -336,13 +336,13 @@ export default function LeaderboardTeaserPage() {
               How Points Are Earned
             </h3>
             <ul className="text-xs text-muted-foreground space-y-1.5 list-disc pl-5">
-              <li><span className="text-foreground font-medium">Wagering:</span> 1 pt per ₦250 staked (a ₦1,000 bet = 4 pts).</li>
-              <li><span className="text-foreground font-medium">Winning:</span> 1 pt per ₦100 of profit on resolved bets.</li>
+              <li><span className="text-foreground font-medium">Predicting:</span> 1 pt per ₦250 committed (a ₦1,000 prediction = 4 pts).</li>
+              <li><span className="text-foreground font-medium">Correct calls:</span> 1 pt per ₦100 of profit on resolved predictions.</li>
               <li><span className="text-foreground font-medium">Normal referral:</span> 200 pts + ₦200 bonus credits per signup.</li>
-              <li><span className="text-foreground font-medium">VIP referral:</span> 1,000 pts + rake share from referee&apos;s losing bets.</li>
+              <li><span className="text-foreground font-medium">VIP referral:</span> 1,000 pts + commission share from referees&apos; activity.</li>
             </ul>
             <p className="text-[10px] text-muted-foreground/80 pt-2">
-              Cash prizes require KYC. Bonus credits must be wagered through 1× before withdrawal.
+              Cash prizes require KYC. Bonus credits must be used in predictions 1× before withdrawal.
               Full T&amp;Cs at <a href="/terms" className="underline">/terms</a>.
             </p>
           </CardContent>

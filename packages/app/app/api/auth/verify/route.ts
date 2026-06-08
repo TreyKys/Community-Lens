@@ -57,6 +57,15 @@ export async function POST(req: NextRequest) {
              return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
         }
 
+        // Launch promo: grant the early-signup bonus if slots remain and we're
+        // before the cutoff. Atomic + idempotent server-side; never block
+        // account creation on it. (The auth.users trigger covers the OTP path;
+        // this covers the custodial direct-insert path.)
+        const { data: granted } = await supabase.rpc('claim_launch_bonus', { p_user_id: newUserId });
+        if (granted && Number(granted) > 0) {
+            console.log(`[auth] launch bonus granted: user=${newUserId} amount=${granted}`);
+        }
+
         user = newUser;
     }
 

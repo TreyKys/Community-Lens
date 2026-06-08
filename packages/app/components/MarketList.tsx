@@ -103,7 +103,7 @@ function BettingInterface({
 
   const handlePlaceBet = async () => {
     if (!session?.access_token) {
-      toast({ title: 'Please sign in to place a bet', variant: 'destructive' });
+      toast({ title: 'Please sign in to make a prediction', variant: 'destructive' });
       return;
     }
     if (!selectedOption) {
@@ -111,7 +111,7 @@ function BettingInterface({
       return;
     }
     if (!amount || Number(amount) < 100) {
-      toast({ title: 'Minimum bet is ₦100', variant: 'destructive' });
+      toast({ title: 'Minimum prediction is ₦100', variant: 'destructive' });
       return;
     }
     if (balance !== null && Number(amount) > balance) {
@@ -135,17 +135,16 @@ function BettingInterface({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Bet failed');
+      if (!res.ok) throw new Error(data.error || 'Prediction failed');
 
-      const isJackpot = data.isJackpotEligible;
       toast({
-        title: isJackpot ? '🏆 Bet locked — Jackpot eligible!' : '✅ Prediction locked!',
-        description: `₦${Number(amount).toLocaleString()} staked on ${market.options[parseInt(selectedOption)]}${isJackpot ? ' — this slip enters the weekly jackpot.' : ''}`,
+        title: '✅ Prediction locked!',
+        description: `₦${Number(amount).toLocaleString()} committed to ${market.options[parseInt(selectedOption)]}`,
       });
 
       onSuccess();
     } catch (err: any) {
-      toast({ title: 'Bet failed', description: err.message, variant: 'destructive' });
+      toast({ title: 'Prediction failed', description: err.message, variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
@@ -218,7 +217,7 @@ function BettingInterface({
         <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
           <div className="flex items-center justify-between mb-1.5">
             <span className="flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-              <Sparkles className="w-3 h-3" /> If you win
+              <Sparkles className="w-3 h-3" /> If correct
             </span>
             <span className="text-[10px] text-muted-foreground">
               {Math.round(payoutPreview.impliedProb * 100)}% implied
@@ -229,12 +228,12 @@ function BettingInterface({
               ₦{Math.round(payoutPreview.payout).toLocaleString()}
             </span>
             <span className="text-xs text-emerald-300/80 font-medium tabular-nums">
-              {payoutPreview.multiplier.toFixed(2)}× stake
+              {payoutPreview.multiplier.toFixed(2)}× return
             </span>
           </div>
           {payoutPreview.isFirstMover && (
             <div className="flex items-center justify-end text-[11px] mt-1.5">
-              <span className="text-[10px] text-amber-300/80">First mover — needs an opposing bet</span>
+              <span className="text-[10px] text-amber-300/80">First mover — needs an opposing prediction</span>
             </div>
           )}
         </div>
@@ -327,7 +326,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                 className="text-[10px] gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-semibold"
                 variant="outline"
               >
-                <CheckCircle2 className="w-2.5 h-2.5" /> STAKED
+                <CheckCircle2 className="w-2.5 h-2.5" /> PREDICTED
               </Badge>
             )}
             {statusBadge()}
@@ -381,7 +380,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
         {market.merkle_root && (
           <div className="flex items-center gap-1.5 text-xs text-emerald-400/70 mb-3">
             <Lock className="w-3 h-3" />
-            <span>Bet book sealed on Polygon</span>
+            <span>Prediction ledger sealed on Polygon</span>
           </div>
         )}
 
@@ -411,7 +410,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
               className="flex-1 text-xs bg-muted/20 hover:bg-muted/50"
               onClick={() => setIsExpanded(true)}
             >
-              Place Bet
+              Predict
             </Button>
           )}
         </div>
@@ -422,7 +421,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
             <Drawer open={isExpanded} onOpenChange={setIsExpanded}>
               <DrawerTrigger asChild>
                 <Button variant="ghost" size="sm" className="w-full text-xs bg-muted/20 hover:bg-muted/50">
-                  Tap to Place Bet
+                  Tap to Predict
                 </Button>
               </DrawerTrigger>
               <DrawerContent>
@@ -453,7 +452,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
             !isResolved && !isVoided && (
               <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground py-1">
                 <Lock className="w-3 h-3" />
-                {isLocked ? 'Betting closed' : 'Market closed'}
+                {isLocked ? 'Predictions closed' : 'Market closed'}
               </div>
             )
           )}

@@ -112,7 +112,7 @@ function TreasuryPanel() {
 
       {/* ── Betting activity ────────────────────────────────────────── */}
       <div>
-        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Betting Activity</h3>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Prediction Activity</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label="Vol (24h)" value={f(b.volume24h)} sub="Gross stakes" icon={Activity} color="text-emerald-400" />
           <StatCard label="Vol (7d)" value={f(b.volume7d)} sub="Gross stakes" icon={Activity} color="text-emerald-400" />
@@ -453,7 +453,7 @@ function ManualOverridePanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">Use when the cron job missed the kickoff. Computes Merkle root and seals the bet book.</p>
+          <p className="text-xs text-muted-foreground">Use when the cron job missed the kickoff. Computes Merkle root and seals the prediction ledger.</p>
           <div className="flex gap-2">
             <Select value={lockMarketId} onValueChange={setLockMarketId}>
               <SelectTrigger className="flex-1">
