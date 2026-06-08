@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -546,15 +546,37 @@ function WithdrawalPanel() {
   const [rejectReason, setRejectReason] = useState('');
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
   const [isRefunding, setIsRefunding] = useState(false);
+  const [manualTarget, setManualTarget] = useState<TreasuryData['pendingWithdrawals'][number] | null>(null);
+  const [manualPaidFrom, setManualPaidFrom] = useState('');
+  const [manualReference, setManualReference] = useState('');
+  const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+  const prevPendingCountRef = useRef<number>(0);
 
   const fetchData = useCallback(async () => {
     const res = await fetch('/api/admin/treasury', { headers: adminHeaders() });
     const body = await res.json();
-    if (res.ok) setData(body);
+    if (res.ok) {
+      setData(body);
+      // Audible ping when a NEW pending withdrawal shows up since last poll —
+      // lets the operator stay in another tab and still catch incoming requests.
+      const count = body.pendingWithdrawals?.length || 0;
+      if (count > prevPendingCountRef.current && prevPendingCountRef.current > 0) {
+        try {
+          const audio = new Audio('data:audio/wav;base64,UklGRpYAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YXIAAAB/f39/f39/f3+AhYqOj42IhH13c3R5goeKi4qFf3p4eXyAhIaGhYJ/fHt7fH+ChIWFg4F/fn1+f4GDhIODgYB/f3+AgYKCgoGAgIB/f4CAgYGBgYCAgIB/f4CAgIGBgYGAgIB/f4CAgIGBgYGAgIB/');
+          audio.volume = 0.3;
+          audio.play().catch(() => {});
+        } catch {}
+      }
+      prevPendingCountRef.current = count;
+    }
     setIsLoading(false);
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+    const t = setInterval(fetchData, 30_000);
+    return () => clearInterval(t);
+  }, [fetchData]);
 
   const approveVia = async (withdrawalId: string, gateway: 'paystack' | 'squad') => {
     setBusyRowId(withdrawalId);
@@ -572,6 +594,41 @@ function WithdrawalPanel() {
       toast({ title: 'Payout failed', description: e.message, variant: 'destructive' });
     } finally {
       setBusyRowId(null);
+    }
+  };
+
+  const submitManualPaid = async () => {
+    if (!manualTarget) return;
+    if (!manualPaidFrom.trim() || !manualReference.trim()) {
+      toast({ title: 'Both fields are required', variant: 'destructive' });
+      return;
+    }
+    setIsMarkingPaid(true);
+    try {
+      const res = await fetch('/api/admin/withdrawals/approve', {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({
+          withdrawalId: manualTarget.id,
+          gateway: 'manual',
+          manualPaidFrom: manualPaidFrom.trim(),
+          manualReference: manualReference.trim(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Failed to record payout');
+      toast({
+        title: 'Payout recorded',
+        description: `₦${manualTarget.naira_to_send.toLocaleString()} from ${manualPaidFrom.trim()} · ref ${manualReference.trim()}`,
+      });
+      setManualTarget(null);
+      setManualPaidFrom('');
+      setManualReference('');
+      fetchData();
+    } catch (e: any) {
+      toast({ title: 'Could not record payout', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsMarkingPaid(false);
     }
   };
 
@@ -678,15 +735,21 @@ function WithdrawalPanel() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {/* Paystack scrapped per board decision — Squad is the only active payout rail. */}
+                      {/* Squad payout API not yet activated by HabariPay — we're
+                          on manual mode: send the money from your own bank, then
+                          record the bank-reference here for the audit trail. */}
                       <Button
                         size="sm"
                         className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-                        onClick={() => approveVia(w.id, 'squad')}
-                        disabled={isBusy || !canSquad}
-                        title={!canSquad ? 'Insufficient Squad balance' : 'Pay out via Squad'}
+                        onClick={() => {
+                          setManualTarget(w);
+                          setManualPaidFrom('');
+                          setManualReference('');
+                        }}
+                        disabled={isBusy}
+                        title="I've already sent the money — record the bank reference"
                       >
-                        {isBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Approve & Pay'}
+                        Mark as Paid
                       </Button>
                       <Button
                         size="sm"
@@ -707,6 +770,73 @@ function WithdrawalPanel() {
       </Card>
 
       <WithdrawalHistoryPanel />
+
+      <Dialog
+        open={!!manualTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setManualTarget(null);
+            setManualPaidFrom('');
+            setManualReference('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record manual payout</DialogTitle>
+            <DialogDescription>
+              Send the money from your own bank first, then enter the details
+              below. We&apos;ll mark the withdrawal completed and stamp the ledger
+              with this reference so you can reconcile against your bank
+              statement later.
+            </DialogDescription>
+          </DialogHeader>
+          {manualTarget && (
+            <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-xs space-y-1 mb-2">
+              <div className="flex justify-between"><span className="text-muted-foreground">Send to user</span><span className="font-medium">{manualTarget.user?.email || manualTarget.user_id.slice(0, 8)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span className="font-bold text-emerald-400">₦{manualTarget.naira_to_send.toLocaleString()}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Bank</span><span>{findBankByCode(manualTarget.bank_code)?.name || `Bank ${manualTarget.bank_code}`}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">NUBAN</span><span className="font-mono">{manualTarget.account_number}</span></div>
+              {manualTarget.account_name && (
+                <div className="flex justify-between"><span className="text-muted-foreground">Account name</span><span>{manualTarget.account_name}</span></div>
+              )}
+            </div>
+          )}
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Paid from which of my banks?</Label>
+              <Input
+                placeholder="e.g. GTBank Opinions Ltd, UBA personal"
+                value={manualPaidFrom}
+                onChange={(e) => setManualPaidFrom(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Bank transaction reference</Label>
+              <Input
+                placeholder="The session/transfer ID from your bank app"
+                value={manualReference}
+                onChange={(e) => setManualReference(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Use the reference from the success screen in your bank app — makes statement reconciliation trivial.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setManualTarget(null)} disabled={isMarkingPaid}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-500"
+              onClick={submitManualPaid}
+              disabled={isMarkingPaid || !manualPaidFrom.trim() || !manualReference.trim()}
+            >
+              {isMarkingPaid ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Recording…</> : 'Record payout'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!rejectTargetId} onOpenChange={(open) => { if (!open) { setRejectTargetId(null); setRejectReason(''); } }}>
         <DialogContent>
@@ -751,6 +881,8 @@ type WithdrawalHistoryRow = {
   gateway: string | null;
   gateway_transfer_code: string | null;
   admin_note: string | null;
+  manual_paid_from: string | null;
+  manual_reference: string | null;
   created_at: string;
   approved_at: string | null;
   processed_at: string | null;
@@ -837,6 +969,9 @@ function WithdrawalHistoryPanel() {
                   </div>
                   {w.gateway_transfer_code && (
                     <div className="text-[10px] text-muted-foreground/70 font-mono">ref: {w.gateway_transfer_code}</div>
+                  )}
+                  {w.manual_paid_from && (
+                    <div className="text-[10px] text-emerald-300/80">paid from: {w.manual_paid_from}</div>
                   )}
                   {w.admin_note && (
                     <div className="text-[10px] text-amber-400/80">note: {w.admin_note}</div>

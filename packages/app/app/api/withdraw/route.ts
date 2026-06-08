@@ -130,8 +130,8 @@ export async function POST(request: Request) {
       nairaToReceive: nairaToSend,
       feesDeducted: spreadAmount + WITHDRAWAL_FLAT_FEE,
       message: isLargeWithdrawal
-        ? 'Your withdrawal is being processed. Due to its size, it requires a security audit before release. This typically takes up to 24 hours.'
-        : 'Withdrawal received. Our team will release it to your bank shortly — usually within 1-2 hours during business hours.',
+        ? 'Your withdrawal is being processed. Due to its size, it requires a security audit. This can take up to 24 hours.'
+        : 'Withdrawal received. Withdrawals are reviewed and released to your bank within 24 hours.',
     }, { status: 200 });
 
   } catch (error: any) {

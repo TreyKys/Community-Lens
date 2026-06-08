@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabaseAdmin
     .from('withdrawals')
-    .select('id, user_id, amount_tngn, naira_to_send, bank_code, account_number, account_name, status, gateway, gateway_transfer_code, admin_note, created_at, approved_at, processed_at')
+    .select('id, user_id, amount_tngn, naira_to_send, bank_code, account_number, account_name, status, gateway, gateway_transfer_code, admin_note, manual_paid_from, manual_reference, created_at, approved_at, processed_at')
     .order('created_at', { ascending: false })
     .limit(200);
 

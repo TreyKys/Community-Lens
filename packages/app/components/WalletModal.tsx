@@ -144,15 +144,11 @@ export function WalletModal() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
-      if (data.status === 'under_review') {
-        toast({ title: 'Withdrawal under review', description: data.message });
-      } else {
-        toast({
-          title: 'Withdrawal initiated ✅',
-          description: `₦${data.nairaToReceive?.toLocaleString()} arriving in your bank within 2 hours.`,
-        });
-        if (session?.user?.id) fetchBalance(session.user.id);
-      }
+      toast({
+        title: 'Withdrawal received',
+        description: data.message || 'Withdrawals are reviewed within 24 hours.',
+      });
+      if (session?.user?.id) fetchBalance(session.user.id);
       setIsOpen(false);
       setWithdrawAmount('');
       setBankCode('');
@@ -247,7 +243,7 @@ export function WalletModal() {
 
           {/* ── WITHDRAW ────────────────────────────────────────────────── */}
           <TabsContent value="withdraw" className="space-y-4 py-4">
-            <p className="text-sm text-muted-foreground">Withdraw to any approved Nigerian bank. Arrives in 1-2 hours.</p>
+            <p className="text-sm text-muted-foreground">Withdraw to any approved Nigerian bank. Reviewed within 24 hours.</p>
             <div className="space-y-2">
               <Label>Amount (tNGN)</Label>
               <div className="relative">
