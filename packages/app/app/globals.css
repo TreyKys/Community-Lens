@@ -32,50 +32,21 @@
     100% { transform: translateX(100%); }
   }
 
-  /* Living green-on-black gradient. The body gets two huge fixed-position
-     emerald blobs that drift very slowly — feels alive without being
-     distracting during betting flows. */
+  /* Static green-on-black backdrop. The old version used two huge animated
+     radial blobs with filter: blur(140px). On Mali/Adreno (most Android
+     GPUs) and weaker integrated chips, animating a blurred low-alpha
+     radial-gradient causes horizontal banding artifacts — the rasterizer
+     can't keep alpha stable across the animated transform, and the page
+     looks like it's losing TV signal. Same emerald glow, no blur, no
+     animation, no GPU drama. */
   .opinions-bg {
     position: fixed;
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    overflow: hidden;
-  }
-
-  .opinions-bg::before,
-  .opinions-bg::after {
-    content: '';
-    position: absolute;
-    border-radius: 9999px;
-    filter: blur(140px);
-  }
-
-  .opinions-bg::before {
-    top: -20%;
-    left: -10%;
-    width: 60vw;
-    height: 60vw;
-    background: radial-gradient(circle, rgba(16,185,129,0.18) 0%, rgba(16,185,129,0) 60%);
-    animation: drift-a 22s ease-in-out infinite;
-  }
-
-  .opinions-bg::after {
-    bottom: -25%;
-    right: -10%;
-    width: 65vw;
-    height: 65vw;
-    background: radial-gradient(circle, rgba(5,150,105,0.14) 0%, rgba(5,150,105,0) 60%);
-    animation: drift-b 28s ease-in-out infinite;
-  }
-
-  @keyframes drift-a {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50%      { transform: translate(8vw, 6vh) scale(1.12); }
-  }
-  @keyframes drift-b {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50%      { transform: translate(-6vw, -8vh) scale(1.08); }
+    background:
+      radial-gradient(ellipse 70vw 70vh at 15% -10%, rgba(16,185,129,0.18), rgba(16,185,129,0) 60%),
+      radial-gradient(ellipse 75vw 75vh at 110% 110%, rgba(5,150,105,0.14), rgba(5,150,105,0) 60%);
   }
 
   /* Soft pulse for landing page mesh */
@@ -93,6 +64,10 @@
     0%, 100% { transform: translate(0, 0); }
     50%      { transform: translate(-2vw, 3vh); }
   }
+
+  /* Hide horizontal scrollbars on tab/pill rows while keeping touch-scroll. */
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 
   /* Inline thin progress bar for loading flows */
   .progress-stripe {
@@ -177,5 +152,6 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: clip;
   }
 }

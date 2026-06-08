@@ -531,16 +531,23 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
     return base;
   }
 
+  if (category === 'crypto') {
+    // Crypto is back as a top-level category. Stored markets may use either
+    // "crypto" or "tech" (legacy mix), so we look at both via .in().
+    base.category = 'crypto_or_tech'; // sentinel handled in the query
+    return base;
+  }
+
   if (category === 'economy') {
-    // "Everything Economy" — economics + finance + crypto + tech/AI + entertainment + geo.
-    // Per board decision (2026-06-07), all money-/world-/culture-adjacent markets
-    // fold into this one bucket. The list-fetch logic handles this via .in() filter.
+    // "Everything Economy" — economics + finance + entertainment + geo.
+    // Crypto split back out into its own top-level entry, so it's no longer
+    // folded in here. The list-fetch logic handles this via .in() filter.
     base.category = 'economy_or_finance'; // sentinel handled in the query
     return base;
   }
 
-  // Legacy params (crypto, tech, entertainment, geo) — redirect into economy bucket
-  if (['crypto', 'tech', 'entertainment', 'geo'].includes(category)) {
+  // Legacy params (tech, entertainment, geo) — redirect into economy bucket
+  if (['tech', 'entertainment', 'geo'].includes(category)) {
     base.category = 'economy_or_finance';
     return base;
   }
@@ -553,9 +560,12 @@ interface MarketListProps {
   filterExactMarketId?: number;
   filterChildrenOfParentId?: number;
   leagueCode?: string;
+  /** Scope the whole list to one sport (e.g. "football"). Used by the
+      /football hub when no specific league is selected. */
+  sport?: string;
 }
 
-export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode }: MarketListProps) {
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport }: MarketListProps) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'trending';
   const subcategory = searchParams.get('subcategory') || null;
@@ -619,14 +629,24 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           .is('parent_market_id', null)
           .eq('category', 'sports')
           .eq('league_code', stripped);
+      } else if (sport) {
+        // Sport-scoped list (e.g. /football "All" tab) — pull every market
+        // for the sport regardless of league.
+        query = query
+          .is('parent_market_id', null)
+          .eq('category', 'sports')
+          .eq('sport', sport);
       } else {
         // General market list — top-level only
         query = query.is('parent_market_id', null);
 
         const filter = buildCategoryFilter(category, subcategory);
-        // Sentinel: 'Everything Economy' tab spans multiple legacy categories.
+        // Sentinels span multiple legacy category strings — crypto pulls
+        // both 'crypto' and 'tech', Everything Economy gets the rest.
         if (filter.category === 'economy_or_finance') {
-          query = query.in('category', ['economy', 'economics', 'finance', 'crypto', 'tech', 'entertainment', 'geo', 'geopolitics']);
+          query = query.in('category', ['economy', 'economics', 'finance', 'entertainment', 'geo', 'geopolitics']);
+        } else if (filter.category === 'crypto_or_tech') {
+          query = query.in('category', ['crypto', 'tech']);
         } else if (filter.category) {
           query = query.eq('category', filter.category);
         }
