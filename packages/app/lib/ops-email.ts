@@ -8,7 +8,11 @@
  */
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
-const DEFAULT_FROM = 'Opinions.ng <ops@notifications.opinions.ng>';
+// Resend's shared, pre-verified onboarding domain. Works on every account
+// without DNS setup — perfect for day-one launch. Set RESEND_FROM in env
+// later once you've verified your own domain (e.g. opinions.ng) on
+// Resend, and emails will come from "Opinions.ng <ops@yourdomain>".
+const DEFAULT_FROM = 'Opinions.ng <onboarding@resend.dev>';
 const DEFAULT_TO = 'hello@neurodevlabs.cloud';
 
 export interface OpsEmail {
@@ -18,7 +22,10 @@ export interface OpsEmail {
 
 export async function sendOpsEmail({ subject, html }: OpsEmail): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return; // silent no-op until configured
+  if (!apiKey) {
+    console.warn('[ops-email] RESEND_API_KEY not set — skipping email send');
+    return;
+  }
 
   const from = process.env.RESEND_FROM || DEFAULT_FROM;
   const to = process.env.OPS_EMAIL || DEFAULT_TO;
@@ -32,9 +39,11 @@ export async function sendOpsEmail({ subject, html }: OpsEmail): Promise<void> {
       },
       body: JSON.stringify({ from, to, subject, html }),
     });
+    const responseBody = await res.text().catch(() => '');
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error('[ops-email] Resend rejected:', res.status, body);
+      console.error(`[ops-email] Resend rejected ${res.status} — from=${from} to=${to} body=${responseBody.slice(0, 500)}`);
+    } else {
+      console.log(`[ops-email] sent → ${to} (subject: "${subject.slice(0, 60)}")`);
     }
   } catch (err: any) {
     console.error('[ops-email] send failed:', err?.message || err);

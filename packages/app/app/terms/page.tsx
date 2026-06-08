@@ -24,6 +24,11 @@ export default function TermsPage() {
       <section className="space-y-6 text-sm leading-relaxed">
         <Section title="1. Nature of the Service">
           <p>
+            Opinions.ng is a product operated by <strong>Neurodevlabs Limited</strong>
+            (&quot;Neurodevlabs&quot;, &quot;we&quot;, &quot;us&quot;). References to Opinions.ng,
+            the platform, or the Service in these Terms mean Opinions.ng as operated by Neurodevlabs.
+          </p>
+          <p>
             Opinions.ng operates a pari-mutuel <strong>event-prediction market</strong>. Users take
             positions on the outcome of public events. We are <strong>not a sportsbook,
             casino, or licensed gaming operator</strong>. Pools are funded by users, and payouts

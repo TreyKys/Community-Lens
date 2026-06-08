@@ -14,6 +14,9 @@ export function Footer() {
         <a href="mailto:hello@opinions.ng" className="hover:text-foreground transition-colors">Contact</a>
       </div>
       <p>© {new Date().getFullYear()} Opinions.ng. All rights reserved.</p>
+      <p className="text-[11px] text-muted-foreground/70">
+        Opinions.ng is operated by <span className="font-medium">Neurodevlabs Limited</span>.
+      </p>
 
       {/* Hidden RainbowKit integration for crypto-natives */}
       <div className="opacity-40 hover:opacity-100 transition-opacity flex flex-col items-center gap-2">

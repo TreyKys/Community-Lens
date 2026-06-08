@@ -51,23 +51,28 @@ export default function ResolvePage() {
       return;
     }
 
+    // user_bets is RLS-locked to own rows only (migration 20240621), so
+    // anon-client aggregation no longer works. Fetch distributions in one
+    // batch from the admin endpoint instead.
+    const ids = (raw as any[]).map(m => m.id);
+    const distRes = await fetch(`/api/admin/markets/distributions?ids=${ids.join(',')}`, {
+      headers: adminHeaders(),
+      credentials: 'include',
+    });
+    const distBody = distRes.ok ? await distRes.json() : { distributions: {} };
+    const distMap: Record<number, Record<number, { count: number; stake: number }>> = distBody.distributions || {};
+
     const enriched: MarketRow[] = [];
     for (const m of raw as any[]) {
-      const { data: bets } = await supabase
-        .from('user_bets')
-        .select('outcome_index, net_stake_tngn')
-        .eq('market_id', m.id)
-        .eq('status', 'active');
-
-      const total = bets?.reduce((s, b) => s + (b.net_stake_tngn || 0), 0) ?? 0;
+      const perOutcome = distMap[m.id] || {};
+      const total = Object.values(perOutcome).reduce((s: number, v: any) => s + (v?.stake || 0), 0);
       const distribution = (m.options as string[]).map((opt, i) => {
-        const forOption = (bets || []).filter((b) => b.outcome_index === i);
-        const stake = forOption.reduce((s, b) => s + (b.net_stake_tngn || 0), 0);
+        const cell = perOutcome[i] || { count: 0, stake: 0 };
         return {
           option: opt,
-          count: forOption.length,
-          stake,
-          percentage: total > 0 ? Math.round((stake / total) * 100) : 0,
+          count: cell.count,
+          stake: cell.stake,
+          percentage: total > 0 ? Math.round((cell.stake / total) * 100) : 0,
         };
       });
 

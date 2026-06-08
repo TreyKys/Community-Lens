@@ -40,11 +40,14 @@ export async function POST(request: Request) {
     if (gateway !== 'paystack' && gateway !== 'squad' && gateway !== 'manual') {
       return NextResponse.json({ error: 'gateway must be paystack, squad, or manual' }, { status: 400 });
     }
-    if (gateway === 'manual' && (!manualPaidFrom || !manualReference)) {
-      return NextResponse.json(
-        { error: 'manualPaidFrom and manualReference are required for manual payouts' },
-        { status: 400 }
-      );
+    if (gateway === 'manual') {
+      // Guard against fat-finger empties — these go straight onto the ledger.
+      if (!manualPaidFrom || manualPaidFrom.length < 2) {
+        return NextResponse.json({ error: 'manualPaidFrom must be at least 2 characters (e.g. "GTBank")' }, { status: 400 });
+      }
+      if (!manualReference || manualReference.length < 4) {
+        return NextResponse.json({ error: 'manualReference must be at least 4 characters — use the session ID from your bank app' }, { status: 400 });
+      }
     }
 
     const { data: w, error: wErr } = await supabaseAdmin

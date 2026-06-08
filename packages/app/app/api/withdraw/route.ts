@@ -46,22 +46,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Minimum withdrawal is ₦${MIN_WITHDRAWAL_TNGN}` }, { status: 400 });
     }
 
-    // 1. Fetch user balance (only real tNGN can be withdrawn — not bonus)
-    const { data: userData, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('tngn_balance')
-      .eq('id', user.id)
-      .single();
-
-    if (userError || !userData) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    if ((userData.tngn_balance || 0) < amountTNGN) {
-      return NextResponse.json({ error: 'Insufficient withdrawable balance' }, { status: 400 });
-    }
-
-    // 2. Calculate what user receives
+    // Fee math up front (so we can pass net values into the atomic RPC).
     const spreadAmount = amountTNGN * WITHDRAWAL_SPREAD;
     const nairaAfterSpread = amountTNGN - spreadAmount;
     const nairaToSend = nairaAfterSpread - WITHDRAWAL_FLAT_FEE;
@@ -70,58 +55,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Amount too small after fees' }, { status: 400 });
     }
 
-    // 3. Deduct balance immediately (hold it while withdrawal processes)
-    const newBalance = (userData.tngn_balance || 0) - amountTNGN;
-    await supabaseAdmin
-      .from('users')
-      .update({ tngn_balance: newBalance })
-      .eq('id', user.id);
+    // Atomic balance lock + deduct + withdrawal insert + fee-ledger row —
+    // see migration 20240621 (request_withdrawal RPC). Replaces the previous
+    // read-then-write balance flow which was vulnerable to concurrent
+    // double-withdrawals (two requests both saw the pre-deduction balance).
+    const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_withdrawal', {
+      p_user_id: user.id,
+      p_amount_tngn: amountTNGN,
+      p_spread: spreadAmount,
+      p_flat_fee: WITHDRAWAL_FLAT_FEE,
+      p_naira_to_send: nairaToSend,
+      p_bank_code: bankCode,
+      p_account_number: accountNumber,
+      p_account_name: accountName || null,
+    });
 
-    // 4. Flag large withdrawals for an extra security audit on the admin side.
-    //    All withdrawals route through admin approval so ops can pick the
-    //    gateway with the most headroom (Paystack vs Squad treasury balances).
-    const isLargeWithdrawal = amountTNGN >= LARGE_WITHDRAWAL_THRESHOLD;
-
-    // 5. Create withdrawal record
-    const { data: withdrawal, error: wdError } = await supabaseAdmin
-      .from('withdrawals')
-      .insert({
-        user_id: user.id,
-        amount_tngn: amountTNGN,
-        spread_amount: spreadAmount,
-        flat_fee: WITHDRAWAL_FLAT_FEE,
-        naira_to_send: nairaToSend,
-        bank_code: bankCode,
-        account_number: accountNumber,
-        account_name: accountName || null,
-        status: 'pending_admin_approval',
-        gateway: null,                                  // admin picks at approval time
-        requires_admin_approval: true,
-        created_at: new Date().toISOString(),
-      })
-      .select('id')
-      .single();
-
-    if (wdError) {
-      // Refund balance if we couldn't create the record
-      await supabaseAdmin
-        .from('users')
-        .update({ tngn_balance: userData.tngn_balance })
-        .eq('id', user.id);
+    if (rpcError) {
+      const code = (rpcError as any)?.code;
+      if (code === 'P0001') {
+        return NextResponse.json({ error: 'Insufficient withdrawable balance' }, { status: 400 });
+      }
+      if (code === 'P0002') {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      }
+      console.error('[withdraw] RPC failed', rpcError);
       return NextResponse.json({ error: 'Failed to create withdrawal request' }, { status: 500 });
     }
 
-    // 6. Log fee capture as a treasury movement (no gateway yet — set on payout).
-    await supabaseAdmin.from('treasury_movements').insert({
-      user_id: user.id,
-      type: 'spread',
-      gateway: null,
-      direction: 'in',
-      amount_ngn: spreadAmount + WITHDRAWAL_FLAT_FEE,
-      reference: withdrawal.id,
-      metadata: { source: 'withdrawal_fee' },
-    });
+    const withdrawalId = (rpcResult as any)?.withdrawal_id;
+    if (!withdrawalId) {
+      return NextResponse.json({ error: 'Withdrawal RPC returned no id' }, { status: 500 });
+    }
 
+    const isLargeWithdrawal = amountTNGN >= LARGE_WITHDRAWAL_THRESHOLD;
+    const withdrawal = { id: withdrawalId };
     console.log(`Withdrawal queued: user=${user.id}, tNGN=${amountTNGN}, NGN to send=${nairaToSend}, large=${isLargeWithdrawal}`);
 
     // Fire-and-forget — never block the user response on email delivery.
