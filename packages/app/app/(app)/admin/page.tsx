@@ -1724,7 +1724,7 @@ function AIMarketGenerator() {
           <div className="space-y-2">
             <Label>Or paste document content directly</Label>
             <textarea
-              className="w-full h-40 bg-muted/30 border border-border rounded-lg p-3 text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full h-40 bg-muted/30 border border-border rounded-lg p-3 text-base md:text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary"
               placeholder="Paste fixture lists, news, schedules, event briefs here..."
               value={docText}
               onChange={e => setDocText(e.target.value)}

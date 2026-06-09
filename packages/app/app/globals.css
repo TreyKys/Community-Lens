@@ -154,4 +154,22 @@
     @apply bg-background text-foreground;
     overflow-x: clip;
   }
+
+  /* Android Chrome + iOS Safari auto-zoom into any focused form control
+     whose font-size is below 16px, then leave the layout zoomed-in
+     afterward — what users perceive as the page "distorting" after
+     tapping a field. Forcing 16px on small viewports kills the zoom
+     trigger. Desktop styles take over again at md+ via component
+     classes, so this is purely a mobile-only correction. Tailwind utility
+     classes (.text-xs, .text-sm) on form controls would normally win this
+     specificity battle, hence !important. */
+  @media (max-width: 767px) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    textarea,
+    select,
+    [role='combobox'],
+    [role='textbox'] {
+      font-size: 16px !important;
+    }
+  }
 }

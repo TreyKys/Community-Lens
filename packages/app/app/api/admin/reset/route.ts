@@ -146,6 +146,26 @@ export async function POST(request: Request) {
       results.push(await deleteAll('bet_insurance_events'));
       results.push(await deleteAll('vip_referral_earnings'));
       results.push(await deleteAll('user_bets'));
+
+      // merkle_commits FK markets.id ON DELETE NO ACTION → clear commits
+      // for the soon-to-be-deleted voided markets first. We scope to the
+      // voided rows specifically so audit commits on resolved markets stay
+      // intact.
+      const { data: voidedMarkets, error: voidedErr } = await supabaseAdmin
+        .from('markets')
+        .select('id')
+        .eq('status', 'voided');
+      if (voidedErr) throw new Error(`markets voided lookup: ${voidedErr.message}`);
+      const voidedIds = (voidedMarkets || []).map(m => m.id);
+      if (voidedIds.length > 0) {
+        const { count: merkleCount, error: merkleErr } = await supabaseAdmin
+          .from('merkle_commits')
+          .delete({ count: 'exact' })
+          .in('market_id', voidedIds);
+        if (merkleErr) throw new Error(`merkle_commits: ${merkleErr.message}`);
+        results.push({ table: 'merkle_commits (voided)', deleted: merkleCount });
+      }
+
       results.push(await deleteAll('markets', { status: 'voided' }));
 
       const { error: poolErr, count: poolCount } = await supabaseAdmin
