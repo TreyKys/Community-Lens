@@ -173,10 +173,31 @@ export async function POST(req: Request) {
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
     ]);
 
+    // Welcome Match: idempotent per-user, only fires on the first qualifying
+    // deposit and only inside the offer window. Match is matched on the
+    // tNGN-credited amount (post-spread) so what they predicted with is what
+    // we match. Failure here must not break the deposit flow.
+    let welcomeCredit = 0;
+    try {
+      const { data: matchAmt } = await supabaseAdmin.rpc('claim_welcome_match', {
+        p_user_id: userId,
+        p_deposit_amount: tNGNToCredit,
+      });
+      welcomeCredit = Number(matchAmt || 0);
+      if (welcomeCredit > 0) {
+        await supabaseAdmin.from('treasury_log').insert([
+          { type: 'welcome_match', amount_tngn: welcomeCredit, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
+        ]);
+      }
+    } catch (e: any) {
+      console.error('Welcome match grant failed (deposit still credited):', e?.message || e);
+    }
+
     return NextResponse.json({
       status: 'success',
       tNGNcredited: tNGNToCredit,
       spreadCaptured: spreadAmount,
+      welcomeMatchCredit: welcomeCredit,
     }, { status: 200 });
   } catch (e: any) {
     console.error('Squad webhook error:', e);

@@ -70,7 +70,7 @@ export default function Home() {
           transition={{ duration: 0.5, delay: 0.05 }}
           className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-xs font-medium text-emerald-300"
         >
-          🎁 Launch offer — the first 500 members get ₦500 in free credits. Ends Friday.
+          🎁 Welcome match — deposit ₦500+, we double it up to ₦1,000. Ends Sat.
         </motion.div>
 
         <motion.h1

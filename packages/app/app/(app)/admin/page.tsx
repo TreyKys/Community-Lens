@@ -154,6 +154,55 @@ function TreasuryPanel() {
         </div>
       </div>
 
+      {/* ── Welcome Match promo ────────────────────────────────────── */}
+      {stats.welcomePromo && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Welcome Match</h3>
+            <Badge className={cn('text-[10px] h-5', stats.welcomePromo.active
+              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              : 'bg-muted text-muted-foreground border-muted')}>
+              {stats.welcomePromo.active ? 'LIVE' : 'PAUSED'}
+            </Badge>
+            {stats.welcomePromo.cutoff && (
+              <span className="text-[10px] text-muted-foreground">
+                Cutoff: {new Date(stats.welcomePromo.cutoff).toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard
+              label="Claims (Total)"
+              value={(stats.welcomePromo.totalClaims || 0).toLocaleString()}
+              sub={`${stats.welcomePromo.claims24h} in last 24h`}
+              icon={Gift}
+              color="text-emerald-400"
+            />
+            <StatCard
+              label="Credit Granted"
+              value={f(stats.welcomePromo.creditGrantedTotal)}
+              sub={`${f(stats.welcomePromo.creditGranted24h)} in last 24h`}
+              icon={Coins}
+              color="text-amber-400"
+            />
+            <StatCard
+              label="Deposits Triggered"
+              value={f(stats.welcomePromo.depositVolumeTriggered)}
+              sub="Real ₦ pulled in by promo"
+              icon={Activity}
+              color="text-emerald-400"
+            />
+            <StatCard
+              label="Promo Settings"
+              value={`${Math.round(stats.welcomePromo.matchRatio * 100)}% / ${f(stats.welcomePromo.matchCap)}`}
+              sub={`Min deposit ${f(stats.welcomePromo.minDeposit)}`}
+              icon={Sparkles}
+              color="text-blue-400"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Heartbeat status (unchanged) */}
       <Card className={cn('border', heartbeat.daysSince !== null && heartbeat.daysSince >= 25 ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5')}>
         <CardContent className="p-4 flex items-center justify-between">

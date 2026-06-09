@@ -41,6 +41,8 @@ export async function GET(request: Request) {
       pointsOutstanding,
       withdrawalsPending,
       depositsTotal,
+      promoConfig,
+      promoGrants,
     ] = await Promise.all([
       supabaseAdmin.from('treasury_log').select('amount_tngn, type'),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }),
@@ -58,6 +60,8 @@ export async function GET(request: Request) {
       supabaseAdmin.from('users').select('points'),
       supabaseAdmin.from('withdrawals').select('amount_tngn').eq('status', 'pending_paystack'),
       supabaseAdmin.from('treasury_log').select('amount_tngn').eq('type', 'deposit'),
+      supabaseAdmin.from('launch_promo').select('match_ratio, match_cap, min_deposit, cutoff, active').eq('id', 1).maybeSingle(),
+      supabaseAdmin.from('launch_promo_grants').select('deposit_amount, credit_granted, granted_at'),
     ]);
 
     const treasuryRows = treasury.data || [];
@@ -108,7 +112,31 @@ export async function GET(request: Request) {
     const pendingWithdrawalAmount = (withdrawalsPending.data || [])
       .reduce((s, w: any) => s + Number(w.amount_tngn || 0), 0);
 
-    const houseRevenueNet = entryRake + resolutionRake - vipEarningsTotal - insurancePaid;
+    // ── Welcome promo metrics ─────────────────────────────────────────
+    // Each grant row = one user who hit a qualifying first deposit
+    // inside the window. Total credit granted is our exposure; total
+    // deposit triggered is the gross deposit volume the promo brought in.
+    const grants = promoGrants.data || [];
+    const grants24h = grants.filter((g: any) => g.granted_at >= dayAgo);
+    const grants7d  = grants.filter((g: any) => g.granted_at >= weekAgo);
+    const sumGrants = (rows: any[]) => rows.reduce((s, g: any) => s + Number(g.credit_granted || 0), 0);
+    const sumDeposits = (rows: any[]) => rows.reduce((s, g: any) => s + Number(g.deposit_amount || 0), 0);
+    const welcomePromo = {
+      active:                 !!promoConfig.data?.active,
+      cutoff:                 promoConfig.data?.cutoff || null,
+      matchRatio:             Number(promoConfig.data?.match_ratio || 0),
+      matchCap:               Number(promoConfig.data?.match_cap   || 0),
+      minDeposit:             Number(promoConfig.data?.min_deposit || 0),
+      totalClaims:            grants.length,
+      claims24h:              grants24h.length,
+      claims7d:               grants7d.length,
+      creditGrantedTotal:     sumGrants(grants),
+      creditGranted24h:       sumGrants(grants24h),
+      depositVolumeTriggered: sumDeposits(grants),
+    };
+    const promoExposure = welcomePromo.creditGrantedTotal;
+
+    const houseRevenueNet = entryRake + resolutionRake - vipEarningsTotal - insurancePaid - promoExposure;
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
@@ -118,8 +146,10 @@ export async function GET(request: Request) {
         totalRake: entryRake + resolutionRake,
         vipPaidOut: vipEarningsTotal,
         insurancePaid,
+        promoExposure,
         houseRevenueNet,
       },
+      welcomePromo,
       users: {
         total: userCounts.count || 0,
         vip:   vipCount.count   || 0,
