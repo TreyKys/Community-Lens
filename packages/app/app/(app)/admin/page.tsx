@@ -302,7 +302,10 @@ function CreateMarketPanel() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
 
       toast({
         title: `Market created! ID: ${data.market.id}`,
@@ -445,7 +448,10 @@ function ManualOverridePanel() {
         body: JSON.stringify({ marketId: parseInt(lockMarketId) }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
       toast({ title: `Market ${lockMarketId} locked! ${data.betCount} bets committed.` });
       setLockMarketId('');
     } catch (err: any) {
@@ -466,7 +472,10 @@ function ManualOverridePanel() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
       toast({ title: `Market ${resolveMarketId} resolved! ${data.winnersCount} winners paid.` });
       setResolveMarketId('');
       setWinningOutcome('');
@@ -484,7 +493,10 @@ function ManualOverridePanel() {
         headers: cronHeaders(),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
       toast({ title: '❤️ Heartbeat fired! Escape hatch clock reset.' });
     } catch (err: any) {
       toast({ title: 'Heartbeat failed', description: err.message, variant: 'destructive' });
@@ -1154,7 +1166,10 @@ function UsersPanel() {
         body: JSON.stringify({ userLookup: issueTarget.id, amount: amt, reason: issueReason }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
       toast({ title: `Credited ₦${amt.toLocaleString()} to ${issueTarget.email || issueTarget.id.slice(0, 8)}` });
       setIssueTarget(null);
       setIssueAmount('');
@@ -1324,7 +1339,10 @@ function CreditsPanel() {
         body: JSON.stringify({ userLookup: userLookup.trim(), amount: amt, reason: reason.trim() }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
       toast({
         title: `Credited ₦${amt.toLocaleString()}`,
         description: `New bonus balance: ₦${(data.newBonusBalance || 0).toLocaleString()}`,
@@ -1457,7 +1475,10 @@ function AIMarketGenerator() {
         body: JSON.stringify({ documentContent: docText, documentName: docName }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
       setDrafts(data.markets);
       toast({ title: `${data.markets.length} markets generated. Review and submit.` });
     } catch (err: any) {
