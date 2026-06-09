@@ -17,6 +17,7 @@ function mapRpcError(message: string): { status: number; error: string } {
   if (message.includes('market_not_open'))        return { status: 400, error: 'Market is not open for betting' };
   if (message.includes('market_closed'))          return { status: 400, error: 'Market betting period has ended' };
   if (message.includes('insufficient_balance'))   return { status: 400, error: 'Insufficient balance' };
+  if (message.includes('not_an_owner'))           return { status: 403, error: 'Forbidden' };
   return { status: 500, error: 'Failed to place bet' };
 }
 
@@ -56,6 +57,59 @@ export async function POST(request: Request) {
     if (!Number.isFinite(stakeNum) || stakeNum <= 0 ||
         !Number.isInteger(outcomeNum) || outcomeNum < 0) {
       return NextResponse.json({ error: 'Invalid stake or outcome' }, { status: 400 });
+    }
+
+    // Owner shadow-bet branch: if this user has an active row in
+    // owner_accounts, route to place_shadow_bet instead. Other users see
+    // an unchanged market pool because shadow bets never touch it. The
+    // owner_accounts table is RLS-locked so this lookup only works from
+    // the service-role client.
+    const { data: ownerRow } = await supabaseAdmin
+      .from('owner_accounts')
+      .select('active')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (ownerRow?.active) {
+      const { data: shadow, error: shadowErr } = await supabaseAdmin
+        .rpc('place_shadow_bet', {
+          p_user_id: user.id,
+          p_market_id: marketId,
+          p_outcome_index: outcomeNum,
+          p_stake_tngn: stakeNum,
+        })
+        .single<{
+          bet_id: string;
+          net_stake: number;
+          odds_snapshot: number;
+          is_jackpot_eligible: boolean;
+        }>();
+
+      if (shadowErr) {
+        const mapped = mapRpcError(shadowErr.message || '');
+        if (mapped.status >= 500) console.error('place_shadow_bet RPC failure:', shadowErr);
+        return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+      }
+      if (!shadow) return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
+
+      // Read balances from users separately — shadow bets don't move them,
+      // but the client still expects them in the response shape.
+      const { data: userRow } = await supabaseAdmin
+        .from('users')
+        .select('tngn_balance, bonus_balance')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      return NextResponse.json({
+        success: true,
+        betId: shadow.bet_id,
+        stakeAmount: stakeNum,
+        netStake: shadow.net_stake,
+        entryRake: 0,
+        isJackpotEligible: shadow.is_jackpot_eligible,
+        newBalance: userRow?.tngn_balance ?? 0,
+        newBonusBalance: userRow?.bonus_balance ?? 0,
+      }, { status: 200 });
     }
 
     // One atomic RPC call replaces the old 4-step read-then-write

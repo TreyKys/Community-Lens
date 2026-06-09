@@ -203,6 +203,10 @@ function TreasuryPanel() {
         </div>
       )}
 
+      {/* Owner activity — quiet strip; only ever has rows when an owner */}
+      {/* account exists. Filtered out of everything else on this panel.   */}
+      <OwnerActivityPanel />
+
       {/* Heartbeat status (unchanged) */}
       <Card className={cn('border', heartbeat.daysSince !== null && heartbeat.daysSince >= 25 ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5')}>
         <CardContent className="p-4 flex items-center justify-between">
@@ -238,6 +242,107 @@ function TreasuryPanel() {
         </div>
       </Link>
     </div>
+  );
+}
+
+// ── Owner Activity (private monitoring for shadow-bet accounts) ──────────
+function OwnerActivityPanel() {
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/admin/owner-activity', { credentials: 'include' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (alive) setData(d);
+      } catch { /* non-critical */ }
+    };
+    load();
+    const t = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  // No owners configured → render nothing. Keeps the dashboard clean for
+  // anyone who hasn't been granted (e.g. ops folks loading admin).
+  if (!data || !data.owners || data.owners.length === 0) return null;
+
+  const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
+  const a = data.aggregates;
+
+  return (
+    <Card className="border-fuchsia-500/20 bg-fuchsia-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2 text-fuchsia-300">
+          <Sparkles className="w-4 h-4" />
+          Owner Activity
+          <Badge className="text-[10px] h-5 bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30 ml-1">
+            {data.owners.length} account{data.owners.length === 1 ? '' : 's'}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="Bets (lifetime)" value={a.lifetime.betsCount} sub={`${f(a.lifetime.stakeTotal)} staked`} icon={Activity} color="text-fuchsia-300" />
+          <StatCard label="Bets (24h)" value={a.last24h.betsCount} sub={`${f(a.last24h.stakeTotal)} staked`} icon={Activity} color="text-fuchsia-300" />
+          <StatCard label="Paid out (lifetime)" value={f(a.lifetime.payoutTotal)} sub="House-funded winnings" icon={Coins} color="text-amber-400" />
+          <StatCard label="Paid out (24h)" value={f(a.last24h.payoutTotal)} sub="House-funded winnings" icon={Coins} color="text-amber-400" />
+        </div>
+
+        <div>
+          <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Accounts</h4>
+          <div className="space-y-1.5">
+            {data.owners.map((o: any) => (
+              <div key={o.user_id} className="flex items-center justify-between text-xs bg-card/40 rounded-md px-3 py-2 border border-fuchsia-500/10">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Badge className={cn('text-[10px] h-5', o.active
+                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                    : 'bg-muted text-muted-foreground border-muted')}>
+                    {o.active ? 'ACTIVE' : 'PAUSED'}
+                  </Badge>
+                  <span className="truncate">{o.email || o.user_id}</span>
+                </div>
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <span>+{Math.round(Number(o.win_boost_pct) * 100)}% boost</span>
+                  <span>{f(o.tngn_balance)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {data.recent.length > 0 && (
+          <div>
+            <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Recent shadow bets</h4>
+            <div className="space-y-1">
+              {data.recent.slice(0, 10).map((r: any) => (
+                <div key={r.id} className="flex items-center justify-between text-xs bg-card/40 rounded-md px-3 py-1.5 border border-fuchsia-500/10">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Badge className={cn('text-[10px] h-5',
+                      r.status === 'won'      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                      r.status === 'lost'     ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                      r.status === 'refunded' ? 'bg-muted text-muted-foreground border-muted' :
+                                                'bg-blue-500/20 text-blue-400 border-blue-500/30')}>
+                      {r.status.toUpperCase()}
+                    </Badge>
+                    <span className="truncate">
+                      {r.market_question || `market #${r.market_id}`}
+                      {r.outcome_label ? ` · ${r.outcome_label}` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <span>stake {f(r.stake_tngn)}</span>
+                    <span>odds {Number(r.odds_snapshot).toFixed(2)}×</span>
+                    {r.status === 'won' && <span className="text-emerald-400">+{f(r.payout_tngn)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

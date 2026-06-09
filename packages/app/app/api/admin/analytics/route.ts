@@ -50,10 +50,13 @@ export async function GET(request: Request) {
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', dayAgo),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', weekAgo),
       supabaseAdmin.from('markets').select('status'),
-      supabaseAdmin.from('user_bets').select('stake_tngn, status'),
-      supabaseAdmin.from('user_bets').select('stake_tngn').gte('placed_at', dayAgo),
-      supabaseAdmin.from('user_bets').select('stake_tngn').gte('placed_at', weekAgo),
-      supabaseAdmin.from('user_bets').select('user_id').gte('placed_at', dayAgo),
+      // Exclude owner shadow bets from every betting aggregate — they're
+      // house-funded and would falsely inflate volume, active-bettor count,
+      // and the won/lost mix. Real-user metrics only.
+      supabaseAdmin.from('user_bets').select('stake_tngn, status').eq('is_shadow_bet', false),
+      supabaseAdmin.from('user_bets').select('stake_tngn').gte('placed_at', dayAgo).eq('is_shadow_bet', false),
+      supabaseAdmin.from('user_bets').select('stake_tngn').gte('placed_at', weekAgo).eq('is_shadow_bet', false),
+      supabaseAdmin.from('user_bets').select('user_id').gte('placed_at', dayAgo).eq('is_shadow_bet', false),
       supabaseAdmin.from('referral_codes').select('uses_count, is_vip_code'),
       supabaseAdmin.from('vip_referral_earnings').select('rake_share_amount'),
       supabaseAdmin.from('bet_insurance_events').select('refund_amount_tngn'),
