@@ -83,46 +83,42 @@ export async function POST(request: Request) {
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
 
-    // Guard against double-credit from a concurrent webhook.
-    const { data: latest } = await supabaseAdmin
+    // Atomic credit slot claim — the Squad webhook can fire for the same
+    // ref while this redirect-driven verify call is mid-flight. Without a
+    // CAS, both readers would see status='pending' and double-credit.
+    // Flip status 'pending' → 'crediting' as an atomic guard; only the
+    // winner proceeds. Loser returns 'completed' (safe; the other call
+    // either has already credited or is about to).
+    const { data: claimed } = await supabaseAdmin
       .from('squad_transactions')
-      .select('status')
+      .update({ status: 'crediting', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
       .eq('transaction_ref', reference)
-      .single();
-    if (latest?.status === 'completed') {
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle();
+
+    if (!claimed) {
       return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit });
     }
 
-    const { data: userData, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('tngn_balance')
-      .eq('id', userId)
-      .single();
+    const { error: creditErr } = await supabaseAdmin.rpc('credit_user', {
+      p_user_id: userId,
+      p_tngn_delta: tNGNToCredit,
+      p_bonus_delta: 0,
+    });
 
-    if (userError || !userData) {
-      await supabaseAdmin
-        .from('squad_transactions')
-        .update({ status: 'failed_user_not_found' })
-        .eq('transaction_ref', reference);
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const { error: updateErr } = await supabaseAdmin
-      .from('users')
-      .update({ tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit })
-      .eq('id', userId);
-
-    if (updateErr) {
+    if (creditErr) {
       await supabaseAdmin
         .from('squad_transactions')
         .update({ status: 'failed_balance_update' })
         .eq('transaction_ref', reference);
-      return NextResponse.json({ error: 'Failed to credit balance' }, { status: 500 });
+      const code = (creditErr as any)?.code === 'P0002' ? 404 : 500;
+      return NextResponse.json({ error: 'Failed to credit balance' }, { status: code });
     }
 
     await supabaseAdmin
       .from('squad_transactions')
-      .update({ status: 'completed', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
+      .update({ status: 'completed' })
       .eq('transaction_ref', reference);
 
     await supabaseAdmin.from('treasury_movements').insert([

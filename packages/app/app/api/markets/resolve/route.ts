@@ -131,6 +131,31 @@ export async function POST(request: Request) {
     if (marketError || !market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
     if (market.status !== 'locked') return NextResponse.json({ error: 'Market must be locked before resolving' }, { status: 400 });
 
+    // Race lock — concurrent resolve calls (admin double-click, retried
+    // cron) would both pass the status check above and double-pay every
+    // winner. Atomically claim the resolve by flipping resolved_outcome
+    // from NULL to the winning index; whoever gets the row back owns it.
+    // If we lose the race, bail with 409 — the other call will finish
+    // the payouts.
+    const { data: claim } = await supabaseAdmin
+      .from('markets')
+      .update({
+        resolved_outcome: winningOutcomeIndex,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq('id', marketId)
+      .eq('status', 'locked')
+      .is('resolved_outcome', null)
+      .select('id')
+      .maybeSingle();
+
+    if (!claim) {
+      return NextResponse.json(
+        { error: 'Resolution already in progress or completed for this market' },
+        { status: 409 },
+      );
+    }
+
     const { data: bets } = await supabaseAdmin
       .from('user_bets')
       .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn')

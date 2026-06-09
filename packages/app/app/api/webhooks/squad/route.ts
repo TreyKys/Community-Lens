@@ -131,31 +131,37 @@ export async function POST(req: Request) {
       }
     }
 
-    const { data: userData, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('tngn_balance')
-      .eq('id', userId)
-      .single();
+    // Atomic credit slot claim — the verify endpoint and this webhook can
+    // both fire for the same ref (user redirects back while Squad pushes
+    // its own webhook), and a previous version read-then-wrote the
+    // balance which double-credited under that race. Flip status from
+    // 'pending' to 'crediting' as a compare-and-swap; only the winner
+    // proceeds. Loser returns "already processed" — safe.
+    const { data: claimed } = await supabaseAdmin
+      .from('squad_transactions')
+      .update({ status: 'crediting' })
+      .eq('transaction_ref', transactionRef)
+      .eq('status', 'pending')
+      .select('id')
+      .maybeSingle();
 
-    if (userError || !userData) {
-      await supabaseAdmin
-        .from('squad_transactions')
-        .update({ status: 'failed_user_not_found' })
-        .eq('transaction_ref', transactionRef);
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    if (!claimed) {
+      return NextResponse.json({ status: 'already processed' }, { status: 200 });
     }
 
-    const { error: updateError } = await supabaseAdmin
-      .from('users')
-      .update({ tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit })
-      .eq('id', userId);
+    const { error: creditError } = await supabaseAdmin.rpc('credit_user', {
+      p_user_id: userId,
+      p_tngn_delta: tNGNToCredit,
+      p_bonus_delta: 0,
+    });
 
-    if (updateError) {
+    if (creditError) {
       await supabaseAdmin
         .from('squad_transactions')
         .update({ status: 'failed_balance_update' })
         .eq('transaction_ref', transactionRef);
-      return NextResponse.json({ error: 'Failed to credit balance' }, { status: 500 });
+      const code = (creditError as any)?.code === 'P0002' ? 404 : 500;
+      return NextResponse.json({ error: 'Failed to credit balance' }, { status: code });
     }
 
     await supabaseAdmin
