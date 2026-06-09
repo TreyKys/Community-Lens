@@ -1,5 +1,4 @@
 import { MarketList } from "@/components/MarketList";
-// JackpotBanner intentionally not mounted — weekly prize feature hidden pre-launch.
 import { MarketsBackdrop } from "@/components/MarketsBackdrop";
 import { PopularMarketsScroll } from "@/components/PopularMarketsScroll";
 import { CategoryTabs } from "@/components/CategoryTabs";

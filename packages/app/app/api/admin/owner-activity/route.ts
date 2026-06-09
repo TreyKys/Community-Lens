@@ -9,14 +9,12 @@ const supabaseAdmin = createClient(
 
 // GET /api/admin/owner-activity
 //
-// Single endpoint that backs the admin "Owner Activity" panel. Returns:
-//   - the configured owners (user_id, win_boost_pct, active, balances)
-//   - recent shadow bets across all owners (last 25)
-//   - aggregate counts (lifetime + 24h) of shadow bets / paid out
-//
-// Owner accounts are filtered out of the public analytics endpoint, so
-// this is the only surface where their activity is observable. Anyone
-// hitting this must hold the admin cookie.
+// Private monitoring panel for owner_accounts. Returns the configured
+// owners, their balances, and recent bet activity. Owners now bet
+// normally (real stake, real pool participation) so this is regular
+// bet activity scoped to the founder cohort — owner_accounts is
+// effectively an analytics tag that keeps founder volume out of the
+// public KPI surface (see /api/admin/analytics).
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -25,43 +23,48 @@ export async function GET(request: Request) {
   try {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const [owners, recent, lifetimeBets, last24h] = await Promise.all([
+    const { data: owners } = await supabaseAdmin
+      .from('owner_accounts')
+      .select('user_id, active, notes, created_at');
+
+    const ownerIds = (owners || []).map(o => o.user_id);
+
+    if (ownerIds.length === 0) {
+      return NextResponse.json({
+        generatedAt: new Date().toISOString(),
+        owners: [],
+        recent: [],
+        aggregates: {
+          lifetime: { betsCount: 0, stakeTotal: 0, payoutTotal: 0 },
+          last24h:  { betsCount: 0, stakeTotal: 0, payoutTotal: 0 },
+        },
+      });
+    }
+
+    const [userRows, recent, lifetimeBets, last24h] = await Promise.all([
       supabaseAdmin
-        .from('owner_accounts')
-        .select('user_id, win_boost_pct, active, notes, created_at'),
-      // Hit user_bets directly (not the view) so we can join into markets +
-      // users for human-readable display without making the view depend on
-      // extra columns.
+        .from('users')
+        .select('id, email, tngn_balance, bonus_balance')
+        .in('id', ownerIds),
       supabaseAdmin
         .from('user_bets')
-        .select('id, user_id, market_id, outcome_index, stake_tngn, payout_tngn, odds_snapshot, status, placed_at')
-        .eq('is_shadow_bet', true)
+        .select('id, user_id, market_id, outcome_index, stake_tngn, payout_tngn, status, placed_at')
+        .in('user_id', ownerIds)
         .order('placed_at', { ascending: false })
         .limit(25),
       supabaseAdmin
         .from('user_bets')
         .select('stake_tngn, payout_tngn, status')
-        .eq('is_shadow_bet', true),
+        .in('user_id', ownerIds),
       supabaseAdmin
         .from('user_bets')
         .select('stake_tngn, payout_tngn, status')
-        .eq('is_shadow_bet', true)
+        .in('user_id', ownerIds)
         .gte('placed_at', dayAgo),
     ]);
 
-    const ownerIds = (owners.data || []).map(o => o.user_id);
+    const usersById = Object.fromEntries((userRows.data || []).map(u => [u.id, u]));
 
-    // Pull balances + display names in two cheap lookups.
-    const { data: userRows } = ownerIds.length > 0
-      ? await supabaseAdmin
-          .from('users')
-          .select('id, email, tngn_balance, bonus_balance')
-          .in('id', ownerIds)
-      : { data: [] as any[] };
-
-    const usersById = Object.fromEntries((userRows || []).map(u => [u.id, u]));
-
-    // Pull market questions for the recent rows (one query, then join in JS).
     const recentRows = recent.data || [];
     const marketIds = Array.from(new Set(recentRows.map(r => r.market_id)));
     const { data: marketRows } = marketIds.length > 0
@@ -69,7 +72,7 @@ export async function GET(request: Request) {
       : { data: [] as any[] };
     const marketsById = Object.fromEntries((marketRows || []).map(m => [m.id, m]));
 
-    const ownersDetailed = (owners.data || []).map(o => ({
+    const ownersDetailed = (owners || []).map(o => ({
       ...o,
       email:         usersById[o.user_id]?.email ?? null,
       tngn_balance:  Number(usersById[o.user_id]?.tngn_balance ?? 0),

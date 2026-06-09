@@ -131,24 +131,13 @@ export async function POST(request: Request) {
     if (marketError || !market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
     if (market.status !== 'locked') return NextResponse.json({ error: 'Market must be locked before resolving' }, { status: 400 });
 
-    const { data: rawBets } = await supabaseAdmin
+    const { data: bets } = await supabaseAdmin
       .from('user_bets')
-      .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn, is_shadow_bet, odds_snapshot')
+      .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn')
       .eq('market_id', marketId)
       .eq('status', 'active');
 
-    if (!rawBets || rawBets.length === 0) {
-      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null }).eq('id', marketId);
-      return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
-    }
-
-    // Shadow bets (owner accounts) are kept on a separate track: they never
-    // entered the public pool, so they're excluded from all pool math and
-    // settled by the house directly at the odds snapshotted at placement.
-    const bets = rawBets.filter(b => !b.is_shadow_bet);
-    const shadowBets = rawBets.filter(b => b.is_shadow_bet);
-
-    if (bets.length === 0 && shadowBets.length === 0) {
+    if (!bets || bets.length === 0) {
       await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null }).eq('id', marketId);
       return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
     }
@@ -159,9 +148,8 @@ export async function POST(request: Request) {
     const losingPool = losingBets.reduce((s, b) => s + b.net_stake_tngn, 0);
     const totalPool = winningPool + losingPool;
 
-    // Void if no losers or no winners (real-bets side only — shadow bets
-    // ride alongside and are still resolved at their snapshot odds below).
-    if (bets.length > 0 && (winningPool === 0 || losingPool === 0)) {
+    // Void if no losers or no winners — refund every bet at net stake.
+    if (winningPool === 0 || losingPool === 0) {
       for (const bet of bets) {
         await supabaseAdmin.rpc('credit_user', {
           p_user_id: bet.user_id,
@@ -169,10 +157,6 @@ export async function POST(request: Request) {
           p_bonus_delta: 0,
         });
         await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', bet.id);
-      }
-      // Shadow bets in a voided market: no refund (stake was never debited).
-      for (const sb of shadowBets) {
-        await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', sb.id);
       }
       await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
       return NextResponse.json({ status: 'voided', reason: 'No losers — all bets refunded' });
@@ -289,48 +273,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Shadow-bet settlement: pay owners at their snapshot odds × (1 + boost),
-    // bypassing pool math and VIP/insurance routing entirely. Losers are
-    // marked lost with no balance impact (they never paid a stake).
-    let shadowPaidTotal = 0;
-    if (shadowBets.length > 0) {
-      const ownerIds = Array.from(new Set(shadowBets.map(b => b.user_id)));
-      const { data: ownerRows } = await supabaseAdmin
-        .from('owner_accounts')
-        .select('user_id, win_boost_pct, active')
-        .in('user_id', ownerIds);
-      const boostByUser: Record<string, number> = Object.fromEntries(
-        (ownerRows || []).map(r => [r.user_id, r.active ? Number(r.win_boost_pct) || 0 : 0])
-      );
-
-      for (const sb of shadowBets) {
-        if (sb.outcome_index === winningOutcomeIndex) {
-          const odds = Number(sb.odds_snapshot) || 0;
-          const boost = boostByUser[sb.user_id] ?? 0;
-          const payout = Number(sb.stake_tngn) * odds * (1 + boost);
-          if (payout > 0) {
-            await supabaseAdmin.rpc('credit_user', {
-              p_user_id: sb.user_id,
-              p_tngn_delta: payout,
-              p_bonus_delta: 0,
-            });
-            shadowPaidTotal += payout;
-          }
-          await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', sb.id);
-          try {
-            await supabaseAdmin.from('notifications').insert({
-              user_id: sb.user_id,
-              type: 'bet_won',
-              message: `You won! ₦${payout.toLocaleString()} has been credited to your account. 🎉`,
-              amount: payout,
-            });
-          } catch { /* non-critical */ }
-        } else {
-          await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', sb.id);
-        }
-      }
-    }
-
     const houseRakeNet = grossRake - vipPayoutTotal;
 
     // Resolution rake to treasury (house's net portion only — VIP slices
@@ -365,8 +307,6 @@ export async function POST(request: Request) {
       payoutPool,
       winnersCount: winningBets.length,
       losersCount: losingBets.length,
-      shadowBetsCount: shadowBets.length,
-      shadowPaidTotal,
     }, { status: 200 });
 
   } catch (error: any) {

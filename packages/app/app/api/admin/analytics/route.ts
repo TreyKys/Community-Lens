@@ -24,9 +24,9 @@ export async function GET(request: Request) {
     const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // Run everything in parallel — these are independent queries.
-    // Bet queries now include user_id + is_shadow_bet so we can segment
-    // every aggregate by cohort (normal / vip / owner / all) in JS without
-    // multiplying the round-trip count by 4.
+    // Bet queries include user_id so we can segment every aggregate by
+    // cohort (normal / vip / owner / all) in JS without multiplying the
+    // round-trip count by 4.
     const [
       treasury,
       userCounts,
@@ -54,9 +54,9 @@ export async function GET(request: Request) {
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', dayAgo),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', weekAgo),
       supabaseAdmin.from('markets').select('status'),
-      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, status, is_shadow_bet'),
-      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, is_shadow_bet').gte('placed_at', dayAgo),
-      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, is_shadow_bet').gte('placed_at', weekAgo),
+      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, status'),
+      supabaseAdmin.from('user_bets').select('user_id, stake_tngn').gte('placed_at', dayAgo),
+      supabaseAdmin.from('user_bets').select('user_id, stake_tngn').gte('placed_at', weekAgo),
       supabaseAdmin.from('referral_codes').select('uses_count, is_vip_code'),
       supabaseAdmin.from('vip_referral_earnings').select('rake_share_amount'),
       supabaseAdmin.from('bet_insurance_events').select('refund_amount_tngn'),
@@ -95,8 +95,8 @@ export async function GET(request: Request) {
     const ownerIds = new Set((ownerUsers.data || []).map((u: any) => u.user_id));
     type Cohort = 'normal' | 'vip' | 'owner';
     const cohortOf = (b: any): Cohort => {
-      if (b.is_shadow_bet || ownerIds.has(b.user_id)) return 'owner';
-      if (vipIds.has(b.user_id)) return 'vip';
+      if (ownerIds.has(b.user_id)) return 'owner';
+      if (vipIds.has(b.user_id))   return 'vip';
       return 'normal';
     };
 
@@ -130,7 +130,7 @@ export async function GET(request: Request) {
       activeBettors24h: new Set(in24h.map(b => b.user_id)).size,
     });
 
-    const splitByCohort = <T extends { user_id: string; is_shadow_bet?: boolean }>(rows: T[]) => {
+    const splitByCohort = <T extends { user_id: string }>(rows: T[]) => {
       const out = { normal: [] as T[], vip: [] as T[], owner: [] as T[] };
       for (const r of rows) out[cohortOf(r)].push(r);
       return out;
@@ -148,12 +148,11 @@ export async function GET(request: Request) {
     };
 
     // Legacy top-level `bets` block preserved for the existing UI cards.
-    // Mirrors the pre-cohort behaviour: real-user activity only (excludes
-    // shadow bets), so dashboards that don't yet read `cohorts` still see
-    // the public number, not house-funded inflation.
-    const realLifetime = lifetimeBets.filter((b: any) => !b.is_shadow_bet);
-    const real24h      = bets24hData.filter((b: any)  => !b.is_shadow_bet);
-    const real7d       = bets7dData.filter((b: any)   => !b.is_shadow_bet);
+    // Excludes the owner cohort so dashboards that haven't migrated to
+    // `cohorts` still show the public number — not founder activity.
+    const realLifetime = lifetimeBets.filter((b: any) => !ownerIds.has(b.user_id));
+    const real24h      = bets24hData.filter((b: any)  => !ownerIds.has(b.user_id));
+    const real7d       = bets7dData.filter((b: any)   => !ownerIds.has(b.user_id));
     const betAggregates = {
       totalCount:    realLifetime.length,
       totalVolume:   sumStake(realLifetime),

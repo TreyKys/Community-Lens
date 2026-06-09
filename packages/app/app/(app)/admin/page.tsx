@@ -298,7 +298,7 @@ function CohortActivity({ cohorts, fallback }: { cohorts?: any; fallback: any })
   );
 }
 
-// ── Owner Activity (private monitoring for shadow-bet accounts) ──────────
+// ── Owner Activity (private monitoring for the founder cohort) ──────────
 function OwnerActivityPanel() {
   const [data, setData] = useState<any>(null);
 
@@ -339,8 +339,8 @@ function OwnerActivityPanel() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label="Bets (lifetime)" value={a.lifetime.betsCount} sub={`${f(a.lifetime.stakeTotal)} staked`} icon={Activity} color="text-fuchsia-300" />
           <StatCard label="Bets (24h)" value={a.last24h.betsCount} sub={`${f(a.last24h.stakeTotal)} staked`} icon={Activity} color="text-fuchsia-300" />
-          <StatCard label="Paid out (lifetime)" value={f(a.lifetime.payoutTotal)} sub="House-funded winnings" icon={Coins} color="text-amber-400" />
-          <StatCard label="Paid out (24h)" value={f(a.last24h.payoutTotal)} sub="House-funded winnings" icon={Coins} color="text-amber-400" />
+          <StatCard label="Won (lifetime)" value={f(a.lifetime.payoutTotal)} sub="Pool winnings" icon={Coins} color="text-amber-400" />
+          <StatCard label="Won (24h)" value={f(a.last24h.payoutTotal)} sub="Pool winnings" icon={Coins} color="text-amber-400" />
         </div>
 
         <div>
@@ -357,7 +357,6 @@ function OwnerActivityPanel() {
                   <span className="truncate">{o.email || o.user_id}</span>
                 </div>
                 <div className="flex items-center gap-3 text-muted-foreground">
-                  <span>+{Math.round(Number(o.win_boost_pct) * 100)}% boost</span>
                   <span>{f(o.tngn_balance)}</span>
                 </div>
               </div>
@@ -367,7 +366,7 @@ function OwnerActivityPanel() {
 
         {data.recent.length > 0 && (
           <div>
-            <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Recent shadow bets</h4>
+            <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Recent bets</h4>
             <div className="space-y-1">
               {data.recent.slice(0, 10).map((r: any) => (
                 <div key={r.id} className="flex items-center justify-between text-xs bg-card/40 rounded-md px-3 py-1.5 border border-fuchsia-500/10">
@@ -386,7 +385,6 @@ function OwnerActivityPanel() {
                   </div>
                   <div className="flex items-center gap-3 text-muted-foreground">
                     <span>stake {f(r.stake_tngn)}</span>
-                    <span>odds {Number(r.odds_snapshot).toFixed(2)}×</span>
                     {r.status === 'won' && <span className="text-emerald-400">+{f(r.payout_tngn)}</span>}
                   </div>
                 </div>
