@@ -1879,9 +1879,11 @@ function ResetPanel() {
   const [isResettingSquad, setIsResettingSquad] = useState(false);
   const [isResettingPaystack, setIsResettingPaystack] = useState(false);
   const [isResettingLaunch, setIsResettingLaunch] = useState(false);
+  const [isResettingBalances, setIsResettingBalances] = useState(false);
   const [confirmSquad, setConfirmSquad] = useState(false);
   const [confirmPaystack, setConfirmPaystack] = useState(false);
   const [confirmLaunch, setConfirmLaunch] = useState(false);
+  const [confirmBalances, setConfirmBalances] = useState(false);
 
   const executeReset = async (action: string, confirm: string, setIsLoading: any, setConfirm: any) => {
     setIsLoading(true);
@@ -2010,6 +2012,50 @@ function ResetPanel() {
                   >
                     {isResettingLaunch ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                     Confirm Reset Launch Data
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Reset all user balances (zero tNGN + bonus across every user) */}
+            <Dialog open={confirmBalances} onOpenChange={setConfirmBalances}>
+              <div className="border border-red-500/30 rounded-lg p-4 space-y-2">
+                <h4 className="text-sm font-semibold">Reset All User Balances</h4>
+                <p className="text-xs text-muted-foreground">
+                  Zeros <strong>tngn_balance</strong> and <strong>bonus_balance</strong> on every
+                  user. Test credits gone. User accounts, bets, treasury, and markets are not touched.
+                </p>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setConfirmBalances(true)}
+                  disabled={isResettingBalances}
+                  className="w-full"
+                >
+                  {isResettingBalances ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Resetting…</> : 'Reset All Balances'}
+                </Button>
+              </div>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Confirm Balance Reset</DialogTitle>
+                  <DialogDescription>
+                    This will zero tngn_balance AND bonus_balance on every user row. Cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <p className="text-sm text-red-300">Are you absolutely sure?</p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setConfirmBalances(false)} disabled={isResettingBalances}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => executeReset('reset-user-balances', 'RESET BALANCES', setIsResettingBalances, setConfirmBalances)}
+                    disabled={isResettingBalances}
+                  >
+                    {isResettingBalances ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Confirm Reset Balances
                   </Button>
                 </DialogFooter>
               </DialogContent>
