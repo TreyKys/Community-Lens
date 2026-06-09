@@ -26,6 +26,7 @@ const supabaseAdmin = createClient(
  *   { action: 'reset-bets-and-markets',   confirm: 'RESET MARKETS' }
  *   { action: 'reset-launch-data',        confirm: 'RESET LAUNCH DATA' }
  *   { action: 'reset-notifications',      confirm: 'RESET NOTIFICATIONS' }
+ *   { action: 'delete-markets',           confirm: 'DELETE MARKETS', marketIds: number[] }
  *
  * Returns the number of affected rows per table so you can sanity-check.
  */
@@ -183,6 +184,65 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, results: [r] });
     }
 
+    if (action === 'delete-markets' && confirm === 'DELETE MARKETS') {
+      // Targeted delete of specific markets by id. Walks the FK chain
+      // (bet_insurance_events → vip_referral_earnings → user_bets →
+      // merkle_commits → markets) so the markets row removal doesn't trip
+      // an FK violation. Refuses if any target has sub-markets — the admin
+      // must handle children explicitly (delete or re-parent them first).
+      const ids = Array.isArray(body?.marketIds)
+        ? body.marketIds.map((v: any) => Number(v)).filter((n: any) => Number.isFinite(n) && n > 0)
+        : [];
+      if (ids.length === 0) {
+        return NextResponse.json(
+          { error: 'marketIds must be a non-empty array of positive integers' },
+          { status: 400 },
+        );
+      }
+
+      // Sub-market guard. If any of the targets are a parent of another
+      // market, surface the conflict instead of cascading silently.
+      const { data: children, error: childErr } = await supabaseAdmin
+        .from('markets')
+        .select('id, question, parent_market_id')
+        .in('parent_market_id', ids);
+      if (childErr) throw new Error(`sub-market check: ${childErr.message}`);
+      if (children && children.length > 0) {
+        const blockedBy: Record<string, Array<{ id: number; question: string }>> = {};
+        for (const c of children as any[]) {
+          const key = String(c.parent_market_id);
+          (blockedBy[key] = blockedBy[key] || []).push({ id: c.id, question: c.question });
+        }
+        return NextResponse.json(
+          {
+            error: 'One or more selected markets have sub-markets. Delete or re-parent the sub-markets first.',
+            blockedBy,
+          },
+          { status: 409 },
+        );
+      }
+
+      const results: ResetResult[] = [];
+
+      for (const table of ['bet_insurance_events', 'vip_referral_earnings', 'user_bets', 'merkle_commits']) {
+        const { count, error } = await supabaseAdmin
+          .from(table)
+          .delete({ count: 'exact' })
+          .in('market_id', ids);
+        if (error) throw new Error(`${table}: ${error.message}`);
+        results.push({ table, deleted: count });
+      }
+
+      const { count: mCount, error: mErr } = await supabaseAdmin
+        .from('markets')
+        .delete({ count: 'exact' })
+        .in('id', ids);
+      if (mErr) throw new Error(`markets: ${mErr.message}`);
+      results.push({ table: 'markets', deleted: mCount });
+
+      return NextResponse.json({ ok: true, results });
+    }
+
     return NextResponse.json(
       {
         error: 'Unknown action OR confirm string mismatch — both required and they must match exactly.',
@@ -195,6 +255,7 @@ export async function POST(request: Request) {
           'reset-bets-and-markets     (confirm: "RESET MARKETS")',
           'reset-launch-data          (confirm: "RESET LAUNCH DATA")',
           'reset-notifications        (confirm: "RESET NOTIFICATIONS")',
+          'delete-markets             (confirm: "DELETE MARKETS",  marketIds: number[])',
         ],
       },
       { status: 400 }

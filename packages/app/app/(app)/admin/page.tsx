@@ -2269,7 +2269,287 @@ function ResetPanel() {
           </p>
         </CardContent>
       </Card>
+
+      <DeleteSpecificMarketsPanel />
     </div>
+  );
+}
+
+// ── Delete Specific Markets ──────────────────────────────────────────────
+// Targeted removal: search + multi-select + cascade-aware delete. Sits
+// alongside the bulk reset buttons since the destination (markets table)
+// and danger profile are the same.
+type MarketRow = {
+  id: number;
+  question: string;
+  category: string | null;
+  status: string;
+  total_pool: number | null;
+  parent_market_id: number | null;
+  closes_at: string | null;
+  child_count: number;
+};
+
+function DeleteSpecificMarketsPanel() {
+  const { toast } = useToast();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [rows, setRows] = useState<MarketRow[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let q = supabase
+        .from('markets')
+        .select('id, question, category, status, total_pool, parent_market_id, closes_at')
+        .order('id', { ascending: false })
+        .limit(50);
+      if (statusFilter !== 'all') q = q.eq('status', statusFilter);
+      const term = search.trim();
+      if (term) {
+        if (/^\d+$/.test(term)) q = q.eq('id', Number(term));
+        else q = q.ilike('question', `%${term}%`);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+
+      const ids = (data || []).map((m: any) => m.id);
+      let childCounts: Record<number, number> = {};
+      if (ids.length > 0) {
+        const { data: kids } = await supabase
+          .from('markets')
+          .select('parent_market_id')
+          .in('parent_market_id', ids);
+        for (const k of (kids || []) as any[]) {
+          const pid = k.parent_market_id as number;
+          childCounts[pid] = (childCounts[pid] || 0) + 1;
+        }
+      }
+
+      setRows(
+        (data || []).map((m: any) => ({
+          id: m.id,
+          question: m.question,
+          category: m.category,
+          status: m.status,
+          total_pool: Number(m.total_pool || 0),
+          parent_market_id: m.parent_market_id,
+          closes_at: m.closes_at,
+          child_count: childCounts[m.id] || 0,
+        })),
+      );
+    } catch (e: any) {
+      toast({ title: 'Failed to load markets', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [search, statusFilter, toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleOne = (id: number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAllVisible = () => setSelected(new Set(rows.map(r => r.id)));
+  const clearSelection = () => setSelected(new Set());
+
+  const selectedRows = rows.filter(r => selected.has(r.id));
+  const blockedRows = selectedRows.filter(r => r.child_count > 0);
+  const canDelete = selectedRows.length > 0 && blockedRows.length === 0;
+
+  const executeDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const res = await fetch('/api/admin/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete-markets',
+          confirm: 'DELETE MARKETS',
+          marketIds: Array.from(selected),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409 && data.blockedBy) {
+          const offenders = Object.entries(data.blockedBy)
+            .map(([pid, kids]: any) => `#${pid} has ${(kids as any[]).length} sub-market(s)`)
+            .join('; ');
+          throw new Error(`${data.error} — ${offenders}`);
+        }
+        throw new Error(data.error || 'Delete failed');
+      }
+      const summary = (data.results || [])
+        .map((r: any) => `${r.table}: ${r.deleted ?? 0}`)
+        .join(' · ');
+      toast({ title: `Deleted ${selected.size} market(s)`, description: summary });
+      setSelected(new Set());
+      setConfirmOpen(false);
+      load();
+    } catch (e: any) {
+      toast({ title: 'Delete failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
+
+  return (
+    <Card className="border-red-500/20 bg-red-500/5">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2 text-red-400">
+          <Trash2 className="w-4 h-4" />
+          Delete Specific Markets
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-red-300/80">
+          Search → tick → delete. Walks the FK chain (bets, merkle commits, payouts) so deletion is complete.
+          Markets with sub-markets are blocked — handle the children first.
+        </p>
+
+        <div className="flex flex-col md:flex-row gap-2">
+          <Input
+            placeholder="Search by question text or paste an ID…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1"
+          />
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="md:w-44"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="open">Open</SelectItem>
+              <SelectItem value="locked">Locked</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+              <SelectItem value="voided">Voided</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={load} disabled={isLoading}>
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Refresh'}
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <Button size="sm" variant="ghost" onClick={selectAllVisible} disabled={rows.length === 0}>
+            Select all visible ({rows.length})
+          </Button>
+          <Button size="sm" variant="ghost" onClick={clearSelection} disabled={selected.size === 0}>
+            Clear selection
+          </Button>
+          <span className="ml-auto text-muted-foreground">{selected.size} selected</span>
+        </div>
+
+        <div className="max-h-96 overflow-y-auto border border-red-500/20 rounded-lg divide-y divide-red-500/10">
+          {rows.length === 0 && (
+            <div className="text-center text-xs text-muted-foreground py-6">
+              {isLoading ? 'Loading…' : 'No markets match your search.'}
+            </div>
+          )}
+          {rows.map((m) => {
+            const checked = selected.has(m.id);
+            const blocked = m.child_count > 0;
+            return (
+              <label
+                key={m.id}
+                className={cn(
+                  'flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-red-500/5',
+                  checked && 'bg-red-500/10',
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleOne(m.id)}
+                  className="mt-1 accent-red-500"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[10px] text-muted-foreground tabular-nums">#{m.id}</span>
+                    <Badge className={cn('text-[10px] h-5',
+                      m.status === 'open'     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                      m.status === 'locked'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                      m.status === 'resolved' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                                'bg-muted text-muted-foreground border-muted')}>
+                      {m.status.toUpperCase()}
+                    </Badge>
+                    {m.category && (
+                      <Badge variant="outline" className="text-[10px] h-5">{m.category}</Badge>
+                    )}
+                    {blocked && (
+                      <Badge className="text-[10px] h-5 bg-yellow-500/20 text-yellow-300 border-yellow-500/30">
+                        {m.child_count} sub-market{m.child_count === 1 ? '' : 's'}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-sm truncate">{m.question}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Pool {f(m.total_pool || 0)}
+                    {m.closes_at ? ` · closes ${new Date(m.closes_at).toLocaleDateString()}` : ''}
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+
+        {blockedRows.length > 0 && (
+          <div className="text-xs bg-yellow-500/10 border border-yellow-500/30 rounded-md px-3 py-2 text-yellow-300">
+            {blockedRows.length} selected market{blockedRows.length === 1 ? ' has' : 's have'} sub-markets and
+            cannot be deleted until their children are removed first.
+          </div>
+        )}
+
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={!canDelete || isDeleting}
+            onClick={() => setConfirmOpen(true)}
+            className="w-full"
+          >
+            {isDeleting
+              ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Deleting…</>
+              : `Delete ${selected.size || 'selected'} market${selected.size === 1 ? '' : 's'}`}
+          </Button>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirm market deletion</DialogTitle>
+              <DialogDescription>
+                The following {selectedRows.length} market{selectedRows.length === 1 ? '' : 's'} and
+                ALL related bets, payouts, and merkle commits will be permanently deleted.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-60 overflow-y-auto bg-red-500/10 border border-red-500/30 rounded-md p-2 space-y-1">
+              {selectedRows.map((m) => (
+                <div key={m.id} className="text-xs flex items-center gap-2">
+                  <span className="text-muted-foreground tabular-nums">#{m.id}</span>
+                  <span className="truncate">{m.question}</span>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={isDeleting}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={executeDelete} disabled={isDeleting}>
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Confirm Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardContent>
+    </Card>
   );
 }
 
