@@ -24,6 +24,9 @@ export async function GET(request: Request) {
     const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // Run everything in parallel — these are independent queries.
+    // Bet queries now include user_id + is_shadow_bet so we can segment
+    // every aggregate by cohort (normal / vip / owner / all) in JS without
+    // multiplying the round-trip count by 4.
     const [
       treasury,
       userCounts,
@@ -31,10 +34,9 @@ export async function GET(request: Request) {
       newUsers24h,
       newUsers7d,
       marketsByStatus,
-      betsAggregate,
+      betsLifetime,
       bets24h,
       bets7d,
-      activeBettors24h,
       referralStats,
       vipEarnings,
       insuranceCost,
@@ -43,6 +45,8 @@ export async function GET(request: Request) {
       depositsTotal,
       promoConfig,
       promoGrants,
+      vipUsers,
+      ownerUsers,
     ] = await Promise.all([
       supabaseAdmin.from('treasury_log').select('amount_tngn, type'),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }),
@@ -50,13 +54,9 @@ export async function GET(request: Request) {
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', dayAgo),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', weekAgo),
       supabaseAdmin.from('markets').select('status'),
-      // Exclude owner shadow bets from every betting aggregate — they're
-      // house-funded and would falsely inflate volume, active-bettor count,
-      // and the won/lost mix. Real-user metrics only.
-      supabaseAdmin.from('user_bets').select('stake_tngn, status').eq('is_shadow_bet', false),
-      supabaseAdmin.from('user_bets').select('stake_tngn').gte('placed_at', dayAgo).eq('is_shadow_bet', false),
-      supabaseAdmin.from('user_bets').select('stake_tngn').gte('placed_at', weekAgo).eq('is_shadow_bet', false),
-      supabaseAdmin.from('user_bets').select('user_id').gte('placed_at', dayAgo).eq('is_shadow_bet', false),
+      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, status, is_shadow_bet'),
+      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, is_shadow_bet').gte('placed_at', dayAgo),
+      supabaseAdmin.from('user_bets').select('user_id, stake_tngn, is_shadow_bet').gte('placed_at', weekAgo),
       supabaseAdmin.from('referral_codes').select('uses_count, is_vip_code'),
       supabaseAdmin.from('vip_referral_earnings').select('rake_share_amount'),
       supabaseAdmin.from('bet_insurance_events').select('refund_amount_tngn'),
@@ -65,6 +65,8 @@ export async function GET(request: Request) {
       supabaseAdmin.from('treasury_log').select('amount_tngn').eq('type', 'deposit'),
       supabaseAdmin.from('launch_promo').select('match_ratio, match_cap, min_deposit, cutoff, active').eq('id', 1).maybeSingle(),
       supabaseAdmin.from('launch_promo_grants').select('deposit_amount, credit_granted, granted_at'),
+      supabaseAdmin.from('users').select('id').eq('is_vip', true),
+      supabaseAdmin.from('owner_accounts').select('user_id'),
     ]);
 
     const treasuryRows = treasury.data || [];
@@ -85,18 +87,84 @@ export async function GET(request: Request) {
       voided:   markets.filter((m: any) => m.status === 'voided').length,
     };
 
-    const bets = betsAggregate.data || [];
-    const betAggregates = {
-      totalCount: bets.length,
-      totalVolume: bets.reduce((s: number, b: any) => s + Number(b.stake_tngn || 0), 0),
-      activeCount: bets.filter((b: any) => b.status === 'active').length,
-      wonCount:    bets.filter((b: any) => b.status === 'won').length,
-      lostCount:   bets.filter((b: any) => b.status === 'lost').length,
-      refundedCount: bets.filter((b: any) => b.status === 'refunded').length,
+    // ── Cohort segmentation ───────────────────────────────────────────
+    // Tag every bet row with which cohort it belongs to so all four views
+    // are computed from the same pull. Cohort precedence: owner > vip >
+    // normal — an owner who somehow has is_vip=true still counts as owner.
+    const vipIds   = new Set((vipUsers.data   || []).map((u: any) => u.id));
+    const ownerIds = new Set((ownerUsers.data || []).map((u: any) => u.user_id));
+    type Cohort = 'normal' | 'vip' | 'owner';
+    const cohortOf = (b: any): Cohort => {
+      if (b.is_shadow_bet || ownerIds.has(b.user_id)) return 'owner';
+      if (vipIds.has(b.user_id)) return 'vip';
+      return 'normal';
     };
-    const volume24h = (bets24h.data || []).reduce((s, b: any) => s + Number(b.stake_tngn || 0), 0);
-    const volume7d  = (bets7d.data  || []).reduce((s, b: any) => s + Number(b.stake_tngn || 0), 0);
-    const uniqueBettors24h = new Set((activeBettors24h.data || []).map((b: any) => b.user_id)).size;
+
+    const lifetimeBets = betsLifetime.data || [];
+    const bets24hData  = bets24h.data      || [];
+    const bets7dData   = bets7d.data       || [];
+
+    const sumStake = (rows: any[]) => rows.reduce((s: number, b: any) => s + Number(b.stake_tngn || 0), 0);
+
+    type CohortStats = {
+      volume24h: number;
+      volume7d: number;
+      totalVolume: number;
+      totalCount: number;
+      activeCount: number;
+      wonCount: number;
+      lostCount: number;
+      refundedCount: number;
+      activeBettors24h: number;
+    };
+
+    const buildCohort = (lifetime: any[], in24h: any[], in7d: any[]): CohortStats => ({
+      volume24h:        sumStake(in24h),
+      volume7d:         sumStake(in7d),
+      totalVolume:      sumStake(lifetime),
+      totalCount:       lifetime.length,
+      activeCount:      lifetime.filter(b => b.status === 'active').length,
+      wonCount:         lifetime.filter(b => b.status === 'won').length,
+      lostCount:        lifetime.filter(b => b.status === 'lost').length,
+      refundedCount:    lifetime.filter(b => b.status === 'refunded').length,
+      activeBettors24h: new Set(in24h.map(b => b.user_id)).size,
+    });
+
+    const splitByCohort = <T extends { user_id: string; is_shadow_bet?: boolean }>(rows: T[]) => {
+      const out = { normal: [] as T[], vip: [] as T[], owner: [] as T[] };
+      for (const r of rows) out[cohortOf(r)].push(r);
+      return out;
+    };
+
+    const lifetimeByCohort = splitByCohort(lifetimeBets);
+    const t24hByCohort     = splitByCohort(bets24hData);
+    const t7dByCohort      = splitByCohort(bets7dData);
+
+    const cohorts: Record<'normal' | 'vip' | 'owner' | 'all', CohortStats> = {
+      normal: buildCohort(lifetimeByCohort.normal, t24hByCohort.normal, t7dByCohort.normal),
+      vip:    buildCohort(lifetimeByCohort.vip,    t24hByCohort.vip,    t7dByCohort.vip),
+      owner:  buildCohort(lifetimeByCohort.owner,  t24hByCohort.owner,  t7dByCohort.owner),
+      all:    buildCohort(lifetimeBets,            bets24hData,         bets7dData),
+    };
+
+    // Legacy top-level `bets` block preserved for the existing UI cards.
+    // Mirrors the pre-cohort behaviour: real-user activity only (excludes
+    // shadow bets), so dashboards that don't yet read `cohorts` still see
+    // the public number, not house-funded inflation.
+    const realLifetime = lifetimeBets.filter((b: any) => !b.is_shadow_bet);
+    const real24h      = bets24hData.filter((b: any)  => !b.is_shadow_bet);
+    const real7d       = bets7dData.filter((b: any)   => !b.is_shadow_bet);
+    const betAggregates = {
+      totalCount:    realLifetime.length,
+      totalVolume:   sumStake(realLifetime),
+      activeCount:   realLifetime.filter((b: any) => b.status === 'active').length,
+      wonCount:      realLifetime.filter((b: any) => b.status === 'won').length,
+      lostCount:     realLifetime.filter((b: any) => b.status === 'lost').length,
+      refundedCount: realLifetime.filter((b: any) => b.status === 'refunded').length,
+    };
+    const volume24h = sumStake(real24h);
+    const volume7d  = sumStake(real7d);
+    const uniqueBettors24h = new Set(real24h.map((b: any) => b.user_id)).size;
 
     const codes = referralStats.data || [];
     const referralBreakdown = {
@@ -166,6 +234,7 @@ export async function GET(request: Request) {
         volume24h,
         volume7d,
       },
+      cohorts,
       referrals: referralBreakdown,
       points: {
         outstanding: pointsTotal,

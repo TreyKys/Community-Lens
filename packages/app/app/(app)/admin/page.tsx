@@ -110,16 +110,9 @@ function TreasuryPanel() {
         </div>
       </div>
 
-      {/* ── Betting activity ────────────────────────────────────────── */}
-      <div>
-        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Prediction Activity</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard label="Vol (24h)" value={f(b.volume24h)} sub="Gross stakes" icon={Activity} color="text-emerald-400" />
-          <StatCard label="Vol (7d)" value={f(b.volume7d)} sub="Gross stakes" icon={Activity} color="text-emerald-400" />
-          <StatCard label="Lifetime Vol" value={f(b.totalVolume)} sub={`${b.totalCount} bets`} icon={Coins} color="text-amber-400" />
-          <StatCard label="Active Bets" value={b.activeCount} sub={`${b.wonCount} won · ${b.lostCount} lost`} icon={Activity} color="text-blue-400" />
-        </div>
-      </div>
+      {/* ── Betting activity (cohort-segmented) ─────────────────────── */}
+      <CohortActivity cohorts={stats.cohorts} fallback={b} />
+
 
       {/* ── Markets ─────────────────────────────────────────────────── */}
       <div>
@@ -241,6 +234,66 @@ function TreasuryPanel() {
           <ExternalLink className="w-4 h-4 text-muted-foreground" />
         </div>
       </Link>
+    </div>
+  );
+}
+
+// ── Prediction Activity by cohort ────────────────────────────────────────
+// Four parallel views over user_bets:
+//   normal — non-VIP, non-owner real bettors (default view, "real users")
+//   vip    — VIP-tier accounts
+//   owner  — house-funded shadow bets (your monitoring stream)
+//   all    — combined; what mixes everything for the absolute top-line
+// Each cohort shows the same 4 metric cards so they're directly comparable.
+function CohortActivity({ cohorts, fallback }: { cohorts?: any; fallback: any }) {
+  const [view, setView] = useState<'normal' | 'vip' | 'owner' | 'all'>('normal');
+  const tabs: Array<{ id: 'normal' | 'vip' | 'owner' | 'all'; label: string; color: string }> = [
+    { id: 'normal', label: 'Normal',    color: 'text-blue-400' },
+    { id: 'vip',    label: 'VIP',       color: 'text-amber-400' },
+    { id: 'owner',  label: 'Owner',     color: 'text-fuchsia-300' },
+    { id: 'all',    label: 'Everybody', color: 'text-emerald-400' },
+  ];
+  // Fall back to the legacy `bets` block if the analytics response is from
+  // before cohorts shipped — so the panel keeps rendering during rollout.
+  const data = cohorts?.[view] || {
+    volume24h: fallback.volume24h,
+    volume7d: fallback.volume7d,
+    totalVolume: fallback.totalVolume,
+    totalCount: fallback.totalCount,
+    activeCount: fallback.activeCount,
+    wonCount: fallback.wonCount,
+    lostCount: fallback.lostCount,
+    activeBettors24h: 0,
+  };
+  const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Prediction Activity</h3>
+        <div className="flex gap-1">
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setView(t.id)}
+              className={cn(
+                'text-[10px] px-2 py-1 rounded-md border transition-colors',
+                view === t.id
+                  ? 'bg-card border-foreground/20 text-foreground'
+                  : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="Vol (24h)"     value={f(data.volume24h)}    sub={`${data.activeBettors24h} bettors`} icon={Activity} color={tabs.find(t => t.id === view)!.color} />
+        <StatCard label="Vol (7d)"      value={f(data.volume7d)}     sub="Gross stakes"                       icon={Activity} color={tabs.find(t => t.id === view)!.color} />
+        <StatCard label="Lifetime Vol"  value={f(data.totalVolume)}  sub={`${data.totalCount} bets`}          icon={Coins}    color="text-amber-400" />
+        <StatCard label="Active Bets"   value={data.activeCount}     sub={`${data.wonCount} won · ${data.lostCount} lost`} icon={Activity} color="text-blue-400" />
+      </div>
     </div>
   );
 }
