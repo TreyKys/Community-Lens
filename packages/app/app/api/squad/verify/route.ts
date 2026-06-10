@@ -83,17 +83,18 @@ export async function POST(request: Request) {
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
 
-    // Atomic credit slot claim — the Squad webhook can fire for the same
-    // ref while this redirect-driven verify call is mid-flight. Without a
-    // CAS, both readers would see status='pending' and double-credit.
-    // Flip status 'pending' → 'crediting' as an atomic guard; only the
-    // winner proceeds. Loser returns 'completed' (safe; the other call
-    // either has already credited or is about to).
+    // Atomic credit slot claim. The squad_transactions row can be in either
+    // 'awaiting_payment' (verify won the race to the webhook — common, since
+    // Squad's redirect lands faster than its webhook) or 'pending' (webhook
+    // already saw the event and normalised the status). Either is fair
+    // game; we CAS to 'crediting' so only one caller — verify OR webhook —
+    // proceeds. If status is 'crediting' or 'completed' someone else
+    // claimed it; we report completed and bail.
     const { data: claimed } = await supabaseAdmin
       .from('squad_transactions')
       .update({ status: 'crediting', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
       .eq('transaction_ref', reference)
-      .eq('status', 'pending')
+      .in('status', ['pending', 'awaiting_payment'])
       .select('id')
       .maybeSingle();
 
