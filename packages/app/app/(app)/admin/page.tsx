@@ -23,12 +23,14 @@ function adminHeaders() {
   return { 'Content-Type': 'application/json' };
 }
 
-function cronHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'x-cron-secret': process.env.NEXT_PUBLIC_CRON_SECRET || '',
-  };
-}
+// NOTE: there is deliberately no cronHeaders() helper any more. It used to
+// attach NEXT_PUBLIC_CRON_SECRET to admin-triggered lock/resolve/heartbeat
+// calls — but NEXT_PUBLIC_* is embedded in the client bundle, so that
+// exposed the cron secret to every visitor. Since /api/markets/lock,
+// /api/markets/resolve, and /api/admin/heartbeat all accept the admin
+// cookie (isAdminRequest), the panel now authenticates with the cookie
+// alone (sent automatically on same-origin fetches). The real CRON_SECRET
+// stays server-side only, injected by the GitHub Actions workflows.
 
 // ── Treasury Overview ────────────────────────────────────────────────────
 function StatCard({ label, value, sub, icon: Icon, color }: any) {
@@ -600,7 +602,8 @@ function ManualOverridePanel() {
     try {
       const res = await fetch('/api/markets/lock', {
         method: 'POST',
-        headers: cronHeaders(),
+        headers: adminHeaders(),
+        credentials: 'include',
         body: JSON.stringify({ marketId: parseInt(lockMarketId) }),
       });
       const data = await res.json();
@@ -621,7 +624,8 @@ function ManualOverridePanel() {
     try {
       const res = await fetch('/api/markets/resolve', {
         method: 'POST',
-        headers: cronHeaders(),
+        headers: adminHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           marketId: parseInt(resolveMarketId),
           winningOutcomeIndex: parseInt(winningOutcome),
@@ -646,7 +650,8 @@ function ManualOverridePanel() {
     try {
       const res = await fetch('/api/admin/heartbeat', {
         method: 'POST',
-        headers: cronHeaders(),
+        headers: adminHeaders(),
+        credentials: 'include',
       });
       const data = await res.json();
       if (!res.ok) {
