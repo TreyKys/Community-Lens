@@ -133,7 +133,6 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
                         <span className="font-medium text-foreground">{d.option}</span>
                       </div>
                       <div className="flex items-center gap-3 text-muted-foreground">
-                        <span>₦{d.amount.toLocaleString()}</span>
                         <span className="font-bold text-foreground">{d.percentage}%</span>
                       </div>
                     </div>

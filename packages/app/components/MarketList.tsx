@@ -424,7 +424,11 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                   Tap to Predict
                 </Button>
               </DrawerTrigger>
-              <DrawerContent>
+              {/* pb-[env(safe-area-inset-bottom)] keeps the close button clear
+                  of the iOS home indicator; the extra pb-6 lifts the whole
+                  actionable area off the bottom edge so it's a thumb-friendly
+                  reach instead of jammed against the screen edge. */}
+              <DrawerContent className="pb-[max(env(safe-area-inset-bottom),1.5rem)]">
                 <div className="mx-auto w-full max-w-sm">
                   <DrawerHeader>
                     <DrawerTitle className="text-base">{displayQuestion}</DrawerTitle>
@@ -440,7 +444,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                       }}
                     />
                   </div>
-                  <DrawerFooter>
+                  <DrawerFooter className="pb-6">
                     <DrawerClose asChild>
                       <Button variant="outline">Close</Button>
                     </DrawerClose>
@@ -599,8 +603,12 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     else setStakedMarketIds(new Set());
   }, [session, fetchStakedMarkets]);
 
-  const fetchMarkets = useCallback(async () => {
-    setIsLoading(true);
+  const fetchMarkets = useCallback(async (opts?: { silent?: boolean }) => {
+    // `silent` background refreshes don't toggle the loading skeleton.
+    // We use it after a bet lands so the list updates the pool numbers
+    // in place without collapsing the rows and resetting scroll —
+    // users were getting punted back to the top after every stake.
+    if (!opts?.silent) setIsLoading(true);
     try {
       // Hide voided markets, and resolved markets older than 26 hours.
       // Data stays in DB (audit trail intact) — this is purely a display filter.
@@ -611,11 +619,15 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
         .not('status', 'eq', 'voided')
         .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
 
-      // Sort: 'new' = newest first by id (id is a serial), 'closing' = soonest closing,
-      // 'pool' = biggest pool first.
+      // Sort. Default is biggest pool first (puts hot markets at the top of
+      // the feed); 'closing' = soonest closing; 'new' = newest by id.
+      // Secondary ordering by id keeps pre-launch markets (all pool=0) in a
+      // stable order rather than reshuffling them on every refetch.
       if (sortParam === 'closing') query = query.order('closes_at', { ascending: true });
-      else if (sortParam === 'pool') query = query.order('total_pool', { ascending: false });
-      else query = query.order('id', { ascending: false });
+      else if (sortParam === 'new') query = query.order('id', { ascending: false });
+      else query = query
+        .order('total_pool', { ascending: false })
+        .order('id', { ascending: false });
 
       if (filterExactMarketId !== undefined) {
         query = query.eq('id', filterExactMarketId);
@@ -711,7 +723,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           market={market}
           session={session}
           onBetPlaced={(id) => {
-            fetchMarkets();
+            fetchMarkets({ silent: true });
             if (session?.user?.id) fetchStakedMarkets(session.user.id);
           }}
           hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
