@@ -33,7 +33,13 @@ export async function POST(request: Request) {
 
     const { data, error } = await supabaseAdmin
       .rpc('redeem_referral_code', { p_user_id: user.id, p_code: code })
-      .single<{ ok: boolean; message: string; owner_id: string | null; is_vip_code: boolean }>();
+      .single<{
+        ok: boolean;
+        message: string;
+        owner_id: string | null;
+        is_vip_code: boolean;
+        signup_bonus_tngn: number | null;
+      }>();
 
     if (error) {
       console.error('redeem_referral_code RPC error', error);
@@ -56,6 +62,10 @@ export async function POST(request: Request) {
       ok: true,
       alreadyRedeemed: data.message === 'already_redeemed',
       isVipCode: data.is_vip_code,
+      // 0 for normal codes / already-redeemed / non-VIP codes. The
+      // AuthModal surfaces it as "🎉 ₦X bonus credit" in the welcome
+      // toast when > 0.
+      signupBonusTngn: Number(data.signup_bonus_tngn) || 0,
     });
   } catch (e: any) {
     console.error('referral redeem error', e);

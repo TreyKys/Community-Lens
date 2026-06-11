@@ -41,16 +41,32 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
 
       const pendingRef = typeof window !== 'undefined' ? localStorage.getItem('pending_referral_code') : null;
       if (pendingRef) {
-        fetch('/api/referral/redeem', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ code: pendingRef }),
-        }).finally(() => {
+        // Await so we can read the granted signup bonus and stash it for
+        // the next page's toast. If the call fails, no toast — but the
+        // user-facing flow still proceeds.
+        try {
+          const res = await fetch('/api/referral/redeem', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ code: pendingRef }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok && Number(body?.signupBonusTngn) > 0) {
+            try {
+              sessionStorage.setItem(
+                'pending_referral_bonus',
+                JSON.stringify({ amount: Number(body.signupBonusTngn), at: Date.now() }),
+              );
+            } catch {}
+          }
+        } catch {
+          // fire-and-forget on network failure
+        } finally {
           try { localStorage.removeItem('pending_referral_code'); } catch {}
-        });
+        }
       }
     } catch {}
   };
@@ -390,7 +406,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ref" className="flex items-center justify-between">
-                    <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+                    <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
                   </Label>
                   <Input
                     id="ref"
@@ -444,7 +460,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ref-phone" className="flex items-center justify-between">
-                    <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+                    <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
                   </Label>
                   <Input
                     id="ref-phone"
@@ -510,7 +526,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="ref-pwd" className="flex items-center justify-between">
-                    <span>Referral Code <span className="text-muted-foreground text-[10px]">(optional)</span></span>
+                    <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
                   </Label>
                   <Input
                     id="ref-pwd"
