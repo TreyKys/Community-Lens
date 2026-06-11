@@ -202,6 +202,10 @@ function TreasuryPanel() {
       {/* account exists. Filtered out of everything else on this panel.   */}
       <OwnerActivityPanel />
 
+      {/* VIP leaderboard — ranks referral-code owners by signups + */}
+      {/* deposits driven. Hides itself entirely if no VIPs exist.   */}
+      <VipLeaderboardPanel />
+
       {/* Heartbeat status (unchanged) */}
       <Card className={cn('border', heartbeat.daysSince !== null && heartbeat.daysSince >= 25 ? 'border-red-500/40 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5')}>
         <CardContent className="p-4 flex items-center justify-between">
@@ -394,6 +398,93 @@ function OwnerActivityPanel() {
             </div>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── VIP Leaderboard ──────────────────────────────────────────────────────
+// Per-VIP performance roll-up. Renders nothing if there are no VIPs yet —
+// keeps the dashboard clean pre-launch when only owner accounts exist.
+function VipLeaderboardPanel() {
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/admin/vip-leaderboard', { credentials: 'include' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (alive) setData(d);
+      } catch { /* non-critical */ }
+    };
+    load();
+    const t = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  if (!data || !data.vips || data.vips.length === 0) return null;
+
+  const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
+
+  return (
+    <Card className="border-violet-500/20 bg-violet-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2 text-violet-300">
+          <Sparkles className="w-4 h-4" />
+          VIP Leaderboard
+          <Badge className="text-[10px] h-5 bg-violet-500/20 text-violet-300 border-violet-500/30 ml-1">
+            {data.vips.length} VIP{data.vips.length === 1 ? '' : 's'}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {data.vips.map((v: any, i: number) => (
+            <div key={v.vip_user_id} className="bg-card/40 rounded-md p-3 border border-violet-500/10">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[10px] text-violet-400/80 tabular-nums w-5">#{i + 1}</span>
+                  <span className="truncate text-sm font-medium">{v.email || v.vip_user_id}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground tabular-nums">
+                  <span>{v.signups} signup{v.signups === 1 ? '' : 's'}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-[10px]">
+                <div>
+                  <p className="text-muted-foreground uppercase tracking-wider">Rake earned</p>
+                  <p className="text-emerald-400 font-semibold tabular-nums">{f(v.rake_earned)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground uppercase tracking-wider">Deposits driven</p>
+                  <p className="text-foreground font-semibold tabular-nums">{f(v.referee_deposits)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground uppercase tracking-wider">Bonus liability</p>
+                  <p className="text-amber-400/80 font-semibold tabular-nums">{f(v.bonus_liability)}</p>
+                </div>
+              </div>
+              {v.codes && v.codes.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2.5">
+                  {v.codes.map((c: any) => (
+                    <Badge
+                      key={c.code}
+                      variant="outline"
+                      className={cn(
+                        'text-[10px] h-5 font-mono px-2',
+                        c.is_active ? 'border-violet-500/30 text-violet-200' : 'opacity-50',
+                      )}
+                    >
+                      {c.code} · {Math.round(c.rake_share_pct)}% rake · ₦{Math.round(c.signup_bonus_tngn).toLocaleString()} bonus
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
