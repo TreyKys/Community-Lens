@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles } from 'lucide-react';
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
 import { getDisplayPool } from '@/lib/displayPool';
@@ -78,6 +78,27 @@ function BettingInterface({
   const payoutPreview = (selectedOption !== '' && stakeNum >= 100)
     ? calculatePotentialPayout(stakeNum, pools, parseInt(selectedOption))
     : null;
+
+  // Break-even stake = the largest amount where multiplier stays >= 1.0.
+  // Derived from the parimutuel payout identity (see lib/payout.ts) by
+  // solving payout(s) = s for the prospective stake s with current pools
+  // O (selected outcome) and L (losing side). Closed form:
+  //   s* = (0.9·(1-r)·L - (1 - 0.9·(1-r))·O) / (1 - 0.9·(1-r))
+  // where r is the entry rake. If the result is < 100 the market is
+  // effectively un-bet-able profitably right now (suggestedMaxStake is
+  // null in that case so we render a softer message).
+  const suggestedMaxStake = (() => {
+    if (selectedOption === '') return null;
+    const i = parseInt(selectedOption);
+    const O = pools[i] ?? 0;
+    const L = pools.reduce((s, p, idx) => s + (idx === i ? 0 : (p || 0)), 0);
+    if (L <= 0) return null; // first-mover state has its own warning
+    const k = 0.9 * (1 - 0.015);   // payout-pool fraction of net stake
+    const denom = 1 - k;            // ≈ 0.1135
+    const s = (k * L - denom * O) / denom;
+    if (!Number.isFinite(s) || s < 100) return null;
+    return Math.floor(s);
+  })();
 
   // Fetch user balance + bet distribution on mount
   useEffect(() => {
@@ -236,6 +257,42 @@ function BettingInterface({
               <span className="text-[10px] text-amber-300/80">First mover — needs an opposing prediction</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Negative-EV warning. Triggers when the prospective stake is
+          large enough relative to the opposing pool that the user would
+          take a loss even on a winning prediction (parimutuel: you
+          mostly just pay yourself back, minus the 10% house rake).
+          Stays clear of the first-mover case (no opposing side yet) —
+          that has its own amber notice inside the payout card. */}
+      {payoutPreview && payoutPreview.multiplier < 1 && !payoutPreview.isFirstMover && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/[0.06] p-3.5 animate-in fade-in slide-in-from-bottom-1">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1.5">
+              <p className="text-xs font-semibold text-red-300">
+                You&rsquo;d lose ₦{Math.round(Math.abs(payoutPreview.profit)).toLocaleString()} even if you win
+              </p>
+              <p className="text-[11px] text-red-200/80 leading-relaxed">
+                This stake is too big for the opposing pool. You&rsquo;d be most of the winning side, so the
+                payout is mostly your own money back &mdash; minus the 10% house rake.
+              </p>
+              {suggestedMaxStake !== null ? (
+                <button
+                  type="button"
+                  onClick={() => setAmount(String(suggestedMaxStake))}
+                  className="text-[11px] font-semibold text-red-300 underline underline-offset-2 hover:text-red-200"
+                >
+                  Use ₦{suggestedMaxStake.toLocaleString()} (break-even max) →
+                </button>
+              ) : (
+                <p className="text-[11px] text-red-200/60">
+                  Wait for the opposing side to grow, then try again.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
