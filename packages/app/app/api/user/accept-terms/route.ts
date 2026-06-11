@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sendWelcomeEmail } from '@/lib/welcome-email';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -33,6 +34,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, alreadyAccepted: true, version: CURRENT_TOS_VERSION });
     }
 
+    // First-ever acceptance vs re-acceptance after a T&C version bump.
+    // We only fire the welcome email on the first acceptance — the
+    // welcome_email_sent_at column gates against double-mail, but
+    // checking here too avoids the cost of a Resend round-trip when the
+    // user is just re-accepting a new T&C version.
+    const isFirstAcceptance = !existing?.tos_version;
+
     await supabaseAdmin
       .from('users')
       .update({
@@ -50,6 +58,17 @@ export async function POST(request: Request) {
       ip_address: ip,
       user_agent: ua,
     });
+
+    // Fire-and-forget welcome email on first acceptance. Never block the
+    // response on it — Resend can be slow / down, and the user already
+    // sees the app at this point. sendWelcomeEmail silently no-ops if
+    // RESEND_API_KEY is missing, so the manual-send path keeps working
+    // alongside this.
+    if (isFirstAcceptance) {
+      sendWelcomeEmail(user.id, supabaseAdmin).catch(err => {
+        console.error('[accept-terms] welcome email send failed (non-blocking):', err?.message || err);
+      });
+    }
 
     return NextResponse.json({ ok: true, version: CURRENT_TOS_VERSION });
   } catch (e: any) {
