@@ -124,19 +124,40 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
         try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
       }
 
-      // Try sign in first; if user doesn't exist, create account
+      // Try sign-in first; if there's no account yet, fall back to sign-up.
+      // The fallback used to throw whatever signUp errored with, which was
+      // confusing for accounts that already existed via OTP (no password
+      // set yet) — Supabase replied "User already registered" and users
+      // saw that instead of a useful "wrong password" hint.
       const signInResult = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
       });
 
       if (signInResult.error) {
-        // Sign-in failed (invalid creds OR user doesn't exist) — try sign-up
         const signUpResult = await supabase.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
         });
-        if (signUpResult.error) throw signUpResult.error;
+        if (signUpResult.error) {
+          const msg = (signUpResult.error.message || '').toLowerCase();
+          // The email already has an account, but our password didn't sign
+          // them in. Almost always means they signed up via email code and
+          // never set a password. Tell them what to do.
+          if (msg.includes('already') || msg.includes('exists') || msg.includes('registered')) {
+            throw new Error(
+              'That email already has an account, but the password didn\'t match. If you signed up with the email code, switch to "Email Code" to sign in.',
+            );
+          }
+          throw signUpResult.error;
+        }
+        // signUp returns no session when Supabase has "Confirm email" turned
+        // on — surface that clearly instead of pretending the user is in.
+        if (!signUpResult.data?.session) {
+          throw new Error(
+            'Account created. Check your inbox to confirm your email, then sign in.',
+          );
+        }
       }
 
       const { data: { session } } = await supabase.auth.getSession();

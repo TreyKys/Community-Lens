@@ -130,7 +130,30 @@ export async function POST(request: Request) {
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
     ]);
 
-    return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit });
+    // Welcome Match grant. Webhook does the same thing; the RPC is
+    // idempotent per user (PK on launch_promo_grants.user_id) so it
+    // doesn't matter who calls it first. Previously this only ran from
+    // the webhook — but verify almost always wins the race (Squad's
+    // redirect lands ~1s before its webhook), and once verify flips the
+    // status to 'completed' the webhook short-circuits without granting
+    // the match. Net effect: first deposits silently missed the bonus.
+    let welcomeCredit = 0;
+    try {
+      const { data: matchAmt } = await supabaseAdmin.rpc('claim_welcome_match', {
+        p_user_id: userId,
+        p_deposit_amount: tNGNToCredit,
+      });
+      welcomeCredit = Number(matchAmt || 0);
+      if (welcomeCredit > 0) {
+        await supabaseAdmin.from('treasury_log').insert([
+          { type: 'welcome_match', amount_tngn: welcomeCredit, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
+        ]);
+      }
+    } catch (e: any) {
+      console.error('Welcome match grant failed (deposit still credited):', e?.message || e);
+    }
+
+    return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit, welcomeMatchCredit: welcomeCredit });
   } catch (e: any) {
     console.error('Squad verify error:', e);
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });
