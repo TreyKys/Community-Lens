@@ -2013,17 +2013,22 @@ function VIPPanel() {
 
   const loadVips = useCallback(async () => {
     setIsLoadingVips(true);
-    const { data } = await supabase
-      .from('users')
-      .select(`
-        id, email, created_at, is_vip, bonus_balance, points,
-        referral_codes!referral_codes_owner_user_id_fkey (code, is_vip_code, rake_share_pct, uses_count, is_active)
-      `)
-      .eq('is_vip', true)
-      .order('created_at', { ascending: false })
-      .limit(30);
-    setRecentVips(data || []);
-    setIsLoadingVips(false);
+    // Service-role-backed endpoint — the previous version hit the
+    // browser supabase client directly, which RLS quietly filtered to
+    // an empty result no matter what was actually in the table.
+    try {
+      const res = await fetch('/api/admin/vip/list', { credentials: 'include' });
+      if (!res.ok) {
+        setRecentVips([]);
+      } else {
+        const data = await res.json();
+        setRecentVips(data?.vips || []);
+      }
+    } catch {
+      setRecentVips([]);
+    } finally {
+      setIsLoadingVips(false);
+    }
   }, []);
 
   useEffect(() => { loadVips(); }, [loadVips]);
