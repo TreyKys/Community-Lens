@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     try { body = await request.json(); }
     catch { return NextResponse.json({ error: 'Malformed body' }, { status: 400 }); }
 
-    const { userId, email, code, rakeSharePct, preloadBonus } = body || {};
+    const { userId, email, code, rakeSharePct, preloadBonus, signupBonus } = body || {};
 
     if (!code) return NextResponse.json({ error: 'code required' }, { status: 400 });
     if (!userId && !email) return NextResponse.json({ error: 'userId or email required' }, { status: 400 });
@@ -42,6 +42,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'preloadBonus out of range' }, { status: 400 });
     }
 
+    // Signup bonus = amount future new users receive when they redeem
+    // this VIP's code. Defaults to ₦500 server-side if unset; capped at
+    // ₦5,000 by the RPC's CHECK constraint on referral_codes.
+    const signup = signupBonus === undefined || signupBonus === null || signupBonus === ''
+      ? undefined
+      : Number(signupBonus);
+    if (signup !== undefined && (!Number.isFinite(signup) || signup < 0 || signup > 5_000)) {
+      return NextResponse.json({ error: 'signupBonus must be between 0 and 5000' }, { status: 400 });
+    }
+
     // Resolve target user
     let targetUserId: string | null = userId || null;
     if (!targetUserId && email) {
@@ -54,28 +64,35 @@ export async function POST(request: Request) {
       targetUserId = u.id;
     }
 
+    const rpcArgs: Record<string, unknown> = {
+      p_user_id: targetUserId,
+      p_custom_code: cleanCode,
+      p_rake_share_pct: share,
+      p_preload_bonus: preload,
+    };
+    if (signup !== undefined) rpcArgs.p_signup_bonus_tngn = signup;
+
     const { data, error } = await supabaseAdmin
-      .rpc('admin_create_vip', {
-        p_user_id: targetUserId,
-        p_custom_code: cleanCode,
-        p_rake_share_pct: share,
-        p_preload_bonus: preload,
-      })
+      .rpc('admin_create_vip', rpcArgs)
       .single<{ ok: boolean; message: string; code: string | null }>();
 
     if (error) {
       console.error('admin_create_vip RPC error', error);
-      return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+      // Surface the actual Postgres error to the client so we don't
+      // pretend success when the RPC just blew up.
+      return NextResponse.json({ error: error.message || 'RPC error' }, { status: 500 });
     }
 
     if (!data?.ok) {
       const map: Record<string, string> = {
-        code_taken: 'That referral code is already taken.',
-        code_length: 'Code must be 3–20 characters.',
-        invalid_input: 'Invalid input.',
-        rake_share_out_of_range: 'Rake share must be 0–50%.',
+        invalid_input:               'Invalid input.',
+        rake_share_out_of_range:     'Rake share must be 0–50%.',
+        preload_bonus_out_of_range:  'Preload bonus out of range (0–1,000,000).',
+        signup_bonus_out_of_range:   'Signup bonus out of range (0–5,000).',
+        code_length_invalid:         'Code must be 3–32 characters.',
+        code_taken:                  'That referral code is already taken.',
       };
-      return NextResponse.json({ error: map[data?.message || ''] || data?.message }, { status: 400 });
+      return NextResponse.json({ error: map[data?.message || ''] || data?.message || 'Unknown failure' }, { status: 400 });
     }
 
     return NextResponse.json({
@@ -84,6 +101,7 @@ export async function POST(request: Request) {
       code: data.code,
       rakeSharePct: share,
       preloadBonus: preload,
+      signupBonus: signup ?? null,
     });
   } catch (e: any) {
     console.error('vip create error', e);

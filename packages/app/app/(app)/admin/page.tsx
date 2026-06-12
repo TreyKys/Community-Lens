@@ -2003,6 +2003,10 @@ function VIPPanel() {
   const [code, setCode] = useState('');
   const [rakeSharePct, setRakeSharePct] = useState('20');
   const [preloadBonus, setPreloadBonus] = useState('5000');
+  // The signup bonus is the credit a NEW user gets when they redeem this
+  // VIP's code — separate from preloadBonus which is the VIP's own
+  // thank-you credit. Empty string means "use the server default" (500).
+  const [signupBonus, setSignupBonus] = useState('500');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [recentVips, setRecentVips] = useState<any[]>([]);
   const [isLoadingVips, setIsLoadingVips] = useState(true);
@@ -2039,12 +2043,16 @@ function VIPPanel() {
           code: code.trim().toUpperCase(),
           rakeSharePct: Number(rakeSharePct) || 0,
           preloadBonus: Number(preloadBonus) || 0,
+          signupBonus: signupBonus === '' ? undefined : Number(signupBonus),
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed');
-      toast({ title: `VIP created: ${json.code}`, description: `${rakeSharePct}% rake share, ₦${Number(preloadBonus).toLocaleString()} preloaded.` });
-      setEmail(''); setCode(''); setRakeSharePct('20'); setPreloadBonus('5000');
+      toast({
+        title: `VIP created: ${json.code}`,
+        description: `${rakeSharePct}% rake share · ₦${Number(preloadBonus).toLocaleString()} preload · ₦${Number(signupBonus || 500).toLocaleString()} per signup`,
+      });
+      setEmail(''); setCode(''); setRakeSharePct('20'); setPreloadBonus('5000'); setSignupBonus('500');
       loadVips();
     } catch (e: any) {
       toast({ title: 'VIP creation failed', description: e.message, variant: 'destructive' });
@@ -2102,7 +2110,18 @@ function VIPPanel() {
                 value={preloadBonus}
                 onChange={e => setPreloadBonus(e.target.value)}
               />
-              <p className="text-[10px] text-muted-foreground">Credited to bonus_balance (non-withdrawable).</p>
+              <p className="text-[10px] text-muted-foreground">Credited to the VIP&apos;s own bonus_balance.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Signup Bonus / referee (tNGN, 0–5000)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={5000}
+                value={signupBonus}
+                onChange={e => setSignupBonus(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground">Credited to NEW users when they redeem this code.</p>
             </div>
           </div>
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-200/90">
