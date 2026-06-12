@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift } from 'lucide-react';
+import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye } from 'lucide-react';
+import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import Link from 'next/link';
@@ -1366,6 +1367,9 @@ function UsersPanel() {
   const [issueAmount, setIssueAmount] = useState('');
   const [issueReason, setIssueReason] = useState('');
   const [isIssuing, setIsIssuing] = useState(false);
+  // The user_id whose forensic drawer is currently open. Null = nothing
+  // selected (drawer closed). UserDetailDrawer self-fetches on change.
+  const [detailUserId, setDetailUserId] = useState<string | null>(null);
   const pageSize = 25;
 
   const load = useCallback(async () => {
@@ -1470,7 +1474,10 @@ function UsersPanel() {
     {
       key: 'actions', label: '',
       render: (u) => (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-1.5">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setDetailUserId(u.id)}>
+            <Eye className="w-3 h-3" /> View
+          </Button>
           <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setIssueTarget(u)}>
             <Gift className="w-3 h-3" /> Issue
           </Button>
@@ -1552,6 +1559,9 @@ function UsersPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Forensic detail drawer — fed by the "View" button on each row. */}
+      <UserDetailDrawer userId={detailUserId} onClose={() => setDetailUserId(null)} />
     </>
   );
 }
