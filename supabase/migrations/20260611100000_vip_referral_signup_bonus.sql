@@ -39,9 +39,13 @@ UPDATE public.referral_codes
    AND signup_bonus_tngn = 0;
 
 -- ── Update admin_create_vip so new VIPs get the bonus baked in ─────────
--- The previous signature took p_rake_share_pct only. We extend it with
--- an optional p_signup_bonus_tngn (default 500). The old shape stays
--- intact so existing callers don't break.
+-- The previous signature was admin_create_vip(uuid, text, numeric) with
+-- the code arg named p_custom_code. We rename it to p_code AND add a
+-- 4th param for the signup bonus — Postgres' CREATE OR REPLACE rejects
+-- renames, so we DROP the old version first (idempotent via IF EXISTS).
+DROP FUNCTION IF EXISTS public.admin_create_vip(uuid, text, numeric);
+DROP FUNCTION IF EXISTS public.admin_create_vip(uuid, text, numeric, numeric);
+
 CREATE OR REPLACE FUNCTION public.admin_create_vip(
   p_user_id            uuid,
   p_code               text,
@@ -97,7 +101,10 @@ GRANT EXECUTE ON FUNCTION public.admin_create_vip(uuid, text, numeric, numeric) 
 
 -- ── Update redeem_referral_code to credit the new user ─────────────────
 -- Adds the signup-bonus credit step. Returns the granted amount as a
--- 5th column so the API can surface it in the welcome toast.
+-- 5th column — Postgres treats a change in RETURN TABLE shape as a
+-- rename, so drop first then create.
+DROP FUNCTION IF EXISTS public.redeem_referral_code(uuid, text);
+
 CREATE OR REPLACE FUNCTION public.redeem_referral_code(
   p_user_id uuid,
   p_code text
