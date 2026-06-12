@@ -256,6 +256,7 @@ export async function GET(
         tos_version: user.tos_version,
         welcome_email_sent_at: user.welcome_email_sent_at,
         created_at: user.created_at,
+        last_active_at: user.last_active_at,
         referred_by_user_id: user.referred_by_user_id,
         referred_by_is_vip: user.referred_by_is_vip || false,
       },

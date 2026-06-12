@@ -123,6 +123,7 @@ export function UserDetailDrawer({ userId, onClose }: Props) {
 
                 <Section title="Profile">
                   <Stat label="Joined" value={dt(data.user.created_at)} />
+                  <Stat label="Last active" value={dt(data.user.last_active_at)} color={data.user.last_active_at && (Date.now() - new Date(data.user.last_active_at).getTime() < 3600_000) ? 'text-emerald-400' : undefined} />
                   <Stat label="Terms accepted" value={data.user.tos_accepted_at ? `${dt(data.user.tos_accepted_at)} (v${data.user.tos_version})` : '—'} />
                   <Stat label="Welcome email" value={data.user.welcome_email_sent_at ? dt(data.user.welcome_email_sent_at) : 'Not sent'} />
                   <Stat label="Phone" value={data.user.phone || '—'} />

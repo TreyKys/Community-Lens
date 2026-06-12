@@ -14,6 +14,7 @@ import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
+import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import Link from 'next/link';
@@ -1353,6 +1354,7 @@ type UserRow = {
   bonus_balance: number;
   lifetime_credits: number;
   created_at: string | null;
+  last_active_at: string | null;
 };
 
 function UsersPanel() {
@@ -1391,9 +1393,9 @@ function UsersPanel() {
   useEffect(() => { load(); }, [load]);
 
   const exportCsv = () => {
-    const header = ['id', 'email', 'username', 'tngn_balance', 'bonus_balance', 'lifetime_credits', 'created_at'];
+    const header = ['id', 'email', 'username', 'tngn_balance', 'bonus_balance', 'lifetime_credits', 'created_at', 'last_active_at'];
     const lines = rows.map((r) =>
-      [r.id, r.email ?? '', r.username ?? '', r.tngn_balance, r.bonus_balance, r.lifetime_credits, r.created_at ?? '']
+      [r.id, r.email ?? '', r.username ?? '', r.tngn_balance, r.bonus_balance, r.lifetime_credits, r.created_at ?? '', r.last_active_at ?? '']
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(',')
     );
@@ -1465,11 +1467,28 @@ function UsersPanel() {
       render: (u) => <span className="text-emerald-400">₦{u.lifetime_credits.toLocaleString()}</span>,
     },
     {
-      key: 'created_at', label: 'Joined', sortable: true,
-      sortValue: (u) => new Date(u.created_at || 0).getTime(),
-      render: (u) => u.created_at
-        ? <span className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-        : '—',
+      key: 'last_active_at', label: 'Last active', sortable: true,
+      sortValue: (u) => new Date(u.last_active_at || u.created_at || 0).getTime(),
+      render: (u) => {
+        // Relative formatting at-a-glance ("3m ago", "2h ago"). Falls
+        // back to created_at for accounts that pre-date the migration.
+        const ts = u.last_active_at || u.created_at;
+        if (!ts) return <span className="text-xs text-muted-foreground">—</span>;
+        const diff = Date.now() - new Date(ts).getTime();
+        const m = Math.floor(diff / 60000);
+        const h = Math.floor(m / 60);
+        const d = Math.floor(h / 24);
+        const rel =
+          m < 1   ? 'now' :
+          m < 60  ? `${m}m ago` :
+          h < 24  ? `${h}h ago` :
+          d < 30  ? `${d}d ago` :
+          new Date(ts).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+        const fresh = m < 60;
+        return (
+          <span className={cn('text-xs tabular-nums', fresh ? 'text-emerald-400' : 'text-muted-foreground')}>{rel}</span>
+        );
+      },
     },
     {
       key: 'actions', label: '',
@@ -2403,6 +2422,11 @@ function DeleteSpecificMarketsPanel() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Market_id of the row whose forensic drawer is currently open. The
+  // panel doubles as the only place to BROWSE markets in admin, so the
+  // View button + drawer also live here (despite the panel being
+  // titled around deletion).
+  const [detailMarketId, setDetailMarketId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -2563,45 +2587,55 @@ function DeleteSpecificMarketsPanel() {
             const checked = selected.has(m.id);
             const blocked = m.child_count > 0;
             return (
-              <label
+              <div
                 key={m.id}
                 className={cn(
-                  'flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-red-500/5',
+                  'flex items-start gap-3 px-3 py-2 hover:bg-red-500/5',
                   checked && 'bg-red-500/10',
                 )}
               >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleOne(m.id)}
-                  className="mt-1 accent-red-500"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[10px] text-muted-foreground tabular-nums">#{m.id}</span>
-                    <Badge className={cn('text-[10px] h-5',
-                      m.status === 'open'     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
-                      m.status === 'locked'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                      m.status === 'resolved' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-                                                'bg-muted text-muted-foreground border-muted')}>
-                      {m.status.toUpperCase()}
-                    </Badge>
-                    {m.category && (
-                      <Badge variant="outline" className="text-[10px] h-5">{m.category}</Badge>
-                    )}
-                    {blocked && (
-                      <Badge className="text-[10px] h-5 bg-yellow-500/20 text-yellow-300 border-yellow-500/30">
-                        {m.child_count} sub-market{m.child_count === 1 ? '' : 's'}
+                <label className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleOne(m.id)}
+                    className="mt-1 accent-red-500"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-[10px] text-muted-foreground tabular-nums">#{m.id}</span>
+                      <Badge className={cn('text-[10px] h-5',
+                        m.status === 'open'     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
+                        m.status === 'locked'   ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                        m.status === 'resolved' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                                                  'bg-muted text-muted-foreground border-muted')}>
+                        {m.status.toUpperCase()}
                       </Badge>
-                    )}
+                      {m.category && (
+                        <Badge variant="outline" className="text-[10px] h-5">{m.category}</Badge>
+                      )}
+                      {blocked && (
+                        <Badge className="text-[10px] h-5 bg-yellow-500/20 text-yellow-300 border-yellow-500/30">
+                          {m.child_count} sub-market{m.child_count === 1 ? '' : 's'}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-sm truncate">{m.question}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      Pool {f(m.total_pool || 0)}
+                      {m.closes_at ? ` · closes ${new Date(m.closes_at).toLocaleDateString()}` : ''}
+                    </div>
                   </div>
-                  <div className="text-sm truncate">{m.question}</div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                    Pool {f(m.total_pool || 0)}
-                    {m.closes_at ? ` · closes ${new Date(m.closes_at).toLocaleDateString()}` : ''}
-                  </div>
-                </div>
-              </label>
+                </label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs gap-1 shrink-0 mt-1"
+                  onClick={() => setDetailMarketId(m.id)}
+                >
+                  <Eye className="w-3 h-3" /> View
+                </Button>
+              </div>
             );
           })}
         </div>
@@ -2653,6 +2687,10 @@ function DeleteSpecificMarketsPanel() {
           </DialogContent>
         </Dialog>
       </CardContent>
+
+      {/* Forensic drawer for the row's "View" button. Shared with the */}
+      {/* admin's market browse flow so a single instance is enough.   */}
+      <MarketDetailDrawer marketId={detailMarketId} onClose={() => setDetailMarketId(null)} />
     </Card>
   );
 }

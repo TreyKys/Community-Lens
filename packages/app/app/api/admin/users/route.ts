@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
   let query = db
     .from('users')
-    .select('id, email, username, tngn_balance, bonus_balance, created_at', { count: 'exact' });
+    .select('id, email, username, tngn_balance, bonus_balance, created_at, last_active_at', { count: 'exact' });
 
   if (search) {
     const safe = search.replace(/[%_]/g, ''); // strip wildcards from raw input
@@ -47,10 +47,10 @@ export async function GET(request: Request) {
   const sortableColumns: Record<string, string> = {
     tngn_balance: 'tngn_balance',
     bonus_balance: 'bonus_balance',
-    last_active: 'created_at', // proxy until we add a real last_active column
+    last_active: 'last_active_at', // now backed by the real column (migration 20260612)
     email: 'email',
   };
-  const sortColumn = sortableColumns[sort] || 'created_at';
+  const sortColumn = sortableColumns[sort] || 'last_active_at';
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
@@ -84,6 +84,7 @@ export async function GET(request: Request) {
     bonus_balance: Number(u.bonus_balance || 0),
     lifetime_credits: creditsByUser[u.id] || 0,
     created_at: u.created_at || null,
+    last_active_at: u.last_active_at || null,
   }));
 
   // If sorting by lifetime_credits, we have to sort in memory since it's a derived field.
