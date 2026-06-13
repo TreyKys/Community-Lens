@@ -69,7 +69,25 @@ function BettingInterface({
   const [isLoading, setIsLoading] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
+  const [showWalkthrough, setShowWalkthrough] = useState(false);
   const { toast } = useToast();
+
+  // First-bet parimutuel primer. Most "I don't get it" complaints die after
+  // a single plain-language explainer; we gate via localStorage so it never
+  // re-shows even if the user backs out without staking. Versioned key so
+  // we can re-show on copy revisions if we ever need to.
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem('opinionsng_seen_walkthrough_v1')) {
+        setShowWalkthrough(true);
+      }
+    } catch {}
+  }, []);
+
+  const dismissWalkthrough = () => {
+    try { localStorage.setItem('opinionsng_seen_walkthrough_v1', new Date().toISOString()); } catch {}
+    setShowWalkthrough(false);
+  };
 
   // Per-option net pools used by the potential-winnings calculator.
   // Kept in sync with the bet distribution fetched below.
@@ -172,7 +190,44 @@ function BettingInterface({
   };
 
   return (
-    <div className="space-y-4 pt-2">
+    <div className="space-y-4 pt-2 relative">
+      {/* First-bet walkthrough — sits absolute over the form so the data
+          loaders (balance, distribution) behind it run in parallel; user
+          sees a populated form the moment they dismiss. Three plain
+          sentences, including the parimutuel "strength" hook in #3 — that's
+          the selling point fixed-odds books can't replicate, so we lean
+          into it instead of apologising for the mechanic. */}
+      {showWalkthrough && (
+        <div className="absolute inset-0 z-20 bg-background/97 backdrop-blur-md flex items-start justify-center overflow-y-auto rounded-md">
+          <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/[0.12] via-emerald-500/[0.05] to-transparent p-5 space-y-4 w-full">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-semibold text-emerald-300">Quick — how this works</span>
+            </div>
+            <ol className="space-y-3 text-sm text-foreground/90 leading-relaxed">
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 w-5 h-5 mt-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold text-emerald-300">1</span>
+                <span>Forget bookie odds. Everyone&rsquo;s stake goes into one pool.</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 w-5 h-5 mt-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold text-emerald-300">2</span>
+                <span>When the market closes, the winners split the pool &mdash; minus a 10% house fee.</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 w-5 h-5 mt-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold text-emerald-300">3</span>
+                <span>The more confident the crowd is, the bigger your payout for being right against them.</span>
+              </li>
+            </ol>
+            <Button
+              onClick={dismissWalkthrough}
+              className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-semibold"
+            >
+              Got it &mdash; let me predict
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Real bet distribution bars */}
       {distribution.length > 0 && (
         <div className="space-y-1.5">
@@ -236,21 +291,25 @@ function BettingInterface({
 
       {payoutPreview && (
         <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="flex items-center gap-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-              <Sparkles className="w-3 h-3" /> If correct
-            </span>
-            <span className="text-[10px] text-muted-foreground">
-              {Math.round(payoutPreview.impliedProb * 100)}% implied
-            </span>
+          {/* Lead with the multiplier — it reads like betting odds, which is
+              the mental model Nigerian users arrive with. ₦ amount stays as
+              the secondary anchor (they still want to see the actual naira).
+              "% implied" demoted to muted footer text — it's a probability
+              puzzle that creates more confusion than clarity at this stage. */}
+          <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
+            <Sparkles className="w-3 h-3" /> Your stake locks at
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-2xl md:text-3xl font-black text-emerald-400 tracking-tight tabular-nums">
-              ₦{Math.round(payoutPreview.payout).toLocaleString()}
+            <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
+              {payoutPreview.multiplier.toFixed(2)}×
             </span>
-            <span className="text-xs text-emerald-300/80 font-medium tabular-nums">
-              {payoutPreview.multiplier.toFixed(2)}× return
+            <span className="text-sm text-emerald-300/80 font-semibold tabular-nums">
+              ₦{Math.round(payoutPreview.payout).toLocaleString()} if correct
             </span>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+            <span>Final payout calculated from pool at close.</span>
+            <span className="text-muted-foreground/60 tabular-nums">{Math.round(payoutPreview.impliedProb * 100)}% implied</span>
           </div>
           {payoutPreview.isFirstMover && (
             <div className="flex items-center justify-end text-[11px] mt-1.5">
