@@ -203,6 +203,12 @@ export function WalletModal() {
             <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
               <Shield className="w-3 h-3" /> Secured by Squad · Card · Bank · USSD
             </p>
+            <p className="text-[11px] text-muted-foreground/80 text-center leading-relaxed border-t border-border/30 pt-3">
+              Trouble with your deposit? Email{' '}
+              <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">opng@neurodevlabs.cloud</a>
+              {' '}or{' '}
+              <a href="mailto:hello@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">hello@neurodevlabs.cloud</a>
+            </p>
           </TabsContent>
 
           {/* ── WITHDRAW ────────────────────────────────────────────────── */}
@@ -281,6 +287,12 @@ export function WalletModal() {
             >
               {isWithdrawLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Withdraw to Bank'}
             </Button>
+            <p className="text-[11px] text-muted-foreground/80 text-center leading-relaxed border-t border-border/30 pt-3">
+              Withdrawal stuck or missing? Email{' '}
+              <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">opng@neurodevlabs.cloud</a>
+              {' '}or{' '}
+              <a href="mailto:hello@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">hello@neurodevlabs.cloud</a>
+            </p>
           </TabsContent>
         </Tabs>
 

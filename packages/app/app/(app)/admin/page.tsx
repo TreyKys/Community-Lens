@@ -12,9 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame } from 'lucide-react';
+import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
+import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import Link from 'next/link';
@@ -2452,6 +2453,10 @@ function DeleteSpecificMarketsPanel() {
   // View button + drawer also live here (despite the panel being
   // titled around deletion).
   const [detailMarketId, setDetailMarketId] = useState<number | null>(null);
+  // Edit dialog target — same pattern as detailMarketId. Letting both
+  // live in this panel keeps "browse / edit / delete a market" in one
+  // physical place in admin, since they share search/filter context.
+  const [editMarketId, setEditMarketId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -2695,6 +2700,15 @@ function DeleteSpecificMarketsPanel() {
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1"
+                    onClick={() => setEditMarketId(m.id)}
+                    title="Edit question, description, options, and close time"
+                  >
+                    <Pencil className="w-3 h-3" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
                     onClick={() => setDetailMarketId(m.id)}
                   >
                     <Eye className="w-3 h-3" /> View
@@ -2756,6 +2770,11 @@ function DeleteSpecificMarketsPanel() {
       {/* Forensic drawer for the row's "View" button. Shared with the */}
       {/* admin's market browse flow so a single instance is enough.   */}
       <MarketDetailDrawer marketId={detailMarketId} onClose={() => setDetailMarketId(null)} />
+      <MarketEditDialog
+        marketId={editMarketId}
+        onClose={() => setEditMarketId(null)}
+        onSaved={() => load()}
+      />
     </Card>
   );
 }

@@ -19,6 +19,21 @@ const ATTEMPT_DELAY_MS = [0, 1500, 2500, 3500, 4500, 5500] as const;
 const PER_ATTEMPT_TIMEOUT_MS = 12_000;
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
+// Inline support line, shown on every state of this page. Deposits are
+// the place users get most spooked when something looks off, so we keep
+// the contact route visible regardless of outcome — including the happy
+// path, just in case the credited amount looks wrong.
+function SupportLine() {
+  return (
+    <p className="text-[11px] text-muted-foreground/80 leading-relaxed border-t border-border/30 pt-3 mt-2">
+      Any problem with your deposit? Email{' '}
+      <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">opng@neurodevlabs.cloud</a>
+      {' '}or{' '}
+      <a href="mailto:hello@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">hello@neurodevlabs.cloud</a>
+    </p>
+  );
+}
+
 async function postVerify(reference: string, signal: AbortSignal): Promise<any> {
   const res = await fetch('/api/squad/verify', {
     method: 'POST',
@@ -150,6 +165,7 @@ function CallbackContent() {
               ref: {ref}
             </p>
           )}
+          <SupportLine />
         </>
       )}
 
@@ -165,6 +181,7 @@ function CallbackContent() {
           <Button onClick={() => router.push('/markets')} className="w-full">
             Continue to markets
           </Button>
+          <SupportLine />
         </>
       )}
 
@@ -190,6 +207,7 @@ function CallbackContent() {
               Back to markets
             </Button>
           </div>
+          <SupportLine />
         </>
       )}
 
@@ -215,6 +233,7 @@ function CallbackContent() {
               Back to markets
             </Button>
           </div>
+          <SupportLine />
         </>
       )}
     </div>
