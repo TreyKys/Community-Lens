@@ -6,6 +6,7 @@ import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Toaster } from "@/components/ui/toaster";
 import { OnboardingIntercept } from "@/components/OnboardingIntercept";
+import { WelcomeModal } from "@/components/WelcomeModal";
 import { BottomTabBar } from "@/components/BottomTabBar";
 
 const geistSans = localFont({
@@ -62,7 +63,11 @@ export default function RootLayout({
           <Footer />
           <BottomTabBar />
           <Toaster />
+          {/* Profile-completion intercept fires for signed-in users; */}
+          {/* Welcome modal fires for unauth visitors. They're mutually */}
+          {/* exclusive by design — both checks gate on session. */}
           <OnboardingIntercept />
+          <WelcomeModal />
         </Providers>
       </body>
     </html>

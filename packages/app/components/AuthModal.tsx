@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, ReactNode } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
+
+// Event name + first-claim guard for opening the auth dialog from outside
+// this component (e.g. WelcomeModal's "Claim my bonus" CTA). AuthModal
+// is rendered TWICE when signed-out (Navbar for desktop, BottomTabBar
+// for mobile), so without the guard a single dispatch would open two
+// dialogs and stack two backdrops. First mount claims the handler;
+// subsequent mounts no-op, and the unmount cleanup releases the claim.
+const AUTH_OPEN_EVENT = 'opinionsng:open-auth';
+let authOpenHandlerActive = false;
 
 interface AuthModalProps {
   variant?: 'default' | 'icon';
@@ -31,6 +40,20 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [referralCode, setReferralCode] = useState('');
   const { toast } = useToast();
+
+  // Imperative open from outside the component (e.g. WelcomeModal,
+  // future deep-link/CTA buttons). See module-scope comment for why
+  // we first-claim the listener.
+  useEffect(() => {
+    if (authOpenHandlerActive) return;
+    authOpenHandlerActive = true;
+    const handler = () => setIsOpen(true);
+    window.addEventListener(AUTH_OPEN_EVENT, handler);
+    return () => {
+      window.removeEventListener(AUTH_OPEN_EVENT, handler);
+      authOpenHandlerActive = false;
+    };
+  }, []);
 
   const applyPostAuthHooks = async (accessToken: string) => {
     try {
