@@ -212,7 +212,7 @@ function BettingInterface({
               </li>
               <li className="flex gap-3">
                 <span className="flex-shrink-0 w-5 h-5 mt-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold text-emerald-300">2</span>
-                <span>When the market closes, the winners split the pool &mdash; minus a 10% house fee.</span>
+                <span>When the market closes, the winners split the pool.</span>
               </li>
               <li className="flex gap-3">
                 <span className="flex-shrink-0 w-5 h-5 mt-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold text-emerald-300">3</span>
@@ -336,7 +336,7 @@ function BettingInterface({
               </p>
               <p className="text-[11px] text-red-200/80 leading-relaxed">
                 This stake is too big for the opposing pool. You&rsquo;d be most of the winning side, so the
-                payout is mostly your own money back &mdash; minus the 10% house rake.
+                payout would mostly be your own money back.
               </p>
               {suggestedMaxStake !== null ? (
                 <button
