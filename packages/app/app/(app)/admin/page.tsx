@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye } from 'lucide-react';
+import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { cn } from '@/lib/utils';
@@ -2435,6 +2435,7 @@ type MarketRow = {
   parent_market_id: number | null;
   closes_at: string | null;
   child_count: number;
+  is_trending: boolean;
 };
 
 function DeleteSpecificMarketsPanel() {
@@ -2457,7 +2458,7 @@ function DeleteSpecificMarketsPanel() {
     try {
       let q = supabase
         .from('markets')
-        .select('id, question, category, status, total_pool, parent_market_id, closes_at')
+        .select('id, question, category, status, total_pool, parent_market_id, closes_at, is_trending')
         .order('id', { ascending: false })
         .limit(50);
       if (statusFilter !== 'all') q = q.eq('status', statusFilter);
@@ -2492,6 +2493,7 @@ function DeleteSpecificMarketsPanel() {
           parent_market_id: m.parent_market_id,
           closes_at: m.closes_at,
           child_count: childCounts[m.id] || 0,
+          is_trending: !!m.is_trending,
         })),
       );
     } catch (e: any) {
@@ -2516,6 +2518,31 @@ function DeleteSpecificMarketsPanel() {
   const selectedRows = rows.filter(r => selected.has(r.id));
   const blockedRows = selectedRows.filter(r => r.child_count > 0);
   const canDelete = selectedRows.length > 0 && blockedRows.length === 0;
+
+  // Optimistic flip — flip the row in state first so the UI feels instant,
+  // roll back on API failure. Only the Trending tab on /markets reads this
+  // flag, so a quick toggle should be reflected immediately.
+  const toggleTrending = async (marketId: number, current: boolean) => {
+    setRows(prev => prev.map(r => r.id === marketId ? { ...r, is_trending: !current } : r));
+    try {
+      const res = await fetch(`/api/admin/markets/${marketId}`, {
+        method: 'PATCH',
+        headers: adminHeaders(),
+        body: JSON.stringify({ is_trending: !current }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update');
+      }
+      toast({
+        title: !current ? 'Added to Trending' : 'Removed from Trending',
+        description: `#${marketId}`,
+      });
+    } catch (e: any) {
+      setRows(prev => prev.map(r => r.id === marketId ? { ...r, is_trending: current } : r));
+      toast({ title: 'Toggle failed', description: e.message, variant: 'destructive' });
+    }
+  };
 
   const executeDelete = async () => {
     setIsDeleting(true);
@@ -2651,14 +2678,28 @@ function DeleteSpecificMarketsPanel() {
                     </div>
                   </div>
                 </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs gap-1 shrink-0 mt-1"
-                  onClick={() => setDetailMarketId(m.id)}
-                >
-                  <Eye className="w-3 h-3" /> View
-                </Button>
+                <div className="flex flex-col gap-1 shrink-0 mt-1">
+                  <Button
+                    size="sm"
+                    variant={m.is_trending ? 'default' : 'outline'}
+                    className={cn(
+                      'h-7 text-xs gap-1',
+                      m.is_trending && 'bg-orange-500 hover:bg-orange-600 text-black border-orange-500',
+                    )}
+                    onClick={(e) => { e.stopPropagation(); toggleTrending(m.id, m.is_trending); }}
+                    title={m.is_trending ? 'Remove from Trending tab' : 'Add to Trending tab'}
+                  >
+                    <Flame className="w-3 h-3" /> {m.is_trending ? 'Trending' : 'Trend'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => setDetailMarketId(m.id)}
+                  >
+                    <Eye className="w-3 h-3" /> View
+                  </Button>
+                </div>
               </div>
             );
           })}

@@ -183,3 +183,50 @@ export async function GET(
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });
   }
 }
+
+// PATCH /api/admin/markets/[id]
+//
+// Flip mutable per-market admin flags. Only is_trending is currently
+// supported — used by the admin panel's Trending toggle to curate
+// which markets surface under the Trending tab on the public list.
+// Generic shape so adding future toggles (e.g. is_featured, is_locked
+// override) is just an allow-list entry rather than a new endpoint.
+export async function PATCH(
+  request: Request,
+  { params }: { params: { id: string } },
+) {
+  if (!isAdminRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const marketId = Number(params.id);
+  if (!Number.isFinite(marketId)) {
+    return NextResponse.json({ error: 'id must be a number' }, { status: 400 });
+  }
+
+  let body: any;
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: 'Malformed body' }, { status: 400 }); }
+
+  const patch: Record<string, unknown> = {};
+  if (typeof body?.is_trending === 'boolean') patch.is_trending = body.is_trending;
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: 'No supported fields in body' }, { status: 400 });
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('markets')
+    .update(patch)
+    .eq('id', marketId)
+    .select('id, is_trending')
+    .maybeSingle();
+
+  if (error) {
+    console.error('admin market-patch error', error);
+    return NextResponse.json({ error: error.message || 'Update failed' }, { status: 500 });
+  }
+  if (!data) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
+
+  return NextResponse.json({ ok: true, market: data });
+}

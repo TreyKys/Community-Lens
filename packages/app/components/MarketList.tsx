@@ -30,6 +30,7 @@ interface Market {
   merkle_root: string | null;
   description: string | null;
   resolved_at: string | null;
+  is_trending: boolean;
 }
 
 interface MarketCardProps {
@@ -428,7 +429,10 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
     : null;
 
   return (
-    <Card className="hover:shadow-lg transition-all bg-card relative overflow-hidden group border-muted">
+    <Card
+      data-market-id={market.id}
+      className="hover:shadow-lg transition-all bg-card relative overflow-hidden group border-muted"
+    >
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
       <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
@@ -598,19 +602,31 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
 type CategoryFilter = {
   category: string | null;
   sport: string | null;
+  excludeSport: string | null;
   leagueCode: string | null;
   questionFilter: string | null;
+  trendingOnly: boolean;
+  excludeTrending: boolean;
 };
 
 function buildCategoryFilter(category: string, subcategory: string | null): CategoryFilter {
-  const base: CategoryFilter = { category: null, sport: null, leagueCode: null, questionFilter: null };
+  const base: CategoryFilter = {
+    category: null,
+    sport: null,
+    excludeSport: null,
+    leagueCode: null,
+    questionFilter: null,
+    trendingOnly: false,
+    excludeTrending: false,
+  };
 
-  // 4-category board model:
-  //   ball  -> any sports category (football, basketball, etc.) excluding combat sports
-  //   fight -> sports.sport='fight' (boxing, MMA, UFC)
+  // Top-tab model:
+  //   trending -> only is_trending=true markets (admin-curated, ~5 hot ones)
+  //   new      -> everything EXCEPT trending, newest first
+  //   ball     -> sports excluding fight (UFC/boxing has its own tab)
+  //   fight    -> sports.sport='fight' (boxing, MMA, UFC)
   //   politics -> politics + geo (world events)
-  //   economy -> economics + finance + crypto + tech (everything money-adjacent)
-  //   trending -> no category filter (show everything)
+  //   economy  -> economics + finance + crypto + tech (everything money-adjacent)
   const LEAGUE_CODE_MAP: Record<string, string> = {
     pl: 'PL', pd: 'PD', sa: 'SA', bl1: 'BL1', fl1: 'FL1',
     cl: 'CL', wc: 'WC', ec: 'EC', ded: 'DED', bsa: 'BSA',
@@ -626,12 +642,25 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
   };
 
   if (category === 'trending') {
-    // no filter — caller treats null category as "all"
+    // Admin-curated featured set only — kept small (~3-5 markets) so
+    // it actually means something. Default tab on the markets list.
+    base.trendingOnly = true;
+    return base;
+  }
+
+  if (category === 'new') {
+    // Everything that isn't currently featured — newest first via the
+    // sort fall-through. Lives next to Trending so users have a clear
+    // "ok where's everything else" tab.
+    base.excludeTrending = true;
     return base;
   }
 
   if (category === 'ball') {
     base.category = 'sports';
+    // Combat sports get their own tab — exclude here so UFC/boxing
+    // markets don't bleed into football / basketball / esports views.
+    base.excludeSport = 'fight';
     base.sport = subcategory && SUBCATEGORY_TO_SPORT[subcategory] ? SUBCATEGORY_TO_SPORT[subcategory] : null;
     if (subcategory && LEAGUE_CODE_MAP[subcategory]) {
       base.leagueCode = LEAGUE_CODE_MAP[subcategory];
@@ -697,6 +726,11 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   const statusParam = searchParams.get('status') || 'open';
   const searchQuery = (searchParams.get('q') || '').trim();
 
+  // Per-view scroll key. /markets uses category+subcategory+filters so each
+  // tab remembers its own position; the sub-market and league hubs get
+  // their own keys so back-navigating into them lands you where you were.
+  const scrollKey = `mlist_${filterExactMarketId ?? ''}_${filterChildrenOfParentId ?? ''}_${leagueCode ?? ''}_${sport ?? ''}_${category}_${subcategory ?? ''}_${sortParam}_${statusParam}_${searchQuery}`;
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
@@ -731,7 +765,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending')
         .not('status', 'eq', 'voided')
         .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
 
@@ -778,8 +812,11 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           query = query.eq('category', filter.category);
         }
         if (filter.sport) query = query.eq('sport', filter.sport);
+        if (filter.excludeSport) query = query.not('sport', 'eq', filter.excludeSport);
         if (filter.leagueCode) query = query.eq('league_code', filter.leagueCode);
         if (filter.questionFilter) query = query.ilike('question', `%${filter.questionFilter}%`);
+        if (filter.trendingOnly) query = query.eq('is_trending', true);
+        if (filter.excludeTrending) query = query.eq('is_trending', false);
 
         // Status filter (Open / Locked / Resolved / All)
         if (statusParam === 'open') query = query.eq('status', 'open');
@@ -811,6 +848,42 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 
+  // Restore scroll position when the same view re-mounts (e.g. user navigates
+  // into /event/X and uses back, or hops between tabs and returns). Without
+  // this Next.js dumps users at scrollY=0 every time, which is exhausting on
+  // mobile where they may have scrolled past 30+ cards. Falls through to
+  // scrollY=0 when switching to a tab with no saved position, so a fresh
+  // tab opens at the top regardless of where they were scrolled before.
+  useEffect(() => {
+    if (isLoading || markets.length === 0) return;
+    try {
+      const saved = sessionStorage.getItem(scrollKey);
+      const y = saved !== null ? parseInt(saved, 10) : 0;
+      if (Number.isFinite(y)) {
+        requestAnimationFrame(() => window.scrollTo(0, y));
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollKey, isLoading]);
+
+  // Persist scroll position as the user scrolls, debounced so we're not
+  // hammering sessionStorage on every wheel tick. Re-registered when the
+  // view changes so each tab's position is keyed independently.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        try { sessionStorage.setItem(scrollKey, String(window.scrollY)); } catch {}
+      }, 150);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [scrollKey]);
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -822,10 +895,17 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   }
 
   if (markets.length === 0) {
+    // Trending starts empty until admin flags a few featured markets;
+    // nudge users to the New tab so the empty Trending isn't a dead end.
+    const trendingEmpty = category === 'trending' && !filterChildrenOfParentId && !filterExactMarketId;
     return (
       <div className="text-center p-12 border border-muted rounded-xl bg-card/50">
         <p className="text-muted-foreground">
-          {filterChildrenOfParentId ? 'No sub-markets for this event.' : 'No markets in this category yet.'}
+          {filterChildrenOfParentId
+            ? 'No sub-markets for this event.'
+            : trendingEmpty
+              ? "No featured markets right now. Tap 'New' for everything else."
+              : 'No markets in this category yet.'}
         </p>
       </div>
     );
@@ -838,9 +918,17 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           key={market.id}
           market={market}
           session={session}
-          onBetPlaced={(id) => {
-            fetchMarkets({ silent: true });
+          onBetPlaced={async (id) => {
+            // Silent refetch (no skeleton) + re-anchor to the card the user
+            // just bet on so they stay in context. Without the scrollIntoView
+            // the silent refetch reorders cards (pool changed) and users
+            // would be looking at a different market at the same scrollY.
+            await fetchMarkets({ silent: true });
             if (session?.user?.id) fetchStakedMarkets(session.user.id);
+            requestAnimationFrame(() => {
+              const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+              card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
           }}
           hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
           isStaked={stakedMarketIds.has(market.id)}

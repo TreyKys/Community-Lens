@@ -4,13 +4,17 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
-  Sparkles, Trophy, Swords, Landmark, Coins,
+  Sparkles, Clock, Trophy, Swords, Landmark, Coins,
 } from 'lucide-react';
 
-// The 4 categories the board signed off on. "Trending" stays as a meta-tab
-// so users have a home-feed view. Filter mapping happens in MarketList.
+// Tab model: Trending = admin-curated featured set (a few hot ones);
+// New = everything else, newest first. Splitting them stops "Trending"
+// from meaning "everything" — the hot Golden Boot / Messi / group
+// winner markets stay surfaced instead of getting buried by the long
+// tail of less popular markets.
 const TABS = [
   { id: 'trending', label: 'Trending', Icon: Sparkles },
+  { id: 'new', label: 'New', Icon: Clock },
   { id: 'ball', label: 'Ball', Icon: Trophy },
   { id: 'fight', label: 'Fight', Icon: Swords },
   { id: 'politics', label: 'Politics', Icon: Landmark },

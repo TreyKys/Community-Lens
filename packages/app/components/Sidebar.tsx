@@ -3,11 +3,11 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Trophy, Flame, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote } from 'lucide-react';
+import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-type Subcategory = { id: string; label: string; href?: string };
+type Subcategory = { id: string; label: string; href?: string; category?: string };
 type Category = {
   id: string;
   label: string;
@@ -18,11 +18,14 @@ type Category = {
 };
 
 // Sports → Football lands on the dedicated /football hub (league tabs +
-// search + filters live on that page now, not in the sidebar). Fights stays
-// as a category-filtered link to the markets list. Politics + Crypto are
-// top-level again per the latest board call.
+// search + filters live on that page now, not in the sidebar). Fights is
+// its OWN top-level filter (category=fight) — used to route as
+// category=sports+subcategory=fight which broke buildCategoryFilter and
+// silently included UFC under "Ball". Politics + Crypto are top-level
+// again per the latest board call.
 const CATEGORIES: Category[] = [
   { id: 'trending', label: 'Trending', icon: Flame, color: 'text-orange-500' },
+  { id: 'new', label: 'New', icon: Clock, color: 'text-sky-400' },
   {
     id: 'sports',
     label: 'Sports',
@@ -30,7 +33,9 @@ const CATEGORIES: Category[] = [
     color: 'text-yellow-500',
     subcategories: [
       { id: 'football', label: '⚽ Football', href: '/football' },
-      { id: 'fight', label: '🥊 Fights' },
+      // Fights jumps straight to its own top-level category — never the
+      // sports+subcategory combo which buildCategoryFilter doesn't honor.
+      { id: 'fight', label: '🥊 Fights', category: 'fight' },
     ],
   },
   { id: 'politics', label: 'Politics', icon: Vote, color: 'text-green-500' },
@@ -89,19 +94,29 @@ export function Sidebar() {
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4 pr-2 py-1 space-y-1">
-                {category.subcategories?.map(sub => (
-                  <Button
-                    key={sub.id}
-                    variant={currentSubcategory === sub.id ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className="w-full justify-start text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      sub.href ? router.push(sub.href) : handleNavigation(category.id, sub.id)
-                    }
-                  >
-                    {sub.label}
-                  </Button>
-                ))}
+                {category.subcategories?.map(sub => {
+                  // sub.category present → jump to that top-level category
+                  // (e.g. Fights → category=fight). Falls back to nested
+                  // subcategory routing only when no override is set.
+                  const isActive = sub.category
+                    ? currentCategory === sub.category
+                    : currentSubcategory === sub.id;
+                  return (
+                    <Button
+                      key={sub.id}
+                      variant={isActive ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="w-full justify-start text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        if (sub.href) router.push(sub.href);
+                        else if (sub.category) handleNavigation(sub.category);
+                        else handleNavigation(category.id, sub.id);
+                      }}
+                    >
+                      {sub.label}
+                    </Button>
+                  );
+                })}
               </CollapsibleContent>
             </Collapsible>
           );
