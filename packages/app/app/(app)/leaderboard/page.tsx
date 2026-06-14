@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -61,9 +62,10 @@ export default function LeaderboardTeaserPage() {
         // non-critical
       }
     };
-    load();
-    const t = setInterval(load, 15_000);
-    return () => { alive = false; clearInterval(t); };
+    // 60s + visibility-gated; background tabs no longer poll. The slot
+    // counter is a vanity FOMO bar, never time-critical.
+    const cleanup = pollWhileVisible(load, 60_000);
+    return () => { alive = false; cleanup(); };
   }, []);
 
   const submitWaitlist = async (payload: { userId?: string; email?: string; phone?: string; source?: string }) => {

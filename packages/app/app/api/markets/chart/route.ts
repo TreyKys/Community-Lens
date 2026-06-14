@@ -6,6 +6,38 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// In-memory cache for chart responses. The aggregation here scans every
+// active bet on the market on every call — viral pages (/event/900 saw
+// 273 hits in 24h) were running this hundreds of times against Nano
+// Supabase IO. 30s of staleness is invisible on a pool chart, so we
+// memoise per (marketId, mode) and serve repeats from process memory.
+//
+// Cache is per-serverless-instance: bursts to the same instance get
+// coalesced; cold instances still hit the DB once. Bounded by a soft
+// cap so a flood of distinct marketIds can't leak memory.
+const CHART_CACHE_TTL_MS = 30_000;
+const CHART_CACHE_MAX = 200;
+const chartCache = new Map<string, { at: number; payload: any }>();
+
+function getCachedChart(key: string): any | null {
+  const hit = chartCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CHART_CACHE_TTL_MS) {
+    chartCache.delete(key);
+    return null;
+  }
+  return hit.payload;
+}
+
+function setCachedChart(key: string, payload: any): void {
+  chartCache.set(key, { at: Date.now(), payload });
+  if (chartCache.size > CHART_CACHE_MAX) {
+    // Drop the oldest entry — sufficient for a soft bound; no need for LRU.
+    const oldestKey = chartCache.keys().next().value;
+    if (oldestKey) chartCache.delete(oldestKey);
+  }
+}
+
 // GET /api/markets/chart?marketId=X&mode=distribution|snapshots
 export async function GET(request: Request) {
   try {
@@ -14,6 +46,10 @@ export async function GET(request: Request) {
     const mode = searchParams.get('mode') || 'distribution';
 
     if (!marketId) return NextResponse.json({ error: 'marketId required' }, { status: 400 });
+
+    const cacheKey = `${marketId}|${mode}`;
+    const cached = getCachedChart(cacheKey);
+    if (cached) return NextResponse.json(cached, { headers: { 'X-Cache': 'HIT' } });
 
     if (mode === 'distribution') {
       // Real bet distribution from user_bets
@@ -65,7 +101,9 @@ export async function GET(request: Request) {
         percentage: totalPool > 0 ? Math.round((optionTotals[i] / totalPool) * 100) : 0,
       }));
 
-      return NextResponse.json({ mode: 'distribution', timeline, distribution, options, totalPool });
+      const payload = { mode: 'distribution', timeline, distribution, options, totalPool };
+      setCachedChart(cacheKey, payload);
+      return NextResponse.json(payload, { headers: { 'X-Cache': 'MISS' } });
     }
 
     // mode === 'snapshots' — from market_snapshots table (historical volume)
@@ -81,7 +119,9 @@ export async function GET(request: Request) {
       volume: s.total_pool,
     }));
 
-    return NextResponse.json({ mode: 'snapshots', timeline });
+    const payload = { mode: 'snapshots', timeline };
+    setCachedChart(cacheKey, payload);
+    return NextResponse.json(payload, { headers: { 'X-Cache': 'MISS' } });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

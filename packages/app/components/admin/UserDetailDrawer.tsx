@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -33,9 +34,12 @@ export function UserDetailDrawer({ userId, onClose }: Props) {
       finally { if (alive) setIsLoading(false); }
     };
     setIsLoading(true);
-    load();
-    const t = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(t); };
+    // 60s + visibility-gated. The drawer aggregation is expensive (bets
+    // + deposits + withdrawals + points + treasury). When the tab is
+    // backgrounded or another tab is focused, we don't burn IO on data
+    // nobody is looking at.
+    const cleanup = pollWhileVisible(load, 60_000);
+    return () => { alive = false; cleanup(); };
   }, [userId]);
 
   const f = (n: number | null | undefined) => `₦${Math.round(Number(n) || 0).toLocaleString()}`;

@@ -18,6 +18,7 @@ import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
+import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import Link from 'next/link';
 
 // Admin auth is now cookie-based: POST /api/admin/auth sets an httpOnly cookie
@@ -71,10 +72,11 @@ function TreasuryPanel() {
       setHeartbeat({ daysSince: days, lastFiredAt: last });
       setIsLoading(false);
     };
-    load();
-    // Auto-refresh every 30s so the panel stays live during launches
-    const t = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(t); };
+    // 90s + visibility-gated. Analytics is a 2-fetch panel; admins
+    // routinely leave it open in a background tab, which was eating
+    // Nano IO. Refreshes immediately on tab refocus.
+    const cleanup = pollWhileVisible(load, 90_000);
+    return () => { alive = false; cleanup(); };
   }, []);
 
   if (isLoading || !stats) {
@@ -321,9 +323,8 @@ function OwnerActivityPanel() {
         if (alive) setData(d);
       } catch { /* non-critical */ }
     };
-    load();
-    const t = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(t); };
+    const cleanup = pollWhileVisible(load, 90_000);
+    return () => { alive = false; cleanup(); };
   }, []);
 
   // No owners configured → render nothing. Keeps the dashboard clean for
@@ -422,9 +423,8 @@ function VipLeaderboardPanel() {
         if (alive) setData(d);
       } catch { /* non-critical */ }
     };
-    load();
-    const t = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(t); };
+    const cleanup = pollWhileVisible(load, 90_000);
+    return () => { alive = false; cleanup(); };
   }, []);
 
   if (!data || !data.vips || data.vips.length === 0) return null;
@@ -930,7 +930,11 @@ function WithdrawalPanel() {
 
   useEffect(() => {
     fetchData();
-    const t = setInterval(fetchData, 30_000);
+    // Deliberately NOT visibility-gated: the audible ping above is the
+    // whole reason this panel polls — the operator stays on another tab
+    // and relies on it to catch new withdrawals. Interval bumped 30s→60s
+    // to cut IO load roughly in half while preserving that behaviour.
+    const t = setInterval(fetchData, 60_000);
     return () => clearInterval(t);
   }, [fetchData]);
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -38,9 +39,11 @@ export function MarketDetailDrawer({ marketId, onClose, onJumpToUser }: Props) {
       finally { if (alive) setIsLoading(false); }
     };
     setIsLoading(true);
-    load();
-    const t = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(t); };
+    // 60s + visibility-gated. Drawer aggregation pulls bets/distribution/
+    // timeline — re-running it every 30s on a backgrounded tab is the
+    // exact pattern that depleted the Nano IO budget.
+    const cleanup = pollWhileVisible(load, 60_000);
+    return () => { alive = false; cleanup(); };
   }, [marketId]);
 
   const f = (n: number | null | undefined) => `₦${Math.round(Number(n) || 0).toLocaleString()}`;
