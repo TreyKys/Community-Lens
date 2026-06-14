@@ -11,5 +11,5 @@
 -- the singleton config row are unchanged. We just bump the cutoff.
 
 UPDATE public.launch_promo
-   SET cutoff = '2026-08-31 23:59:59+01'
+   SET cutoff = '2026-06-31 23:59:59+01'
  WHERE id = 1;
