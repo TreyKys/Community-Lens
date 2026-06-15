@@ -55,13 +55,14 @@ export async function GET(request: Request) {
       // Real bet distribution from user_bets
       const { data: market } = await supabaseAdmin
         .from('markets')
-        .select('options, total_pool')
+        .select('options, total_pool, status')
         .eq('id', marketId)
         .single();
 
       if (!market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
 
       const options = market.options as string[];
+      const status = market.status as string;
 
       const { data: bets } = await supabaseAdmin
         .from('user_bets')
@@ -71,6 +72,10 @@ export async function GET(request: Request) {
 
       // Build per-option totals
       const optionTotals: number[] = options.map(() => 0);
+      // timeline points are emitted as % share of each option at each
+      // hourly bucket, summing to 100. This is what the chart renders —
+      // a stacked area showing how market consensus has shifted, which
+      // stays meaningful even as the absolute pool grows.
       const timeline: { time: string; [key: string]: number | string }[] = [];
 
       // Group bets by hour for timeline
@@ -82,15 +87,24 @@ export async function GET(request: Request) {
         optionTotals[bet.outcome_index] += bet.net_stake_tngn;
       }
 
-      // Build cumulative timeline
+      // Build cumulative timeline as percentage share at each hour.
+      // We accumulate ₦ to a running total, then normalise to % so the
+      // y-axis stays 0-100 regardless of pool size.
       const hours = Object.keys(hourMap).sort();
       const running = options.map(() => 0);
       for (const hour of hours) {
         options.forEach((_, i) => { running[i] += hourMap[hour][i] || 0; });
+        const total = running.reduce((s, v) => s + v, 0);
         const entry: any = {
           time: new Date(hour).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })
         };
-        options.forEach((opt, i) => { entry[opt] = Math.round(running[i]); });
+        if (total > 0) {
+          // One decimal place so the area boundaries look smooth instead
+          // of jumping in 1% steps when small pools have one new bet.
+          options.forEach((opt, i) => { entry[opt] = Math.round((running[i] / total) * 1000) / 10; });
+        } else {
+          options.forEach((opt) => { entry[opt] = 0; });
+        }
         timeline.push(entry);
       }
 
@@ -101,7 +115,7 @@ export async function GET(request: Request) {
         percentage: totalPool > 0 ? Math.round((optionTotals[i] / totalPool) * 100) : 0,
       }));
 
-      const payload = { mode: 'distribution', timeline, distribution, options, totalPool };
+      const payload = { mode: 'distribution', timeline, distribution, options, totalPool, status };
       setCachedChart(cacheKey, payload);
       return NextResponse.json(payload, { headers: { 'X-Cache': 'MISS' } });
     }

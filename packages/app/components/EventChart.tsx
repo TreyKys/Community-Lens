@@ -37,6 +37,12 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
   const [distribution, setDistribution] = useState<DistributionPoint[]>([]);
   const [totalPool, setTotalPool] = useState(0);
   const [chartOptions, setChartOptions] = useState<string[]>(options);
+  // marketStatus gates whether we expose pool ₦ at all. While the market
+  // is open we only show % share + the distribution graph — disclosing
+  // tiny pool sizes pre-lock tips traders off and looks weak on small
+  // markets. Once locked/resolved the total is no longer actionable, so
+  // it's safe (and useful) to show.
+  const [marketStatus, setMarketStatus] = useState<string>('open');
 
   const fetchChartData = useCallback(async (m: ChartMode) => {
     if (!marketId) return;
@@ -51,6 +57,7 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
         setDistribution(data.distribution || []);
         setTotalPool(data.totalPool || 0);
         if (data.options?.length) setChartOptions(data.options);
+        if (data.status) setMarketStatus(data.status);
       } else {
         setTimeline(data.timeline || []);
       }
@@ -71,6 +78,7 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
   const totalPoolStr = displayedPool > 1000
     ? `₦${(displayedPool / 1000).toFixed(1)}k`
     : `₦${displayedPool.toLocaleString()}`;
+  const isPoolRevealed = marketStatus === 'locked' || marketStatus === 'resolved';
 
   return (
     <Card className="w-full bg-card/50 backdrop-blur-sm border-muted overflow-hidden">
@@ -82,30 +90,35 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
             </CardTitle>
             <CardDescription className="text-xs">
               {mode === 'distribution'
-                ? `Total pool: ${totalPoolStr} tNGN`
+                ? (isPoolRevealed ? `Total pool: ${totalPoolStr} tNGN` : 'Live consensus by share')
                 : 'Liquidity flow over time'}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
-            <Button
-              size="sm"
-              variant={mode === 'distribution' ? 'secondary' : 'ghost'}
-              className="h-7 px-2.5 text-xs gap-1"
-              onClick={() => handleModeChange('distribution')}
-            >
-              <BarChart3 className="w-3 h-3" />
-              Bets
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === 'snapshots' ? 'secondary' : 'ghost'}
-              className="h-7 px-2.5 text-xs gap-1"
-              onClick={() => handleModeChange('snapshots')}
-            >
-              <TrendingUp className="w-3 h-3" />
-              Volume
-            </Button>
-          </div>
+          {/* Volume tab is inherently ₦-denominated — only useful once the
+              pool is revealed. While the market is open we keep the chart
+              focused on % share and hide the toggle entirely. */}
+          {isPoolRevealed && (
+            <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
+              <Button
+                size="sm"
+                variant={mode === 'distribution' ? 'secondary' : 'ghost'}
+                className="h-7 px-2.5 text-xs gap-1"
+                onClick={() => handleModeChange('distribution')}
+              >
+                <BarChart3 className="w-3 h-3" />
+                Bets
+              </Button>
+              <Button
+                size="sm"
+                variant={mode === 'snapshots' ? 'secondary' : 'ghost'}
+                className="h-7 px-2.5 text-xs gap-1"
+                onClick={() => handleModeChange('snapshots')}
+              >
+                <TrendingUp className="w-3 h-3" />
+                Volume
+              </Button>
+            </div>
+          )}
         </div>
       </CardHeader>
 
@@ -154,24 +167,37 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
               </div>
             )}
 
-            {/* Timeline chart if we have time-based data */}
+            {/* Timeline chart if we have time-based data.
+                Values from the API are now per-option % share at each
+                hourly bucket (sums to 100). Stacking with stackId fills
+                the chart to a 100% band, so the y-axis stays meaningful
+                regardless of how big the pool grows. */}
             {timeline.length > 1 && (
               <div className="h-[160px] w-full mt-4">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={timeline} margin={{ top: 4, right: 10, left: 0, bottom: 0 }}>
+                  <AreaChart data={timeline} margin={{ top: 4, right: 10, left: 0, bottom: 0 }} stackOffset="expand">
                     <defs>
                       {chartOptions.map((opt, i) => (
                         <linearGradient key={opt} id={`color_${i}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={OPTION_COLORS[i % OPTION_COLORS.length]} stopOpacity={0.25} />
-                          <stop offset="95%" stopColor={OPTION_COLORS[i % OPTION_COLORS.length]} stopOpacity={0} />
+                          <stop offset="5%" stopColor={OPTION_COLORS[i % OPTION_COLORS.length]} stopOpacity={0.5} />
+                          <stop offset="95%" stopColor={OPTION_COLORS[i % OPTION_COLORS.length]} stopOpacity={0.1} />
                         </linearGradient>
                       ))}
                     </defs>
                     <XAxis dataKey="time" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} dy={8} />
-                    <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={v => `₦${(v/1000).toFixed(0)}k`} dx={-4} width={40} />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                      tickFormatter={v => `${Math.round(v * 100)}%`}
+                      domain={[0, 1]}
+                      ticks={[0, 0.25, 0.5, 0.75, 1]}
+                      dx={-4}
+                      width={36}
+                    />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }}
-                      formatter={(v: any, name: any) => [`₦${Number(v).toLocaleString()}`, name as string]}
+                      formatter={(v: any, name: any) => [`${Number(v).toFixed(1)}%`, name as string]}
                     />
                     {chartOptions.map((opt, i) => (
                       <Area
@@ -179,6 +205,7 @@ export function EventChart({ marketId, options = [] }: EventChartProps) {
                         type="monotone"
                         dataKey={opt}
                         name={opt}
+                        stackId="1"
                         stroke={OPTION_COLORS[i % OPTION_COLORS.length]}
                         strokeWidth={1.5}
                         fillOpacity={1}
