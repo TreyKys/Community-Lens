@@ -481,12 +481,17 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
           </div>
         )}
 
-        {/* Pool + deadline — wraps on narrow phones so neither label gets cut off */}
+        {/* Pool + deadline — wraps on narrow phones so neither label gets cut off.
+            Pool tNGN is hidden until the market locks/resolves: showing a small
+            pool pre-lock looks weak and tips traders off. Once locked the
+            number is no longer actionable, so it's safe to reveal. */}
         <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1 mb-3">
-          <span className="flex items-center gap-1 min-w-0">
-            <TrendingUp className="w-3 h-3 shrink-0" />
-            <span className="truncate">Pool: ₦{getDisplayPool(market.total_pool).toLocaleString()} tNGN</span>
-          </span>
+          {(isLocked || isResolved) && (
+            <span className="flex items-center gap-1 min-w-0">
+              <TrendingUp className="w-3 h-3 shrink-0" />
+              <span className="truncate">Pool: ₦{getDisplayPool(market.total_pool).toLocaleString()} tNGN</span>
+            </span>
+          )}
           <span className="flex items-center gap-1 shrink-0">
             <Clock className="w-3 h-3" />
             {isResolved || isLocked

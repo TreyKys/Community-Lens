@@ -161,10 +161,14 @@ export function PopularMarketsScroll() {
                 {cleanQuestion}
               </p>
               <div className="flex items-center justify-between text-[11px] text-muted-foreground gap-2">
-                <span className="flex items-center gap-1 truncate">
-                  <TrendingUp className="w-3 h-3 shrink-0" />
-                  <span className="truncate">₦{getDisplayPool(m.total_pool).toLocaleString()}</span>
-                </span>
+                {/* Pool tNGN hidden until lock — see EventChart / MarketList
+                    for the same rule. Pre-lock we show only the deadline. */}
+                {(m.status === 'locked' || m.status === 'resolved') ? (
+                  <span className="flex items-center gap-1 truncate">
+                    <TrendingUp className="w-3 h-3 shrink-0" />
+                    <span className="truncate">₦{getDisplayPool(m.total_pool).toLocaleString()}</span>
+                  </span>
+                ) : <span />}
                 <span className="flex items-center gap-1 shrink-0">
                   <Clock className="w-3 h-3" />
                   {closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}

@@ -394,10 +394,15 @@ export default function DashboardPage() {
                       <Wallet className="w-3 h-3" />
                       Committed ₦{(s.stake_tngn || 0).toLocaleString()}
                     </span>
-                    <span className="flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3" />
-                      Pool ₦{getDisplayPool(s.markets?.total_pool).toLocaleString()}
-                    </span>
+                    {/* Pool tNGN hidden until lock — same rule applied
+                        across the homepage rail, markets list and event
+                        chart. Pre-lock pools tip traders off. */}
+                    {(s.markets?.status === 'locked' || s.markets?.status === 'resolved') && (
+                      <span className="flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3" />
+                        Pool ₦{getDisplayPool(s.markets?.total_pool).toLocaleString()}
+                      </span>
+                    )}
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {new Date(s.markets?.closes_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
