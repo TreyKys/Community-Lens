@@ -5,6 +5,59 @@ import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import type { Metadata } from "next";
+import { createClient } from "@supabase/supabase-js";
+
+// Per-event SEO metadata. Without this every /event/X inherits the
+// site-wide title, which means Google sees hundreds of duplicate-title
+// pages. We pull the market question + description and synthesise
+// something humans will actually click on in a search result.
+export async function generateMetadata({ params }: { params: { eventId: string } }): Promise<Metadata> {
+  const eventId = parseInt(params.eventId, 10);
+  if (isNaN(eventId)) return { title: 'Event' };
+
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+    const { data: market } = await supabase
+      .from('markets')
+      .select('question, description')
+      .eq('id', eventId)
+      .maybeSingle();
+
+    if (!market) return { title: 'Event not found' };
+
+    // Strip leading category tags like "[Football]" out of the
+    // question — useful for admin filtering but visual clutter in a
+    // search result title.
+    const cleanQuestion = String(market.question || '').replace(/\[.*?\]\s*/g, '').trim();
+    const titleQuestion = cleanQuestion || `Event #${eventId}`;
+    const description = market.description
+      ? `${String(market.description).slice(0, 150)}${market.description.length > 150 ? '…' : ''} · Predict on Opinions.ng.`
+      : 'Take a position on this prediction market. Stakes in Naira, resolution sealed on Polygon.';
+
+    return {
+      title: titleQuestion,
+      description,
+      alternates: { canonical: `/event/${eventId}` },
+      openGraph: {
+        title: titleQuestion,
+        description,
+        url: `https://opinionsng.com/event/${eventId}`,
+        type: 'website',
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title: titleQuestion,
+        description,
+      },
+    };
+  } catch {
+    return { title: 'Event' };
+  }
+}
 
 export default function EventPage({ params }: { params: { eventId: string } }) {
   // eventId is now a plain Supabase integer, not a BigInt
