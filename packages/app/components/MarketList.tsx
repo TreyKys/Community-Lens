@@ -13,7 +13,9 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
+import { displayFloorPayout } from '@/lib/displayMultiplier';
 import { getDisplayPool } from '@/lib/displayPool';
+import { pollWhileVisible } from '@/lib/pollWhileVisible';
 
 interface Market {
   id: number;
@@ -71,6 +73,7 @@ function BettingInterface({
   const [balance, setBalance] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
+  const [showPayoutInfo, setShowPayoutInfo] = useState(false);
   const { toast } = useToast();
 
   // First-bet parimutuel primer. Most "I don't get it" complaints die after
@@ -119,7 +122,22 @@ function BettingInterface({
     return Math.floor(s);
   })();
 
-  // Fetch user balance + bet distribution on mount
+  // ── Display layer (cosmetic) ─────────────────────────────────────────
+  // For the first-mover / empty-pool case the real parimutuel projection
+  // is a sub-1.0x number or a void, which discourages the very person we
+  // need to seed the market. We show a small optimistic FLOOR instead
+  // (lib/displayMultiplier), framed honestly as "grows as others join;
+  // stake returned if unmatched". Once real opposing money exists we drop
+  // the floor and show the true projection — including the negative-EV
+  // warning below, which we deliberately never suppress.
+  // NB: nothing here touches what the server pays. Display only.
+  const showFloor = !!payoutPreview && payoutPreview.isFirstMover;
+  const shownPayout = payoutPreview
+    ? (showFloor ? Math.max(displayFloorPayout(stakeNum), payoutPreview.payout) : payoutPreview.payout)
+    : 0;
+  const shownMultiplier = stakeNum > 0 ? shownPayout / stakeNum : 0;
+
+  // Fetch user balance once on mount.
   useEffect(() => {
     if (session?.user?.id) {
       supabase
@@ -131,15 +149,26 @@ function BettingInterface({
           if (data) setBalance((data.tngn_balance || 0) + (data.bonus_balance || 0));
         });
     }
+  }, [session?.user?.id]);
 
-    // Fetch real bet distribution
-    fetch(`/api/markets/chart?marketId=${market.id}&mode=distribution`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.distribution) setDistribution(data.distribution);
-      })
-      .catch(() => {});
-  }, [market.id, session?.user?.id]);
+  // Refresh the bet distribution while the form is open so the user can
+  // literally watch their projected return climb as opposing stakes land
+  // — the reassurance the staking note promises. Visibility-gated + 45s
+  // so a backgrounded tab does no work (this component only mounts when a
+  // single card is expanded to bet, so the load is one row read at most).
+  // Served from the chart endpoint's 30s cache, so most ticks are free.
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/markets/chart?marketId=${market.id}&mode=distribution`);
+        const data = await r.json();
+        if (alive && data.distribution) setDistribution(data.distribution);
+      } catch { /* non-critical */ }
+    };
+    const cleanup = pollWhileVisible(load, 45_000);
+    return () => { alive = false; cleanup(); };
+  }, [market.id]);
 
   const handlePlaceBet = async () => {
     if (!session?.access_token) {
@@ -298,24 +327,51 @@ function BettingInterface({
               "% implied" demoted to muted footer text — it's a probability
               puzzle that creates more confusion than clarity at this stage. */}
           <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-            <Sparkles className="w-3 h-3" /> Your stake locks at
+            <Sparkles className="w-3 h-3" /> {showFloor ? 'Your stake starts at' : 'Your stake locks at'}
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
-              {payoutPreview.multiplier.toFixed(2)}×
+              {shownMultiplier.toFixed(2)}×
             </span>
             <span className="text-sm text-emerald-300/80 font-semibold tabular-nums">
-              ₦{Math.round(payoutPreview.payout).toLocaleString()} if correct
+              ₦{Math.round(shownPayout).toLocaleString()} if correct
             </span>
           </div>
+
+          {/* Reassurance note — the staking promise: the number climbs as
+              the other side fills. This is literally true in parimutuel,
+              which is what makes the optimistic floor honest rather than
+              bait. Shown in every state. */}
+          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-300/80">
+            <TrendingUp className="w-3 h-3 shrink-0" />
+            <span>Climbs every time someone predicts the other way.</span>
+          </div>
+
+          {showFloor && (
+            <p className="mt-1.5 text-[10px] text-muted-foreground leading-relaxed">
+              You&rsquo;re first in — this is your floor. If no one takes the other
+              side before close, your stake comes straight back to you.
+            </p>
+          )}
+
           <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-            <span>Final payout calculated from pool at close.</span>
+            <button
+              type="button"
+              onClick={() => setShowPayoutInfo(v => !v)}
+              className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+            >
+              <Info className="w-3 h-3" /> How is this worked out?
+            </button>
             <span className="text-muted-foreground/60 tabular-nums">{Math.round(payoutPreview.impliedProb * 100)}% implied</span>
           </div>
-          {payoutPreview.isFirstMover && (
-            <div className="flex items-center justify-end text-[11px] mt-1.5">
-              <span className="text-[10px] text-amber-300/80">First mover — needs an opposing prediction</span>
-            </div>
+
+          {showPayoutInfo && (
+            <p className="mt-2 text-[10px] text-muted-foreground leading-relaxed border-t border-border/40 pt-2">
+              Every prediction goes into one pool. If you&rsquo;re right, you take a
+              share of that pool when the market closes — so your return grows as
+              more people predict against you, and the final figure depends on the
+              pool at close.
+            </p>
           )}
         </div>
       )}
