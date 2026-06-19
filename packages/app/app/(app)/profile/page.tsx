@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import {
   TrendingUp, TrendingDown, Zap, BarChart3, Target,
-  Copy, Check, Shield, Bell, LogOut, ChevronRight, Trophy
+  Copy, Check, Shield, Bell, LogOut, ChevronRight, Trophy, Share2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -146,6 +146,38 @@ export default function ProfilePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Share the accuracy card. Tries native share with the PNG file first
+  // (best on mobile — drops straight into WhatsApp/X), then native share
+  // of the link, then clipboard. Every path points at /u/<id>, which
+  // unfurls back into the same card for the next person.
+  const shareCard = async () => {
+    if (!session?.user?.id) return;
+    const url = `${window.location.origin}/u/${session.user.id}`;
+    const text = 'My forecast accuracy on Opinions.ng 🎯';
+    try {
+      const res = await fetch(`/api/card/${session.user.id}`);
+      const blob = await res.blob();
+      const file = new File([blob], 'opinions-accuracy.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'My Opinions.ng accuracy', text });
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({ title: 'My Opinions.ng accuracy', text, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      toast({ title: 'Link copied', description: 'Share it anywhere.' });
+    } catch {
+      // User cancelled the share sheet, or share/fetch failed — fall back
+      // to clipboard so the action never dead-ends.
+      try {
+        await navigator.clipboard.writeText(url);
+        toast({ title: 'Link copied', description: 'Share it anywhere.' });
+      } catch { /* nothing more we can do */ }
+    }
+  };
+
   if (!session) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -214,6 +246,17 @@ export default function ProfilePage() {
         <StatCard label="Net P&L" value={`${netProfit >= 0 ? '+' : ''}₦${Math.abs(netProfit).toLocaleString()}`} sub="Returns minus commitments" icon={netProfit >= 0 ? TrendingUp : TrendingDown} color={netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'} />
         <StatCard label="Live Predictions" value={stats?.activeBets || 0} sub="Predictions live right now" icon={Zap} color="text-amber-400" />
       </div>
+
+      {/* Share accuracy card — the free acquisition loop. One tap drops a
+          branded stat card into WhatsApp/X; the link unfurls back into the
+          card and lands the next person on a signup CTA. */}
+      <button
+        onClick={shareCard}
+        className="w-full flex items-center justify-center gap-2 h-12 rounded-xl bg-gradient-to-r from-emerald-500/90 to-emerald-600 hover:from-emerald-500 hover:to-emerald-600 text-black font-semibold transition-colors"
+      >
+        <Share2 className="w-4 h-4" />
+        Share my accuracy card
+      </button>
 
       {/* Heatmap */}
       <div className="bg-card border border-border rounded-xl p-5">
