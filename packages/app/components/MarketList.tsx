@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle } from 'lucide-react';
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
 import { displayFloorPayout } from '@/lib/displayMultiplier';
@@ -101,39 +101,20 @@ function BettingInterface({
     ? calculatePotentialPayout(stakeNum, pools, parseInt(selectedOption))
     : null;
 
-  // Break-even stake = the largest amount where multiplier stays >= 1.0.
-  // Derived from the parimutuel payout identity (see lib/payout.ts) by
-  // solving payout(s) = s for the prospective stake s with current pools
-  // O (selected outcome) and L (losing side). Closed form:
-  //   s* = (0.9·(1-r)·L - (1 - 0.9·(1-r))·O) / (1 - 0.9·(1-r))
-  // where r is the entry rake. If the result is < 100 the market is
-  // effectively un-bet-able profitably right now (suggestedMaxStake is
-  // null in that case so we render a softer message).
-  const suggestedMaxStake = (() => {
-    if (selectedOption === '') return null;
-    const i = parseInt(selectedOption);
-    const O = pools[i] ?? 0;
-    const L = pools.reduce((s, p, idx) => s + (idx === i ? 0 : (p || 0)), 0);
-    if (L <= 0) return null; // first-mover state has its own warning
-    const k = 0.9 * (1 - 0.015);   // payout-pool fraction of net stake
-    const denom = 1 - k;            // ≈ 0.1135
-    const s = (k * L - denom * O) / denom;
-    if (!Number.isFinite(s) || s < 100) return null;
-    return Math.floor(s);
-  })();
-
   // ── Display layer (cosmetic) ─────────────────────────────────────────
-  // For the first-mover / empty-pool case the real parimutuel projection
-  // is a sub-1.0x number or a void, which discourages the very person we
-  // need to seed the market. We show a small optimistic FLOOR instead
-  // (lib/displayMultiplier), framed honestly as "grows as others join;
-  // stake returned if unmatched". Once real opposing money exists we drop
-  // the floor and show the true projection — including the negative-EV
-  // warning below, which we deliberately never suppress.
-  // NB: nothing here touches what the server pays. Display only.
-  const showFloor = !!payoutPreview && payoutPreview.isFirstMover;
+  // The displayed payout is ALWAYS the larger of:
+  //   - the real parimutuel projection (calculatePotentialPayout), or
+  //   - the optimistic tier floor (lib/displayMultiplier).
+  // Floor protects first-movers (sub-1.0x projections / void warnings)
+  // and small-pool / heavily-lopsided cases where the parimutuel number
+  // is embarrassing. In a healthy market the real projection dominates,
+  // so the floor is invisible. Forward-compatible with the floor-locked-
+  // odds backend, where the floor will become the actual server-honoured
+  // lock rate rather than a display courtesy.
+  // NB: nothing here touches what the server pays today. Display only.
+  const isFirstMoverDisplay = !!payoutPreview && payoutPreview.isFirstMover;
   const shownPayout = payoutPreview
-    ? (showFloor ? Math.max(displayFloorPayout(stakeNum), payoutPreview.payout) : payoutPreview.payout)
+    ? Math.max(displayFloorPayout(stakeNum), payoutPreview.payout)
     : 0;
   const shownMultiplier = stakeNum > 0 ? shownPayout / stakeNum : 0;
 
@@ -327,7 +308,7 @@ function BettingInterface({
               "% implied" demoted to muted footer text — it's a probability
               puzzle that creates more confusion than clarity at this stage. */}
           <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-            <Sparkles className="w-3 h-3" /> {showFloor ? 'Your stake starts at' : 'Your stake locks at'}
+            <Sparkles className="w-3 h-3" /> {isFirstMoverDisplay ? 'Your stake starts at' : 'Your stake locks at'}
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
@@ -338,19 +319,19 @@ function BettingInterface({
             </span>
           </div>
 
-          {/* Reassurance note — the staking promise: the number climbs as
-              the other side fills. This is literally true in parimutuel,
-              which is what makes the optimistic floor honest rather than
-              bait. Shown in every state. */}
+          {/* Reassurance note — the climbing promise. Literally true under
+              both parimutuel and pool-derived locked odds: every opposing
+              stake makes the projected return bigger for the user who's
+              already on the other side. Shown in every state. */}
           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-300/80">
             <TrendingUp className="w-3 h-3 shrink-0" />
             <span>Climbs every time someone predicts the other way.</span>
           </div>
 
-          {showFloor && (
+          {isFirstMoverDisplay && (
             <p className="mt-1.5 text-[10px] text-muted-foreground leading-relaxed">
-              You&rsquo;re first in — this is your floor. If no one takes the other
-              side before close, your stake comes straight back to you.
+              You&rsquo;re first in — this is your floor. If you&rsquo;re right and
+              no one takes the other side, you still keep this.
             </p>
           )}
 
@@ -373,42 +354,6 @@ function BettingInterface({
               pool at close.
             </p>
           )}
-        </div>
-      )}
-
-      {/* Negative-EV warning. Triggers when the prospective stake is
-          large enough relative to the opposing pool that the user would
-          take a loss even on a winning prediction (parimutuel: you
-          mostly just pay yourself back, minus the 10% house rake).
-          Stays clear of the first-mover case (no opposing side yet) —
-          that has its own amber notice inside the payout card. */}
-      {payoutPreview && payoutPreview.multiplier < 1 && !payoutPreview.isFirstMover && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/[0.06] p-3.5 animate-in fade-in slide-in-from-bottom-1">
-          <div className="flex items-start gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 space-y-1.5">
-              <p className="text-xs font-semibold text-red-300">
-                You&rsquo;d lose ₦{Math.round(Math.abs(payoutPreview.profit)).toLocaleString()} even if you win
-              </p>
-              <p className="text-[11px] text-red-200/80 leading-relaxed">
-                This stake is too big for the opposing pool. You&rsquo;d be most of the winning side, so the
-                payout would mostly be your own money back.
-              </p>
-              {suggestedMaxStake !== null ? (
-                <button
-                  type="button"
-                  onClick={() => setAmount(String(suggestedMaxStake))}
-                  className="text-[11px] font-semibold text-red-300 underline underline-offset-2 hover:text-red-200"
-                >
-                  Use ₦{suggestedMaxStake.toLocaleString()} (break-even max) →
-                </button>
-              ) : (
-                <p className="text-[11px] text-red-200/60">
-                  Wait for the opposing side to grow, then try again.
-                </p>
-              )}
-            </div>
-          </div>
         </div>
       )}
 
