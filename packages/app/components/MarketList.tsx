@@ -549,21 +549,29 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                   Tap to Predict
                 </Button>
               </DrawerTrigger>
-              {/* max-h caps the drawer at viewport height; the inner flex
-                  column makes the form scroll while the title + close
-                  button stay reachable. Without this, taller form
-                  content (walkthrough + option grid + payout preview +
-                  Lock Prediction button) overflowed below the visible
-                  viewport on short Android phones, so the primary CTA
-                  could not be tapped. pb-[max(safe-area,1.5rem)] keeps
-                  the close button clear of the iOS home indicator. */}
+              {/* Vaul drawer scroll mechanics:
+                  - DrawerContent gets the height cap (90vh).
+                  - Inner column uses flex-1 + min-h-0 so it fills the
+                    drawer below Vaul's injected handle bar, and the
+                    middle child can actually grow/shrink instead of
+                    stacking past the bottom edge.
+                  - data-vaul-no-drag on the scrollable middle is the
+                    critical bit: without it, Vaul's swipe-down-to-
+                    dismiss gesture eats every vertical touch event,
+                    so overflow-y-auto is dead on mobile. The flag
+                    tells Vaul "leave touches in this region alone"
+                    so they reach the scroll container instead.
+                  pb-[max(safe-area,1.5rem)] clears the iOS home bar. */}
               <DrawerContent className="max-h-[90vh] pb-[max(env(safe-area-inset-bottom),1.5rem)]">
-                <div className="mx-auto w-full max-w-sm flex flex-col max-h-[90vh]">
+                <div className="mx-auto w-full max-w-sm flex flex-col flex-1 min-h-0">
                   <DrawerHeader className="shrink-0">
                     <DrawerTitle className="text-base">{displayQuestion}</DrawerTitle>
                     <DrawerDescription>Make your prediction</DrawerDescription>
                   </DrawerHeader>
-                  <div className="flex-1 overflow-y-auto p-4 pb-0 overscroll-contain">
+                  <div
+                    data-vaul-no-drag
+                    className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 pb-0"
+                  >
                     <BettingInterface
                       market={market}
                       session={session}
