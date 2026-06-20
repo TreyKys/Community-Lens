@@ -119,7 +119,7 @@ export function WelcomeModal() {
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) dismiss(); }}>
       <DialogContent
-        className="sm:max-w-[520px] p-0 overflow-hidden bg-gradient-to-b from-emerald-950/40 via-background to-background border border-emerald-500/30 shadow-2xl shadow-emerald-500/10"
+        className="sm:max-w-[520px] p-0 max-h-[90vh] overflow-y-auto bg-gradient-to-b from-emerald-950/40 via-background to-background border border-emerald-500/30 shadow-2xl shadow-emerald-500/10"
       >
         {/* Animated ambient glow — purely decorative, gives the modal a
             "live" feel without depending on any data fetch. */}
