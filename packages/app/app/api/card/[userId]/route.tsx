@@ -13,10 +13,16 @@ import { createClient } from '@supabase/supabase-js';
 // no session, so it can't be auth-gated. It therefore exposes ONLY vanity
 // data — username, accuracy %, prediction counts. Never balance, never
 // money, never email.
+//
+// NB: `size` / `contentType` are reserved exports for Next's special
+// opengraph-image.tsx file convention, NOT for route handlers — declaring
+// them here trips the route type-checker. We pass dimensions through the
+// ImageResponse options instead, and the content type is image/png by
+// default.
 
 export const runtime = 'nodejs';
-export const size = { width: 1080, height: 1350 };
-export const contentType = 'image/png';
+
+const CARD_SIZE = { width: 1080, height: 1350 };
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -180,6 +186,6 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
         </div>
       </div>
     ),
-    { ...size },
+    { ...CARD_SIZE },
   );
 }
