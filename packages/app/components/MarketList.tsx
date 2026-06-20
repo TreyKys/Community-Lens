@@ -550,17 +550,21 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                   Tap to Predict
                 </Button>
               </DrawerTrigger>
-              {/* pb-[env(safe-area-inset-bottom)] keeps the close button clear
-                  of the iOS home indicator; the extra pb-6 lifts the whole
-                  actionable area off the bottom edge so it's a thumb-friendly
-                  reach instead of jammed against the screen edge. */}
-              <DrawerContent className="pb-[max(env(safe-area-inset-bottom),1.5rem)]">
-                <div className="mx-auto w-full max-w-sm">
-                  <DrawerHeader>
+              {/* max-h caps the drawer at viewport height; the inner flex
+                  column makes the form scroll while the title + close
+                  button stay reachable. Without this, taller form
+                  content (walkthrough + option grid + payout preview +
+                  Lock Prediction button) overflowed below the visible
+                  viewport on short Android phones, so the primary CTA
+                  could not be tapped. pb-[max(safe-area,1.5rem)] keeps
+                  the close button clear of the iOS home indicator. */}
+              <DrawerContent className="max-h-[90vh] pb-[max(env(safe-area-inset-bottom),1.5rem)]">
+                <div className="mx-auto w-full max-w-sm flex flex-col max-h-[90vh]">
+                  <DrawerHeader className="shrink-0">
                     <DrawerTitle className="text-base">{displayQuestion}</DrawerTitle>
                     <DrawerDescription>Make your prediction</DrawerDescription>
                   </DrawerHeader>
-                  <div className="p-4 pb-0">
+                  <div className="flex-1 overflow-y-auto p-4 pb-0 overscroll-contain">
                     <BettingInterface
                       market={market}
                       session={session}
@@ -570,7 +574,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                       }}
                     />
                   </div>
-                  <DrawerFooter className="pb-6">
+                  <DrawerFooter className="shrink-0 pb-6">
                     <DrawerClose asChild>
                       <Button variant="outline">Close</Button>
                     </DrawerClose>

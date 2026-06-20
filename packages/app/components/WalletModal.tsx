@@ -140,7 +140,7 @@ export function WalletModal() {
           {balance > 0 ? `₦${balance.toLocaleString()} tNGN` : 'Wallet'}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[420px] border-muted">
+      <DialogContent className="sm:max-w-[420px] max-h-[92vh] overflow-y-auto border-muted">
         <DialogHeader>
           <DialogTitle>Wallet</DialogTitle>
           <DialogDescription>

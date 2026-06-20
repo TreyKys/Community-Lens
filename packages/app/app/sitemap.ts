@@ -15,6 +15,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${SITE_URL}/`,             changeFrequency: 'daily',   priority: 1.0 },
     { url: `${SITE_URL}/markets`,      changeFrequency: 'hourly',  priority: 0.9 },
     { url: `${SITE_URL}/leaderboard`,  changeFrequency: 'daily',   priority: 0.7 },
+    // /trust is the off-site backlink destination — Crunchbase, LinkedIn,
+    // Nairaland, Trustpilot etc. all point here. High priority so Google
+    // re-crawls it whenever those external profiles get added/updated.
+    { url: `${SITE_URL}/trust`,        changeFrequency: 'weekly',  priority: 0.8 },
     { url: `${SITE_URL}/terms`,        changeFrequency: 'monthly', priority: 0.3 },
     { url: `${SITE_URL}/privacy`,      changeFrequency: 'monthly', priority: 0.3 },
   ];
