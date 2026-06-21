@@ -332,23 +332,17 @@ function ReserveHealthPanel() {
 
   useEffect(() => {
     let alive = true;
+    // reserve_health + market_liability are service-role only via RLS,
+    // so we proxy through an admin-authenticated endpoint instead of
+    // hitting the tables directly with the browser-side anon client.
+    // Pattern matches /api/admin/owner-activity etc.
     const load = async () => {
       try {
-        const [{ data: reserve }, { count: lockedCount }, { data: liability }] = await Promise.all([
-          supabase.from('reserve_health').select('total_tngn, floor_tngn, deployable_tngn').maybeSingle(),
-          supabase.from('markets').select('id', { count: 'exact', head: true }).eq('is_locked_odds', true).eq('status', 'open'),
-          supabase.from('market_liability').select('worst_case_tngn'),
-        ]);
+        const r = await fetch('/api/admin/reserve-health', { credentials: 'include' });
+        if (!r.ok) return;
+        const d = await r.json();
         if (!alive) return;
-        if (!reserve) return;
-        const totalWorstCase = (liability || []).reduce((a: number, r: any) => a + Number(r.worst_case_tngn || 0), 0);
-        setData({
-          deployable: Number(reserve.deployable_tngn || 0),
-          floor: Number(reserve.floor_tngn || 0),
-          total: Number(reserve.total_tngn || 0),
-          aggregateWorstCase: totalWorstCase,
-          lockedOddsMarketCount: lockedCount || 0,
-        });
+        setData(d);
       } catch { /* non-critical */ }
     };
     const cleanup = pollWhileVisible(load, 60_000);
