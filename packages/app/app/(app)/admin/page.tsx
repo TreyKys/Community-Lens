@@ -204,6 +204,11 @@ function TreasuryPanel() {
         </div>
       )}
 
+      {/* Reserve health — only renders once a locked-odds market exists  */}
+      {/* (otherwise admin doesn't need to think about it). Live deployable */}
+      {/* + dynamic cap + open exposure across the locked-odds book.        */}
+      <ReserveHealthPanel />
+
       {/* Owner activity — quiet strip; only ever has rows when an owner */}
       {/* account exists. Filtered out of everything else on this panel.   */}
       <OwnerActivityPanel />
@@ -307,6 +312,96 @@ function CohortActivity({ cohorts, fallback }: { cohorts?: any; fallback: any })
         <StatCard label="Active Bets"   value={data.activeCount}     sub={`${data.wonCount} won · ${data.lostCount} lost`} icon={Activity} color="text-blue-400" />
       </div>
     </div>
+  );
+}
+
+// ── Reserve health (locked-odds book monitoring) ────────────────────────
+//
+// Lights up only once there's at least one is_locked_odds market in
+// the system — admins not piloting locked-odds shouldn't see this at
+// all. Surfaces the dynamic-stake-cap regime so admins know what users
+// can currently stake.
+function ReserveHealthPanel() {
+  const [data, setData] = useState<{
+    deployable: number;
+    floor: number;
+    total: number;
+    aggregateWorstCase: number;
+    lockedOddsMarketCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const [{ data: reserve }, { count: lockedCount }, { data: liability }] = await Promise.all([
+          supabase.from('reserve_health').select('total_tngn, floor_tngn, deployable_tngn').maybeSingle(),
+          supabase.from('markets').select('id', { count: 'exact', head: true }).eq('is_locked_odds', true).eq('status', 'open'),
+          supabase.from('market_liability').select('worst_case_tngn'),
+        ]);
+        if (!alive) return;
+        if (!reserve) return;
+        const totalWorstCase = (liability || []).reduce((a: number, r: any) => a + Number(r.worst_case_tngn || 0), 0);
+        setData({
+          deployable: Number(reserve.deployable_tngn || 0),
+          floor: Number(reserve.floor_tngn || 0),
+          total: Number(reserve.total_tngn || 0),
+          aggregateWorstCase: totalWorstCase,
+          lockedOddsMarketCount: lockedCount || 0,
+        });
+      } catch { /* non-critical */ }
+    };
+    const cleanup = pollWhileVisible(load, 60_000);
+    return () => { alive = false; cleanup(); };
+  }, []);
+
+  // Hide entirely until there's a locked-odds market in play.
+  if (!data || data.lockedOddsMarketCount === 0) return null;
+
+  // Mirror the dynamic-cap schedule in lib/lockedOdds + the
+  // place_bet_locked RPC. If these ever drift, update all three.
+  const cap = data.deployable <= 0 ? 0
+            : data.deployable < 50_000 ? 1500
+            : data.deployable < 80_000 ? 3000
+            : 5000;
+  const stressed = data.deployable < data.floor * 0.6;
+
+  const f = (n: number) => `₦${Math.round(n).toLocaleString()}`;
+
+  return (
+    <Card className={cn(
+      'border',
+      stressed ? 'border-amber-500/40 bg-amber-500/[0.04]'
+                : 'border-emerald-500/30 bg-emerald-500/[0.03]',
+    )}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Shield className={cn('w-4 h-4', stressed ? 'text-amber-400' : 'text-emerald-400')} />
+          Reserve Health
+          <Badge className={cn(
+            'text-[10px] h-5 ml-1',
+            stressed ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                     : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+          )}>
+            {stressed ? 'STRESSED' : 'HEALTHY'}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <StatCard label="Deployable" value={f(data.deployable)} sub="Tier-2 spending capacity" icon={Coins} color="text-emerald-400" />
+          <StatCard label="Floor" value={f(data.floor)} sub="Untouchable buffer" icon={Shield} color="text-muted-foreground" />
+          <StatCard label="Total Reserve" value={f(data.total)} sub="Deployable + floor" icon={Coins} color="text-blue-400" />
+          <StatCard label="Open Exposure" value={f(data.aggregateWorstCase)} sub="Worst case across markets" icon={Activity} color={data.aggregateWorstCase > data.deployable ? 'text-red-400' : 'text-amber-400'} />
+          <StatCard label="Tier-2 Cap" value={cap === 0 ? 'PAUSED' : f(cap)} sub={cap === 0 ? 'Routed to parimutuel' : 'Per stake right now'} icon={Lock} color={cap === 0 ? 'text-red-400' : 'text-amber-300'} />
+        </div>
+        {data.aggregateWorstCase > data.deployable && (
+          <p className="text-[11px] text-red-400 mt-3">
+            Worst-case exposure exceeds deployable reserve. New Tier-2 stakes are tightening; settle a market to recover headroom.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

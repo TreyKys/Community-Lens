@@ -8,6 +8,11 @@ const supabaseAdmin = createClient(
 
 // Map Postgres exceptions thrown by place_bet() / place_bet_locked()
 // to HTTP responses. Keeping this list explicit so QA can grep for each.
+//
+// Two locked-odds-specific paths get special treatment further down in
+// the handler, not here:
+//   - tier2_paused: silent fallback to parimutuel (no error surfaced).
+//   - stake_above_dynamic_cap_<N>: friendly cap surfaced to the user.
 function mapRpcError(message: string): { status: number; error: string } {
   if (message.includes('invalid_input'))            return { status: 400, error: 'Missing required fields' };
   if (message.includes('stake_below_minimum'))      return { status: 400, error: 'Minimum stake is ₦100 (100 tNGN)' };
@@ -22,6 +27,48 @@ function mapRpcError(message: string): { status: number; error: string } {
   if (message.includes('liability_ceiling_breach')) return { status: 409, error: 'This market is at maximum exposure — try a smaller stake or a different market' };
   if (message.includes('reserve_unavailable'))      return { status: 503, error: 'Pricing engine temporarily unavailable' };
   return { status: 500, error: 'Failed to place bet' };
+}
+
+/**
+ * Parse 'stake_above_dynamic_cap_<N>' to extract the current cap so we
+ * can surface a friendly "Max stake right now is ₦X" error rather than
+ * an opaque rejection. Returns null if the message doesn't match.
+ */
+function parseDynamicCap(message: string): number | null {
+  const m = message.match(/stake_above_dynamic_cap_(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Run the parimutuel place_bet for a user — the "silent fallback" path
+ * when locked-odds is paused or otherwise can't accept the stake. The
+ * return shape mirrors the locked-odds response so the frontend doesn't
+ * branch on which engine settled the bet.
+ */
+async function placeParimutuelBet(
+  userId: string,
+  marketId: any,
+  outcomeNum: number,
+  stakeNum: number,
+) {
+  const { data, error } = await supabaseAdmin
+    .rpc('place_bet', {
+      p_user_id: userId,
+      p_market_id: marketId,
+      p_outcome_index: outcomeNum,
+      p_stake_tngn: stakeNum,
+    })
+    .single<{
+      bet_id: string;
+      net_stake: number;
+      entry_rake: number;
+      new_tngn_balance: number;
+      new_bonus_balance: number;
+      is_jackpot_eligible: boolean;
+    }>();
+  return { data, error };
 }
 
 export async function POST(request: Request) {
@@ -116,7 +163,49 @@ export async function POST(request: Request) {
         }>();
 
       if (rpcError) {
-        const mapped = mapRpcError(rpcError.message || '');
+        const msg = rpcError.message || '';
+
+        // Silent fallback: Tier 2 is paused because the reserve has
+        // dropped to or below the floor. The stake routes through
+        // parimutuel transparently — user sees a successful bet.
+        if (msg.includes('tier2_paused')) {
+          const { data: pmData, error: pmError } = await placeParimutuelBet(
+            user.id, marketId, outcomeNum, stakeNum,
+          );
+          if (pmError) {
+            const mapped = mapRpcError(pmError.message || '');
+            if (mapped.status >= 500) {
+              console.error('Parimutuel fallback failed after locked-odds tier2_paused:', pmError);
+            }
+            return NextResponse.json({ error: mapped.error }, { status: mapped.status });
+          }
+          if (!pmData) {
+            return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
+          }
+          // Frontend shape matches the parimutuel branch below.
+          return NextResponse.json({
+            success: true,
+            betId: pmData.bet_id,
+            stakeAmount: stakeNum,
+            netStake: pmData.net_stake,
+            entryRake: pmData.entry_rake,
+            isJackpotEligible: pmData.is_jackpot_eligible,
+            newBalance: pmData.new_tngn_balance,
+            newBonusBalance: pmData.new_bonus_balance,
+          }, { status: 200 });
+        }
+
+        // Friendly dynamic-cap surface — tell the user what they can
+        // stake right now instead of an opaque rejection.
+        const cap = parseDynamicCap(msg);
+        if (cap !== null) {
+          return NextResponse.json({
+            error: `Max stake on this market right now is ₦${cap.toLocaleString()}. Lower your stake and try again.`,
+            dynamicCapTngn: cap,
+          }, { status: 400 });
+        }
+
+        const mapped = mapRpcError(msg);
         if (mapped.status >= 500) {
           console.error('place_bet_locked RPC failure:', rpcError);
         }
