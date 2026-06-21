@@ -19,6 +19,7 @@ import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import { pollWhileVisible } from '@/lib/pollWhileVisible';
+import { calculateLockedOdds } from '@/lib/lockedOdds';
 import Link from 'next/link';
 
 // Admin auth is now cookie-based: POST /api/admin/auth sets an httpOnly cookie
@@ -504,6 +505,30 @@ function CreateMarketPanel() {
   const [parentMarketId, setParentMarketId] = useState<string>('');
   const [parentOptions, setParentOptions] = useState<Array<{ id: number; question: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // ─── Locked-odds config (Pro tier) ────────────────────────────────
+  // Collapsed by default — admins explicitly opt a market into the
+  // locked-odds engine. Defaults preserve the legacy parimutuel path.
+  const [isLockedOdds, setIsLockedOdds] = useState(false);
+  const [seedSize, setSeedSize] = useState<string>('10000');
+  const [seedProbability, setSeedProbability] = useState<string>('0.5'); // binary YES
+  const [vigOverride, setVigOverride] = useState<string>(''); // empty = use default per category
+  const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
+
+  // Fetch the deployable reserve so the form can show a budget hint
+  // before submission. Read via the reserve_health view; failures are
+  // silent — the create endpoint enforces the real check.
+  useEffect(() => {
+    if (!isLockedOdds) return;
+    supabase
+      .from('reserve_health')
+      .select('deployable_tngn')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data && typeof data.deployable_tngn !== 'undefined') {
+          setReserveDeployable(Number(data.deployable_tngn));
+        }
+      });
+  }, [isLockedOdds]);
 
   const PRESETS = [
     { label: '1X2 (Football)', options: 'Home Win, Draw, Away Win' },
@@ -540,6 +565,13 @@ function CreateMarketPanel() {
 
     setIsSubmitting(true);
     try {
+      const lockedPayload = isLockedOdds ? {
+        isLockedOdds: true,
+        seedSizeTngn: Number(seedSize),
+        seedProbability: options.length === 2 ? Number(seedProbability) : null,
+        vigPct: vigOverride.trim() === '' ? null : Number(vigOverride),
+      } : { isLockedOdds: false };
+
       const res = await fetch('/api/admin/market', {
         method: 'POST',
         headers: adminHeaders(),
@@ -550,6 +582,7 @@ function CreateMarketPanel() {
           closesAt: new Date(closesAt).toISOString(),
           fixtureId: fixtureId ? parseInt(fixtureId) : null,
           parentMarketId: parentMarketId ? parseInt(parentMarketId) : null,
+          ...lockedPayload,
         }),
       });
 
@@ -653,11 +686,196 @@ function CreateMarketPanel() {
           </p>
         </div>
 
+        <LockedOddsConfigBlock
+          isLockedOdds={isLockedOdds}
+          setIsLockedOdds={setIsLockedOdds}
+          seedSize={seedSize}
+          setSeedSize={setSeedSize}
+          seedProbability={seedProbability}
+          setSeedProbability={setSeedProbability}
+          vigOverride={vigOverride}
+          setVigOverride={setVigOverride}
+          reserveDeployable={reserveDeployable}
+          numOutcomes={optionsText.split(',').map(o => o.trim()).filter(Boolean).length}
+          category={category}
+        />
+
         <Button onClick={handleCreate} disabled={isSubmitting} className="w-full">
-          {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</> : 'Create Market'}
+          {isSubmitting
+            ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</>
+            : isLockedOdds ? 'Create Locked-Odds Market' : 'Create Market'}
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+// ── Locked-odds config block ─────────────────────────────────────────────
+//
+// Used inside CreateMarketPanel. Collapsible; defaults preserve the
+// legacy parimutuel behaviour. Live opening-odds preview keeps the
+// admin honest about what users will see on Day 1.
+function LockedOddsConfigBlock(props: {
+  isLockedOdds: boolean;
+  setIsLockedOdds: (v: boolean) => void;
+  seedSize: string;
+  setSeedSize: (v: string) => void;
+  seedProbability: string;
+  setSeedProbability: (v: string) => void;
+  vigOverride: string;
+  setVigOverride: (v: string) => void;
+  reserveDeployable: number | null;
+  numOutcomes: number;
+  category: string;
+}) {
+  const {
+    isLockedOdds, setIsLockedOdds,
+    seedSize, setSeedSize,
+    seedProbability, setSeedProbability,
+    vigOverride, setVigOverride,
+    reserveDeployable, numOutcomes, category,
+  } = props;
+
+  const seedSizeNum = Number(seedSize);
+  const seedProbNum = Number(seedProbability);
+  const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
+  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
+  const validProb = numOutcomes !== 2 || (Number.isFinite(seedProbNum) && seedProbNum >= 0.05 && seedProbNum <= 0.95);
+  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
+  const seedFitsReserve = reserveDeployable == null || seedSizeNum <= reserveDeployable;
+
+  // Compose the opening seed pool — same logic as the API but client-side.
+  const seedPool: number[] = (() => {
+    if (!validSeed || numOutcomes < 2) return [];
+    if (numOutcomes === 2 && validProb) {
+      const yes = Math.round(seedSizeNum * seedProbNum);
+      return [yes, seedSizeNum - yes];
+    }
+    const share = Math.round(seedSizeNum / numOutcomes);
+    const out = Array.from({ length: numOutcomes }, () => share);
+    out[0] = seedSizeNum - share * (numOutcomes - 1);
+    return out;
+  })();
+
+  // Hypothetical ₦500 opening stake on each outcome — gives the admin a
+  // concrete "this is what a Day-1 user will see" number.
+  const preview = isLockedOdds && seedPool.length >= 2 && validSeed && validProb
+    ? seedPool.map((_, i) => {
+        try {
+          return calculateLockedOdds(
+            { category, seedPool, realPool: Array(seedPool.length).fill(0), vigPctOverride: vigNum },
+            500,
+            i,
+            {},
+            { deployableTngn: reserveDeployable ?? 120_000, floorTngn: 30_000 },
+          );
+        } catch {
+          return null;
+        }
+      })
+    : null;
+
+  return (
+    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.03] p-3 space-y-3">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={isLockedOdds}
+          onChange={e => setIsLockedOdds(e.target.checked)}
+          className="w-4 h-4 accent-emerald-500"
+        />
+        <span className="text-sm font-medium">Locked-odds (Pro tier)</span>
+        <Badge variant="outline" className="text-[9px] border-emerald-500/30 text-emerald-300">EXPERIMENTAL</Badge>
+      </label>
+      <p className="text-[11px] text-muted-foreground -mt-2 ml-6">
+        House-seeded market with frozen odds at stake time. Defaults preserve parimutuel.
+      </p>
+
+      {isLockedOdds && (
+        <div className="space-y-3 ml-6 pt-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Seed size (₦)</Label>
+              <Input
+                type="number"
+                min={1000}
+                max={14000}
+                value={seedSize}
+                onChange={e => setSeedSize(e.target.value)}
+                className={cn(!validSeed && 'border-red-500/40')}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                ₦1k – ₦14k. {reserveDeployable != null && (
+                  <span className={seedFitsReserve ? 'text-emerald-400' : 'text-red-400'}>
+                    Reserve: ₦{reserveDeployable.toLocaleString()} available.
+                  </span>
+                )}
+              </p>
+            </div>
+            {numOutcomes === 2 && (
+              <div className="space-y-1">
+                <Label className="text-xs">Seed probability (YES, 0–1)</Label>
+                <Input
+                  type="number"
+                  min={0.05}
+                  max={0.95}
+                  step={0.01}
+                  value={seedProbability}
+                  onChange={e => setSeedProbability(e.target.value)}
+                  className={cn(!validProb && 'border-red-500/40')}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {validProb && validSeed && seedPool.length === 2 && (
+                    <>Split: ₦{seedPool[0].toLocaleString()} YES · ₦{seedPool[1].toLocaleString()} NO</>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Vig override (0.04–0.15, blank = category default)</Label>
+            <Input
+              type="number"
+              min={0.04}
+              max={0.15}
+              step={0.01}
+              value={vigOverride}
+              onChange={e => setVigOverride(e.target.value)}
+              placeholder="default for category"
+              className={cn(!validVig && 'border-red-500/40')}
+            />
+          </div>
+
+          {/* Live opening odds preview */}
+          {preview && (
+            <div className="rounded-md bg-background/40 border border-border/40 p-2.5 space-y-1">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Opening odds — ₦500 sample</p>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {preview.map((r, i) => r && (
+                  <div key={i} className="bg-card/40 rounded px-2 py-1.5">
+                    <div className="text-[10px] text-muted-foreground">Outcome {i}</div>
+                    <div className="font-bold tabular-nums">{r.lockedOdds.toFixed(2)}×</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      ₦{r.floorPayout.toLocaleString()} – ₦{r.upperPayout.toLocaleString()}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      vig {(r.vigApplied * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!seedFitsReserve && (
+            <p className="text-[11px] text-red-400">
+              Seed exceeds deployable reserve. Reduce seed size or settle a market first.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
