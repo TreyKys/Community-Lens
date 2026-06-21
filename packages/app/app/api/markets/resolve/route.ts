@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import {
+  settleLockedMarket,
+  type LockedBet,
+  type MarketResolution,
+} from '@/lib/lockedSettlement';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -111,6 +116,274 @@ async function applyFirstBetInsurance(userId: string, bet: any, marketId: number
   console.log(`Bet Insurance (${trigger}): user=${userId} refund=${refundAmount} tNGN`);
 }
 
+// Locked-odds settlement path.
+//
+// Pays each winner MAX(floor, parimutuel-with-vig) using the bet's
+// frozen locked_odds + vig_at_stake_pct. House P&L is computed from
+// the in-memory summary and applied atomically to house_reserve via
+// apply_house_pnl. market_liability is cleared at the end.
+//
+// Reuses the existing applyFirstBetInsurance helper and points-award
+// pattern — those policies are independent of pricing engine.
+//
+// VIP rake-share formula CHANGES for locked-odds bets: instead of a
+// slice of the pool rake, the VIP gets a slice of the bet's
+// contribution to house margin (net_stake × vig_at_stake × share%).
+// See lib/lockedSettlement.calculateLockedVipCut.
+async function resolveLockedOddsMarket(args: {
+  marketId: number | bigint | string;
+  winningOutcomeIndex: number;
+  market: any;
+}) {
+  const { marketId, winningOutcomeIndex, market } = args;
+
+  // Pull every active bet on this market, including the locked-odds
+  // fields. The same row-shape supplies the LockedBet input to the
+  // settlement library and the bet rows we'll mark won/lost/refunded.
+  const { data: rawBets } = await supabaseAdmin
+    .from('user_bets')
+    .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn, locked_odds, vig_at_stake_pct, tier')
+    .eq('market_id', marketId)
+    .eq('status', 'active');
+
+  if (!rawBets || rawBets.length === 0) {
+    await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null }).eq('id', marketId);
+    await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+    return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
+  }
+
+  // Defensive cleanup: a locked-odds market should never have legacy
+  // parimutuel bets (locked_odds NULL). If somehow we encounter one,
+  // refund it at net stake rather than running floor-up math without
+  // the inputs it needs. Log the surprise so admin can investigate.
+  const malformed = rawBets.filter(b => b.locked_odds == null || b.vig_at_stake_pct == null);
+  if (malformed.length > 0) {
+    console.error(`Locked-odds resolve: ${malformed.length} bets missing locked_odds/vig on market ${marketId}`);
+    for (const bet of malformed) {
+      await supabaseAdmin.rpc('credit_user', {
+        p_user_id: bet.user_id,
+        p_tngn_delta: bet.net_stake_tngn,
+        p_bonus_delta: 0,
+      });
+      await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', bet.id);
+    }
+  }
+
+  const wellFormed = rawBets.filter(b => b.locked_odds != null && b.vig_at_stake_pct != null);
+  if (wellFormed.length === 0) {
+    await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
+    await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+    return NextResponse.json({ status: 'voided', reason: 'All bets malformed; refunded at net stake' });
+  }
+
+  // Preload VIP referral info — same shape as the parimutuel branch.
+  const losingUserIds = Array.from(new Set(
+    wellFormed.filter(b => b.outcome_index !== winningOutcomeIndex).map(b => b.user_id),
+  ));
+  const referrerByUser: Record<string, { vipId: string; sharePct: number }> = {};
+  if (losingUserIds.length > 0) {
+    const { data: refRows } = await supabaseAdmin
+      .from('users')
+      .select('id, referred_by_user_id, referred_by_is_vip')
+      .in('id', losingUserIds);
+    const vipIds = (refRows || [])
+      .filter(r => r.referred_by_is_vip && r.referred_by_user_id)
+      .map(r => r.referred_by_user_id);
+    let rakeMap: Record<string, number> = {};
+    if (vipIds.length > 0) {
+      const { data: codes } = await supabaseAdmin
+        .from('referral_codes')
+        .select('owner_user_id, rake_share_pct')
+        .in('owner_user_id', vipIds)
+        .eq('is_vip_code', true)
+        .eq('is_active', true);
+      rakeMap = Object.fromEntries((codes || []).map(c => [c.owner_user_id, Number(c.rake_share_pct) || 0]));
+    }
+    for (const r of refRows || []) {
+      if (r.referred_by_is_vip && r.referred_by_user_id && rakeMap[r.referred_by_user_id]) {
+        referrerByUser[r.id] = {
+          vipId: r.referred_by_user_id,
+          sharePct: rakeMap[r.referred_by_user_id],
+        };
+      }
+    }
+  }
+
+  // Extract seed_pool and pool_by_outcome into ordered numeric arrays.
+  // jsonb keyed by outcome_index::text → numeric[] in [0..n-1] order.
+  const optionsLen = (market.options as any[]).length;
+  const toArray = (j: any): number[] => {
+    const arr: number[] = [];
+    const src = j || {};
+    for (let i = 0; i < optionsLen; i++) {
+      const v = Number(src[String(i)] ?? 0);
+      arr.push(Number.isFinite(v) && v > 0 ? v : 0);
+    }
+    return arr;
+  };
+
+  const resolution: MarketResolution = {
+    seedPool: toArray(market.seed_pool),
+    realPool: toArray(market.pool_by_outcome),
+    winningOutcomeIndex,
+  };
+
+  // Build the LockedBet input array. VIP context joined in here so
+  // settleLockedMarket can return VIP cuts in the same pass.
+  const lockedBets: LockedBet[] = wellFormed.map(b => {
+    const ref = referrerByUser[b.user_id];
+    return {
+      id: b.id,
+      userId: b.user_id,
+      outcomeIndex: b.outcome_index,
+      stakeTngn: Number(b.stake_tngn),
+      netStakeTngn: Number(b.net_stake_tngn),
+      lockedOdds: Number(b.locked_odds),
+      vigAtStakePct: Number(b.vig_at_stake_pct),
+      vipRakeSharePct: ref?.sharePct,
+      vipReferrerId: ref?.vipId,
+    };
+  });
+
+  const summary = settleLockedMarket(lockedBets, resolution);
+
+  // One-sided check (no winners): refund losers at net stake, mark
+  // market voided. Mirrors the existing parimutuel void path.
+  if (summary.isOneSided || lockedBets.filter(b => b.outcomeIndex === winningOutcomeIndex).length === 0) {
+    for (const lb of lockedBets) {
+      await supabaseAdmin.rpc('credit_user', {
+        p_user_id: lb.userId,
+        p_tngn_delta: lb.netStakeTngn,
+        p_bonus_delta: 0,
+      });
+      await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', lb.id);
+    }
+    await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
+    await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+    return NextResponse.json({ status: 'voided', reason: 'No winners — all bets refunded at net stake' });
+  }
+
+  // Pay winners + award win points.
+  for (const p of summary.perBet) {
+    if (!p.won) continue;
+    const lb = lockedBets.find(x => x.id === p.betId)!;
+    await supabaseAdmin.rpc('credit_user', {
+      p_user_id: lb.userId,
+      p_tngn_delta: p.payoutTngn,
+      p_bonus_delta: 0,
+    });
+    await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: p.payoutTngn }).eq('id', lb.id);
+
+    const profit = Math.max(0, p.payoutTngn - lb.stakeTngn);
+    const winPoints = Math.max(0, Math.floor(profit / 100));
+    if (winPoints > 0) {
+      await supabaseAdmin.rpc('award_points', {
+        p_user_id: lb.userId,
+        p_reason: 'bet_win',
+        p_points: winPoints,
+        p_bet_id: lb.id,
+        p_metadata: { payout: p.payoutTngn, profit, locked_odds: lb.lockedOdds, floor_bound: p.floorBound, upside_bound: p.upsideBound },
+      });
+    }
+
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: lb.userId,
+        type: 'bet_won',
+        message: `You won! ₦${p.payoutTngn.toLocaleString()} has been credited to your account. 🎉`,
+        amount: p.payoutTngn,
+      });
+    } catch { /* non-critical */ }
+  }
+
+  // Mark losers + insurance + VIP rake share.
+  for (const p of summary.perBet) {
+    if (p.won) continue;
+    const lb = lockedBets.find(x => x.id === p.betId)!;
+    await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', lb.id);
+    await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
+  }
+
+  // VIP cuts — routed in one pass from the summary so we don't
+  // recompute the math.
+  for (const cut of summary.vipCuts) {
+    await supabaseAdmin.rpc('credit_user', {
+      p_user_id: cut.vipReferrerId,
+      p_tngn_delta: 0,
+      p_bonus_delta: cut.amountTngn,
+    });
+    await supabaseAdmin.from('vip_referral_earnings').insert({
+      vip_user_id: cut.vipReferrerId,
+      referred_user_id: lockedBets.find(b => b.id === cut.betId)!.userId,
+      bet_id: cut.betId,
+      market_id: marketId,
+      rake_share_pct: lockedBets.find(b => b.id === cut.betId)!.vipRakeSharePct,
+      rake_share_amount: cut.amountTngn,
+      metadata: { basis: cut.basis },
+    });
+  }
+
+  // House P&L → reserve. Single atomic RPC.
+  const { data: reserveAfter, error: reserveErr } = await supabaseAdmin
+    .rpc('apply_house_pnl', {
+      p_pnl_tngn: summary.houseProfitTngn,
+      p_market_id: marketId,
+    })
+    .single<{ total_tngn: number; floor_tngn: number; deployable_tngn: number }>();
+  if (reserveErr) {
+    console.error('apply_house_pnl failed at locked-odds settlement:', reserveErr);
+    // Don't fail the resolution; the payouts above have already
+    // gone out. Surface the failure for ops, but keep going so the
+    // market is at least marked resolved.
+  }
+
+  // Treasury log — house margin captured. Single entry per resolved
+  // locked-odds market, mirroring the parimutuel branch's
+  // resolution_rake entry. metadata carries the diagnostic detail.
+  await supabaseAdmin.from('treasury_log').insert({
+    type: 'locked_settlement_pnl',
+    amount_tngn: summary.houseProfitTngn,
+    market_id: marketId,
+    metadata: {
+      total_winner_payouts: summary.totalWinnerPayouts,
+      total_vip_payouts: summary.totalVipPayouts,
+      bet_count: lockedBets.length,
+      winners: summary.perBet.filter(p => p.won).length,
+      losers: summary.perBet.filter(p => !p.won).length,
+      reserve_after: reserveAfter ?? null,
+    },
+    created_at: new Date().toISOString(),
+  });
+
+  // Clear the open-exposure ledger row.
+  await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+
+  // Finalise market status.
+  const totalPool = lockedBets.reduce((a, b) => a + b.netStakeTngn, 0);
+  await supabaseAdmin.from('markets').update({
+    status: 'resolved',
+    resolved_outcome: winningOutcomeIndex,
+    total_pool: totalPool,
+    resolved_at: new Date().toISOString(),
+  }).eq('id', marketId);
+
+  console.log(`Market ${marketId} resolved (locked-odds). Winners: ${summary.perBet.filter(p => p.won).length}. House P&L: ${summary.houseProfitTngn}.`);
+
+  return NextResponse.json({
+    success: true,
+    engine: 'locked_odds',
+    marketId,
+    winningOutcomeIndex,
+    totalPool,
+    winnersCount: summary.perBet.filter(p => p.won).length,
+    losersCount: summary.perBet.filter(p => !p.won).length,
+    totalWinnerPayouts: summary.totalWinnerPayouts,
+    totalVipPayouts: summary.totalVipPayouts,
+    houseProfit: summary.houseProfitTngn,
+    reserveAfter,
+  }, { status: 200 });
+}
+
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
@@ -154,6 +427,19 @@ export async function POST(request: Request) {
         { error: 'Resolution already in progress or completed for this market' },
         { status: 409 },
       );
+    }
+
+    // Branch on the market's pricing engine BEFORE reading bets, so
+    // the locked-odds path can request the extra columns it needs
+    // (locked_odds, vig_at_stake_pct) in a single query. Existing
+    // parimutuel markets keep using the original SELECT to avoid any
+    // change to their query shape.
+    if (market.is_locked_odds) {
+      return await resolveLockedOddsMarket({
+        marketId,
+        winningOutcomeIndex,
+        market,
+      });
     }
 
     const { data: bets } = await supabaseAdmin
