@@ -55,7 +55,7 @@ export async function GET(request: Request) {
       // Real bet distribution from user_bets
       const { data: market } = await supabaseAdmin
         .from('markets')
-        .select('options, total_pool, status')
+        .select('options, total_pool, status, is_locked_odds, seed_pool, category, vig_pct')
         .eq('id', marketId)
         .single();
 
@@ -63,6 +63,7 @@ export async function GET(request: Request) {
 
       const options = market.options as string[];
       const status = market.status as string;
+      const isLockedOdds = !!market.is_locked_odds;
 
       const { data: bets } = await supabaseAdmin
         .from('user_bets')
@@ -115,7 +116,40 @@ export async function GET(request: Request) {
         percentage: totalPool > 0 ? Math.round((optionTotals[i] / totalPool) * 100) : 0,
       }));
 
-      const payload = { mode: 'distribution', timeline, distribution, options, totalPool, status };
+      // Locked-odds preview inputs. Only attached for locked-odds
+      // markets — the bet modal uses these (plus the live distribution
+      // above as the realPool) to compute the SAME locked odds the
+      // server will freeze, so the displayed range matches settlement.
+      // seedPool is ordered by outcome index; reserve_health is read
+      // server-side because RLS hides it from the browser.
+      let lockedOdds: any = undefined;
+      if (isLockedOdds) {
+        const seedPoolMap = (market.seed_pool || {}) as Record<string, number>;
+        const seedPool = options.map((_, i) => {
+          const v = Number(seedPoolMap[String(i)] ?? 0);
+          return Number.isFinite(v) && v > 0 ? v : 0;
+        });
+        const { data: reserve } = await supabaseAdmin
+          .from('reserve_health')
+          .select('deployable_tngn, floor_tngn')
+          .maybeSingle();
+        lockedOdds = {
+          isLockedOdds: true,
+          seedPool,
+          category: market.category,
+          vigPct: market.vig_pct == null ? null : Number(market.vig_pct),
+          reserve: {
+            deployableTngn: Number(reserve?.deployable_tngn ?? 120_000),
+            floorTngn: Number(reserve?.floor_tngn ?? 30_000),
+          },
+        };
+      }
+
+      const payload = {
+        mode: 'distribution', timeline, distribution, options, totalPool, status,
+        isLockedOdds,
+        lockedOdds,
+      };
       setCachedChart(cacheKey, payload);
       return NextResponse.json(payload, { headers: { 'X-Cache': 'MISS' } });
     }

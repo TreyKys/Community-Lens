@@ -13,6 +13,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
+import { calculateLockedOdds } from '@/lib/lockedOdds';
 import { getDisplayPool } from '@/lib/displayPool';
 
 interface Market {
@@ -71,6 +72,16 @@ function BettingInterface({
   const [balance, setBalance] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
+  // Locked-odds config for this market, fetched alongside the
+  // distribution. Null = parimutuel market (the legacy default), in
+  // which case the parimutuel preview below applies unchanged.
+  const [lockedConfig, setLockedConfig] = useState<{
+    isLockedOdds: boolean;
+    seedPool: number[];
+    category: string;
+    vigPct: number | null;
+    reserve: { deployableTngn: number; floorTngn: number };
+  } | null>(null);
   const { toast } = useToast();
 
   // First-bet parimutuel primer. Most "I don't get it" complaints die after
@@ -94,7 +105,36 @@ function BettingInterface({
   // Kept in sync with the bet distribution fetched below.
   const pools = market.options.map((_, i) => distribution[i]?.amount ?? 0);
   const stakeNum = Number(amount);
-  const payoutPreview = (selectedOption !== '' && stakeNum >= 100)
+  const isLockedMarket = !!lockedConfig?.isLockedOdds;
+
+  // Locked-odds preview. Runs the SAME canonical algorithm the server
+  // uses (lib/lockedOdds) on the seed pool + live distribution, so the
+  // range we show matches what gets frozen on the bet row. Only active
+  // on locked-odds markets; parimutuel markets fall through to the
+  // legacy preview below.
+  const lockedPreview = (isLockedMarket && selectedOption !== '' && stakeNum >= 100 && lockedConfig)
+    ? (() => {
+        try {
+          return calculateLockedOdds(
+            {
+              category: lockedConfig.category,
+              seedPool: lockedConfig.seedPool,
+              realPool: lockedConfig.seedPool.map((_, i) => pools[i] ?? 0),
+              vigPctOverride: lockedConfig.vigPct ?? undefined,
+            },
+            stakeNum,
+            parseInt(selectedOption),
+            {},
+            lockedConfig.reserve,
+          );
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  // Parimutuel preview — legacy path, untouched for non-locked markets.
+  const payoutPreview = (!isLockedMarket && selectedOption !== '' && stakeNum >= 100)
     ? calculatePotentialPayout(stakeNum, pools, parseInt(selectedOption))
     : null;
 
@@ -132,11 +172,16 @@ function BettingInterface({
         });
     }
 
-    // Fetch real bet distribution
+    // Fetch real bet distribution + locked-odds config (if any).
     fetch(`/api/markets/chart?marketId=${market.id}&mode=distribution`)
       .then(r => r.json())
       .then(data => {
         if (data.distribution) setDistribution(data.distribution);
+        if (data.isLockedOdds && data.lockedOdds) {
+          setLockedConfig(data.lockedOdds);
+        } else {
+          setLockedConfig(null);
+        }
       })
       .catch(() => {});
   }, [market.id, session?.user?.id]);
@@ -290,6 +335,33 @@ function BettingInterface({
         </p>
       )}
 
+      {/* Locked-odds preview. Frozen rate + an honest "₦X – ₦Y if
+          correct" range whose floor is the server-guaranteed minimum.
+          No first-mover warning — the house seed is always present, so
+          there is never a void/first-mover state on a locked market. */}
+      {lockedPreview && (
+        <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
+          <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
+            <Sparkles className="w-3 h-3" /> Your stake locks at
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
+              {lockedPreview.lockedOdds.toFixed(2)}×
+            </span>
+            <span className="text-sm text-emerald-300/80 font-semibold tabular-nums">
+              ₦{lockedPreview.floorPayout.toLocaleString()}
+              {lockedPreview.upperPayout > lockedPreview.floorPayout && (
+                <> – ₦{lockedPreview.upperPayout.toLocaleString()}</>
+              )} if correct
+            </span>
+          </div>
+          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-300/80">
+            <TrendingUp className="w-3 h-3 shrink-0" />
+            <span>Your rate is locked. Winnings climb as others predict the other way.</span>
+          </div>
+        </div>
+      )}
+
       {payoutPreview && (
         <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
           {/* Lead with the multiplier — it reads like betting odds, which is
@@ -325,7 +397,9 @@ function BettingInterface({
           take a loss even on a winning prediction (parimutuel: you
           mostly just pay yourself back, minus the 10% house rake).
           Stays clear of the first-mover case (no opposing side yet) —
-          that has its own amber notice inside the payout card. */}
+          that has its own amber notice inside the payout card.
+          Locked-odds markets never hit this — the floor guarantees a
+          minimum — so it's parimutuel-only via payoutPreview. */}
       {payoutPreview && payoutPreview.multiplier < 1 && !payoutPreview.isFirstMover && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/[0.06] p-3.5 animate-in fade-in slide-in-from-bottom-1">
           <div className="flex items-start gap-2.5">
