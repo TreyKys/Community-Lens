@@ -33,6 +33,7 @@ interface Market {
   description: string | null;
   resolved_at: string | null;
   is_trending: boolean;
+  is_locked_odds?: boolean;
 }
 
 interface MarketCardProps {
@@ -495,6 +496,59 @@ function BettingInterface({
   );
 }
 
+// Always-visible Multiplier picker on locked-odds market cards. Shows
+// each outcome as a small chip — tap to add as a leg, tap again to
+// remove. One leg per market: adding a different outcome swaps the
+// existing pick. Stays unobtrusive so it doesn't compete with the main
+// "tap to predict" affordance for singles.
+function MultiplierQuickPick({ market }: { market: Market }) {
+  const { addLeg, removeLeg, hasLeg, setOpen } = useSlip();
+  const cleanQ = market.question.replace(/\[.*?\]\s*/g, '').trim();
+
+  return (
+    <div className="mb-3 rounded-md border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-2 flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-violet-300/90 font-semibold">
+        <Layers className="w-3 h-3" /> Multiplier
+      </div>
+      <div className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
+        {market.options.map((opt, i) => {
+          const picked = hasLeg(market.id, i);
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={(e) => {
+                // Don't trigger any parent-card expand handlers.
+                e.stopPropagation();
+                if (picked) {
+                  removeLeg(market.id);
+                } else {
+                  addLeg({
+                    marketId: market.id,
+                    outcomeIndex: i,
+                    marketQuestion: cleanQ || `Market ${market.id}`,
+                    optionLabel: opt,
+                  });
+                  setOpen(true);
+                }
+              }}
+              className={cn(
+                'inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                picked
+                  ? 'bg-violet-500 text-white border border-violet-500'
+                  : 'bg-background/40 border border-violet-500/25 text-violet-200 hover:bg-violet-500/15',
+              )}
+            >
+              {picked ? <CheckCircle2 className="w-3 h-3" /> : <span className="text-violet-300/80">+</span>}
+              <span className="truncate max-w-[120px]">{opt}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStaked = false }: MarketCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -616,6 +670,16 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
             <Lock className="w-3 h-3" />
             <span>Prediction ledger sealed on Polygon</span>
           </div>
+        )}
+
+        {/* Always-visible Multiplier quick-pick on open locked-odds
+            markets. Lets the user add legs to their slip while browsing
+            the market list — no need to expand the full bet form for
+            each one. The full bet form (below) is still the path for
+            single-bet placement. Soft violet so it visually belongs to
+            the Multiplier surface, not the singles flow. */}
+        {isOpen && market.is_locked_odds && (
+          <MultiplierQuickPick market={market} />
         )}
 
         {/* Desktop inline betting */}
@@ -891,7 +955,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, is_locked_odds')
         .not('status', 'eq', 'voided')
         .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
 
