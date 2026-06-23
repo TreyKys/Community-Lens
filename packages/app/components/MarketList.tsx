@@ -10,10 +10,11 @@ import { Label } from '@/components/ui/label';
 import { Drawer, DrawerContent, DrawerTrigger, DrawerHeader, DrawerTitle, DrawerDescription, DrawerFooter, DrawerClose } from '@/components/ui/drawer';
 import { useToast } from '@/hooks/use-toast';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle } from 'lucide-react';
+import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
+import { useSlip } from '@/components/multiplier/SlipProvider';
 import { getDisplayPool } from '@/lib/displayPool';
 
 interface Market {
@@ -72,6 +73,8 @@ function BettingInterface({
   const [balance, setBalance] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
+  // Multiplier slip — add the selected leg to the global slip.
+  const { addLeg, hasMarket: slipHasMarket, setOpen: setSlipOpen } = useSlip();
   // Locked-odds config for this market, fetched alongside the
   // distribution. Null = parimutuel market (the legacy default), in
   // which case the parimutuel preview below applies unchanged.
@@ -456,6 +459,38 @@ function BettingInterface({
           ) : 'Lock Prediction'}
         </Button>
       </div>
+
+      {/* Add to Multiplier — only on locked-odds markets (the engine
+          rejects parimutuel legs). Soft violet so it reads as a distinct
+          path from the single-bet "Lock Prediction" above. Adds the
+          currently-selected outcome as a leg; one leg per market, so
+          re-adding swaps the pick. */}
+      {isLockedMarket && (
+        <button
+          type="button"
+          disabled={!selectedOption}
+          onClick={() => {
+            const idx = parseInt(selectedOption);
+            const cleanQ = market.question.replace(/\[.*?\]\s*/g, '').trim();
+            addLeg({
+              marketId: market.id,
+              outcomeIndex: idx,
+              marketQuestion: cleanQ || `Market ${market.id}`,
+              optionLabel: market.options[idx],
+            });
+            setSlipOpen(true);
+          }}
+          className={cn(
+            'w-full flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-semibold transition-colors',
+            'border border-violet-500/30 text-violet-300 bg-violet-500/[0.06] hover:bg-violet-500/15',
+            !selectedOption && 'opacity-50 cursor-not-allowed',
+            slipHasMarket(market.id) && 'bg-violet-500/15 border-violet-500/50',
+          )}
+        >
+          <Layers className="w-4 h-4" />
+          {slipHasMarket(market.id) ? 'Update in Multiplier' : 'Add to Multiplier'}
+        </button>
+      )}
     </div>
   );
 }
