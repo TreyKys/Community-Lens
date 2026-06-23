@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [reserveRes, openMarketsRes, liabilityRes] = await Promise.all([
+    const [reserveRes, openMarketsRes, liabilityRes, slipRes] = await Promise.all([
       supabaseAdmin.from('reserve_health').select('total_tngn, floor_tngn, deployable_tngn').maybeSingle(),
       supabaseAdmin
         .from('markets')
@@ -31,6 +31,10 @@ export async function GET(request: Request) {
         .eq('is_locked_odds', true)
         .eq('status', 'open'),
       supabaseAdmin.from('market_liability').select('worst_case_tngn'),
+      // Open Multiplier liability — the house's potential payout on every
+      // active slip. The reserve only reflects realised P&L, so this is
+      // shown separately so the admin sees true open exposure.
+      supabaseAdmin.from('multiplier_slips').select('payout_tngn').eq('status', 'active'),
     ]);
 
     const reserve = reserveRes.data;
@@ -50,12 +54,17 @@ export async function GET(request: Request) {
       (a, r: any) => a + Number(r.worst_case_tngn || 0),
       0,
     );
+    const openSlipLiability = (slipRes.data || []).reduce(
+      (a, r: any) => a + Number(r.payout_tngn || 0),
+      0,
+    );
 
     return NextResponse.json({
       deployable: Number(reserve.deployable_tngn || 0),
       floor: Number(reserve.floor_tngn || 0),
       total: Number(reserve.total_tngn || 0),
       aggregateWorstCase,
+      openSlipLiability,
       lockedOddsMarketCount: openMarketsRes.count || 0,
     });
   } catch (e: any) {

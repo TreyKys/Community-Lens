@@ -327,6 +327,7 @@ function ReserveHealthPanel() {
     floor: number;
     total: number;
     aggregateWorstCase: number;
+    openSlipLiability?: number;
     lockedOddsMarketCount: number;
   } | null>(null);
 
@@ -386,7 +387,7 @@ function ReserveHealthPanel() {
           <StatCard label="Deployable" value={f(data.deployable)} sub="Tier-2 spending capacity" icon={Coins} color="text-emerald-400" />
           <StatCard label="Floor" value={f(data.floor)} sub="Untouchable buffer" icon={Shield} color="text-muted-foreground" />
           <StatCard label="Total Reserve" value={f(data.total)} sub="Deployable + floor" icon={Coins} color="text-blue-400" />
-          <StatCard label="Open Exposure" value={f(data.aggregateWorstCase)} sub="Worst case across markets" icon={Activity} color={data.aggregateWorstCase > data.deployable ? 'text-red-400' : 'text-amber-400'} />
+          <StatCard label="Open Exposure" value={f(data.aggregateWorstCase + (data.openSlipLiability || 0))} sub={`Singles + ₦${Math.round(data.openSlipLiability || 0).toLocaleString()} slips`} icon={Activity} color={(data.aggregateWorstCase + (data.openSlipLiability || 0)) > data.deployable ? 'text-red-400' : 'text-amber-400'} />
           <StatCard label="Tier-2 Cap" value={cap === 0 ? 'PAUSED' : f(cap)} sub={cap === 0 ? 'Routed to parimutuel' : 'Per stake right now'} icon={Lock} color={cap === 0 ? 'text-red-400' : 'text-amber-300'} />
         </div>
         {data.aggregateWorstCase > data.deployable && (
@@ -584,6 +585,181 @@ function VipLeaderboardPanel() {
 }
 
 // ── Market Creation ───────────────────────────────────────────────────────
+// ── Odds Calculator ───────────────────────────────────────────────────────
+//
+// A pure exploration tool — adjust seed size, seed probability, vig and
+// category, and instantly see the resulting opening odds, implied
+// probabilities, and how the line moves across stake sizes. Helps the
+// admin choose seeding parameters BEFORE creating a market. No DB,
+// no side effects: everything runs through lib/lockedOdds in the
+// browser.
+function OddsCalculatorPanel() {
+  const [category, setCategory] = useState('sports');
+  const [numOutcomes, setNumOutcomes] = useState(2);
+  const [seedSize, setSeedSize] = useState('10000');
+  const [seedProb, setSeedProb] = useState('0.5'); // P(outcome 0) for binary
+  const [vigOverride, setVigOverride] = useState('');
+
+  const seedSizeNum = Number(seedSize);
+  const seedProbNum = Number(seedProb);
+  const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
+
+  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
+  const validProb = numOutcomes !== 2 || (Number.isFinite(seedProbNum) && seedProbNum > 0.02 && seedProbNum < 0.98);
+
+  // Seed split.
+  const seedPool: number[] = (() => {
+    if (!validSeed) return [];
+    if (numOutcomes === 2 && validProb) {
+      const a = Math.round(seedSizeNum * seedProbNum);
+      return [a, seedSizeNum - a];
+    }
+    const share = Math.round(seedSizeNum / numOutcomes);
+    const out = Array.from({ length: numOutcomes }, () => share);
+    out[0] = seedSizeNum - share * (numOutcomes - 1);
+    return out;
+  })();
+
+  const SAMPLE_STAKES = [200, 500, 1000, 5000];
+
+  // For each (stake, outcome) compute the locked odds. Returns null grid
+  // if inputs are invalid.
+  const grid = (seedPool.length >= 2 && validSeed && validProb)
+    ? SAMPLE_STAKES.map(stake => ({
+        stake,
+        perOutcome: seedPool.map((_, i) => {
+          try {
+            return calculateLockedOdds(
+              { category, seedPool, realPool: seedPool.map(() => 0), vigPctOverride: vigNum },
+              stake, i, {}, { deployableTngn: 120_000, floorTngn: 30_000 },
+            );
+          } catch {
+            return null;
+          }
+        }),
+      }))
+    : null;
+
+  // Implied probability from the seed split (what the opening line says).
+  const totalSeed = seedPool.reduce((a, b) => a + b, 0);
+
+  return (
+    <Card className="border-blue-500/20 bg-blue-500/[0.02]">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Coins className="w-4 h-4 text-blue-400" />
+          Odds Calculator
+          <Badge variant="outline" className="text-[9px] border-blue-500/30 text-blue-300">EXPLORE</Badge>
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Tune seed size, probability and vig to find the opening line you want — then create the market with those numbers.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Category</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sports">Sports (7%)</SelectItem>
+                <SelectItem value="sports_top">Sports — top (6%)</SelectItem>
+                <SelectItem value="combat">Combat (8%)</SelectItem>
+                <SelectItem value="economy">Economy (9%)</SelectItem>
+                <SelectItem value="crypto">Crypto (8%)</SelectItem>
+                <SelectItem value="entertainment">Entertainment (9%)</SelectItem>
+                <SelectItem value="politics">Politics (10%)</SelectItem>
+                <SelectItem value="culture">Culture (10%)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Outcomes</Label>
+            <Select value={String(numOutcomes)} onValueChange={v => setNumOutcomes(Number(v))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="2">2 (Yes/No)</SelectItem>
+                <SelectItem value="3">3 (1X2)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Seed size (₦)</Label>
+            <Input type="number" value={seedSize} onChange={e => setSeedSize(e.target.value)}
+              className={cn(!validSeed && 'border-red-500/40')} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Vig override</Label>
+            <Input type="number" step={0.01} placeholder="category default" value={vigOverride}
+              onChange={e => setVigOverride(e.target.value)} />
+          </div>
+        </div>
+
+        {numOutcomes === 2 && (
+          <div className="space-y-1">
+            <Label className="text-xs">Seed probability — P(outcome 0)</Label>
+            <Input type="number" step={0.01} value={seedProb} onChange={e => setSeedProb(e.target.value)}
+              className={cn(!validProb && 'border-red-500/40')} />
+          </div>
+        )}
+
+        {/* Seed split + implied prob */}
+        {seedPool.length >= 2 && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            {seedPool.map((s, i) => (
+              <div key={i} className="bg-card/40 rounded px-2.5 py-1.5 border border-border/40">
+                <span className="text-muted-foreground">Outcome {i}: </span>
+                <span className="font-semibold">₦{s.toLocaleString()}</span>
+                <span className="text-muted-foreground"> · {totalSeed > 0 ? Math.round((s / totalSeed) * 100) : 0}% implied</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Odds grid across sample stakes */}
+        {grid ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-muted-foreground border-b border-border/40">
+                  <th className="text-left py-2 pr-3 font-medium">Stake</th>
+                  {seedPool.map((_, i) => (
+                    <th key={i} className="text-left py-2 px-3 font-medium">Outcome {i} odds</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {grid.map(row => (
+                  <tr key={row.stake} className="border-b border-border/20">
+                    <td className="py-2 pr-3 tabular-nums">₦{row.stake.toLocaleString()}</td>
+                    {row.perOutcome.map((r, i) => (
+                      <td key={i} className="py-2 px-3">
+                        {r ? (
+                          <div className="flex flex-col">
+                            <span className="font-bold tabular-nums">{r.lockedOdds.toFixed(2)}×</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              ₦{r.floorPayout.toLocaleString()}–₦{r.upperPayout.toLocaleString()} · vig {(r.vigApplied * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                        ) : '—'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              Odds shorten as stake grows (slippage protection). Bigger seed = more stable odds. Higher vig = shorter odds, more house margin.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Enter a valid seed (₦1k–₦14k) and probability to see odds.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CreateMarketPanel() {
   const { toast } = useToast();
   const [question, setQuestion] = useState('');
@@ -3182,7 +3358,12 @@ export default function AdminPage() {
         <TabsContent value="users" className="pt-4"><UsersPanel /></TabsContent>
         <TabsContent value="vip" className="pt-4"><VIPPanel /></TabsContent>
         <TabsContent value="ai" className="pt-4"><AIMarketGenerator /></TabsContent>
-        <TabsContent value="create" className="pt-4"><CreateMarketPanel /></TabsContent>
+        <TabsContent value="create" className="pt-4">
+          <div className="space-y-6">
+            <OddsCalculatorPanel />
+            <CreateMarketPanel />
+          </div>
+        </TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
         <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>
         <TabsContent value="credits" className="pt-4"><CreditsPanel /></TabsContent>

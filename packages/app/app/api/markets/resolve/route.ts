@@ -137,6 +137,26 @@ async function resolveLockedOddsMarket(args: {
 }) {
   const { marketId, winningOutcomeIndex, market } = args;
 
+  // Settle any Multiplier legs riding on this market FIRST. Legs pay
+  // from the house at fixed odds and are independent of the single-bet
+  // pool — so a market that voids its singles for one-sidedness still
+  // settles its legs on the real winning outcome. p_voided=false here:
+  // the resolve route always carries a real winning outcome; a genuine
+  // event cancellation would call this with p_voided=true from a
+  // dedicated admin void action (not yet wired).
+  try {
+    await supabaseAdmin.rpc('settle_multiplier_for_market', {
+      p_market_id: marketId,
+      p_winning_outcome: winningOutcomeIndex,
+      p_voided: false,
+    });
+  } catch (e) {
+    console.error(`settle_multiplier_for_market failed for market ${marketId}:`, e);
+    // Don't abort single settlement on a multiplier hiccup — surface
+    // for ops and continue. Legs left active will retry-settle if the
+    // market is re-resolved.
+  }
+
   // Pull every active bet on this market, including the locked-odds
   // fields. The same row-shape supplies the LockedBet input to the
   // settlement library and the bet rows we'll mark won/lost/refunded.
