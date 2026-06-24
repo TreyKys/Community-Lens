@@ -1210,8 +1210,33 @@ function CreateMarketPanel() {
   const [isLockedOdds, setIsLockedOdds] = useState(false);
   const [seedSize, setSeedSize] = useState<string>('10000');
   const [seedProbability, setSeedProbability] = useState<string>('0.5'); // binary YES
+  // Per-outcome probabilities for markets with 3+ outcomes. Synced to
+  // numOutcomes by the effect below — admins can override the default
+  // uniform split (e.g. tilt 1X2 toward the home side).
+  const [seedProbsMulti, setSeedProbsMulti] = useState<string[]>(['0.40', '0.30', '0.30']);
   const [vigOverride, setVigOverride] = useState<string>(''); // empty = use default per category
   const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
+
+  const numOutcomesNow = optionsText.split(',').map(o => o.trim()).filter(Boolean).length;
+
+  // Re-shape seedProbsMulti when the options count changes so the inputs
+  // always match the actual outcomes — and regenerate cleanly when the
+  // length differs. Preserving stale slot values across a resize would
+  // leave the sum off 1.00 by default, forcing the admin to debug their
+  // own form. A clean uniform split (with the rounding crumb absorbed by
+  // the last slot so the sum is exactly 1.00) is more predictable.
+  useEffect(() => {
+    if (numOutcomesNow < 3) return;
+    setSeedProbsMulti(prev => {
+      if (prev.length === numOutcomesNow) return prev;
+      const uniform = Math.floor((1 / numOutcomesNow) * 100) / 100;
+      const next: string[] = Array.from({ length: numOutcomesNow }, () => uniform.toFixed(2));
+      const drift = 1 - uniform * numOutcomesNow;
+      // Absorb crumb in the last slot so the sum equals 1.00 exactly.
+      next[numOutcomesNow - 1] = (uniform + drift).toFixed(2);
+      return next;
+    });
+  }, [numOutcomesNow]);
 
   // Fetch the deployable reserve so the form can show a budget hint
   // before submission. Read via the reserve_health view; failures are
@@ -1264,10 +1289,36 @@ function CreateMarketPanel() {
 
     setIsSubmitting(true);
     try {
+      // For 3+ outcomes, convert per-outcome probabilities into an
+      // explicit seed pool (₦ per outcome) so the API stores the exact
+      // split the admin previewed. For binary markets we still pass
+      // seedProbability and let the API derive the split.
+      let multiSeedPool: number[] | null = null;
+      if (isLockedOdds && options.length >= 3) {
+        const probs = seedProbsMulti.slice(0, options.length).map(s => Number(s));
+        const probSum = probs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
+        if (!probs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98) || Math.abs(probSum - 1) > 0.005) {
+          toast({
+            title: 'Seed probabilities invalid',
+            description: 'Each outcome must be 0.02–0.98 and they must sum to 1.00.',
+            variant: 'destructive',
+          });
+          setIsSubmitting(false);
+          return;
+        }
+        const seedSizeNum = Number(seedSize);
+        const raw = probs.map(p => Math.round(seedSizeNum * p));
+        // Crumb-correct so the sum equals seedSize exactly.
+        const drift = seedSizeNum - raw.reduce((a, v) => a + v, 0);
+        raw[0] += drift;
+        multiSeedPool = raw;
+      }
+
       const lockedPayload = isLockedOdds ? {
         isLockedOdds: true,
         seedSizeTngn: Number(seedSize),
         seedProbability: options.length === 2 ? Number(seedProbability) : null,
+        seedPool: multiSeedPool,
         vigPct: vigOverride.trim() === '' ? null : Number(vigOverride),
       } : { isLockedOdds: false };
 
@@ -1392,10 +1443,12 @@ function CreateMarketPanel() {
           setSeedSize={setSeedSize}
           seedProbability={seedProbability}
           setSeedProbability={setSeedProbability}
+          seedProbsMulti={seedProbsMulti}
+          setSeedProbsMulti={setSeedProbsMulti}
           vigOverride={vigOverride}
           setVigOverride={setVigOverride}
           reserveDeployable={reserveDeployable}
-          numOutcomes={optionsText.split(',').map(o => o.trim()).filter(Boolean).length}
+          numOutcomes={numOutcomesNow}
           category={category}
         />
 
@@ -1421,6 +1474,8 @@ function LockedOddsConfigBlock(props: {
   setSeedSize: (v: string) => void;
   seedProbability: string;
   setSeedProbability: (v: string) => void;
+  seedProbsMulti: string[];
+  setSeedProbsMulti: (v: string[] | ((prev: string[]) => string[])) => void;
   vigOverride: string;
   setVigOverride: (v: string) => void;
   reserveDeployable: number | null;
@@ -1431,6 +1486,7 @@ function LockedOddsConfigBlock(props: {
     isLockedOdds, setIsLockedOdds,
     seedSize, setSeedSize,
     seedProbability, setSeedProbability,
+    seedProbsMulti, setSeedProbsMulti,
     vigOverride, setVigOverride,
     reserveDeployable, numOutcomes, category,
   } = props;
@@ -1439,17 +1495,43 @@ function LockedOddsConfigBlock(props: {
   const seedProbNum = Number(seedProbability);
   const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
   const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
-  const validProb = numOutcomes !== 2 || (Number.isFinite(seedProbNum) && seedProbNum >= 0.05 && seedProbNum <= 0.95);
   const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
   const seedFitsReserve = reserveDeployable == null || seedSizeNum <= reserveDeployable;
 
+  // Probability validation differs between the binary and multi-outcome
+  // cases. Binary: single YES probability in [0.05, 0.95]. Multi: each
+  // outcome in [0.02, 0.98] and they must sum to ~1.
+  const multiProbs = seedProbsMulti.slice(0, numOutcomes).map(s => Number(s));
+  const multiProbSum = multiProbs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
+  const validMultiProbs =
+    numOutcomes < 3
+      ? true
+      : multiProbs.length === numOutcomes
+        && multiProbs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98)
+        && Math.abs(multiProbSum - 1) <= 0.005;
+  const validProb =
+    numOutcomes === 2
+      ? (Number.isFinite(seedProbNum) && seedProbNum >= 0.05 && seedProbNum <= 0.95)
+      : validMultiProbs;
+
   // Compose the opening seed pool — same logic as the API but client-side.
+  // For 3+ outcomes we now use the admin's per-outcome probabilities
+  // instead of a blind uniform split.
   const seedPool: number[] = (() => {
     if (!validSeed || numOutcomes < 2) return [];
-    if (numOutcomes === 2 && validProb) {
+    if (numOutcomes === 2) {
+      if (!validProb) return [];
       const yes = Math.round(seedSizeNum * seedProbNum);
       return [yes, seedSizeNum - yes];
     }
+    if (validMultiProbs) {
+      const raw = multiProbs.map(p => Math.round(seedSizeNum * p));
+      const drift = seedSizeNum - raw.reduce((a, v) => a + v, 0);
+      raw[0] += drift;
+      return raw;
+    }
+    // Fallback while the admin is mid-edit (e.g. inputs don't sum to 1):
+    // render a uniform-split preview so the panel stays informative.
     const share = Math.round(seedSizeNum / numOutcomes);
     const out = Array.from({ length: numOutcomes }, () => share);
     out[0] = seedSizeNum - share * (numOutcomes - 1);
@@ -1531,6 +1613,49 @@ function LockedOddsConfigBlock(props: {
               </div>
             )}
           </div>
+
+          {/* Per-outcome probability inputs for 3+ outcomes. Without
+              these, the admin has no way to tilt the seed pool away
+              from a uniform split (e.g. home-side favourite in 1X2).
+              Inputs must sum to 1.00 — sum is surfaced below in red
+              while off-target. */}
+          {numOutcomes >= 3 && (
+            <div className="space-y-2">
+              <Label className="text-xs">Seed probability per outcome (must sum to 1.00)</Label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {Array.from({ length: numOutcomes }).map((_, i) => (
+                  <div key={i} className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground">Outcome {i}</p>
+                    <Input
+                      type="number"
+                      step={0.01}
+                      min={0.02}
+                      max={0.98}
+                      value={seedProbsMulti[i] ?? ''}
+                      onChange={e => setSeedProbsMulti(prev => {
+                        const next = prev.slice(0, numOutcomes);
+                        while (next.length < numOutcomes) next.push('');
+                        next[i] = e.target.value;
+                        return next;
+                      })}
+                      className={cn(!validMultiProbs && 'border-red-500/40')}
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className={cn(
+                'text-[10px]',
+                Math.abs(multiProbSum - 1) > 0.005 ? 'text-red-400' : 'text-muted-foreground',
+              )}>
+                Sum: {multiProbSum.toFixed(3)} {Math.abs(multiProbSum - 1) > 0.005 && '— must equal 1.000'}
+              </p>
+              {validMultiProbs && validSeed && seedPool.length === numOutcomes && (
+                <p className="text-[10px] text-muted-foreground">
+                  Split: {seedPool.map((v, i) => `₦${v.toLocaleString()} (#${i})`).join(' · ')}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1">
             <Label className="text-xs">Vig override (0.04–0.15, blank = category default)</Label>
