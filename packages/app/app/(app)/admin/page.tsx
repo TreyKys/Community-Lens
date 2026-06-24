@@ -746,6 +746,64 @@ function OddsCalculatorPanel() {
   const [seedProbs, setSeedProbs] = useState<string[]>(['0.5', '0.5']);
   // Reverse: target displayed odds for EACH outcome.
   const [targetOdds, setTargetOdds] = useState<string[]>(['1.85', '1.85']);
+  // Bookmaker lookup state (Reverse mode only).
+  const [lookupSport, setLookupSport] = useState<string>('soccer_epl');
+  const [lookupQuery, setLookupQuery] = useState<string>('');
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupEvents, setLookupEvents] = useState<any[]>([]);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupConfigured, setLookupConfigured] = useState<boolean>(true);
+
+  // Sports we expose in the lookup. Keys are The Odds API sport keys.
+  const SPORTS = [
+    { key: 'soccer_epl', label: 'EPL' },
+    { key: 'soccer_uefa_champs_league', label: 'UEFA Champions League' },
+    { key: 'soccer_uefa_europa_league', label: 'UEFA Europa League' },
+    { key: 'soccer_spain_la_liga', label: 'La Liga' },
+    { key: 'soccer_italy_serie_a', label: 'Serie A' },
+    { key: 'soccer_germany_bundesliga', label: 'Bundesliga' },
+    { key: 'soccer_france_ligue_one', label: 'Ligue 1' },
+    { key: 'soccer_africa_cup_of_nations', label: 'AFCON' },
+    { key: 'soccer_fifa_world_cup', label: 'World Cup' },
+    { key: 'basketball_nba', label: 'NBA' },
+    { key: 'mma_mixed_martial_arts', label: 'UFC / MMA' },
+  ];
+
+  const runLookup = async () => {
+    setLookupLoading(true);
+    setLookupError(null);
+    try {
+      const url = `/api/admin/lookup-odds?sport=${encodeURIComponent(lookupSport)}&q=${encodeURIComponent(lookupQuery)}`;
+      const res = await fetch(url, { credentials: 'include' });
+      const data = await res.json();
+      if (!res.ok) {
+        setLookupConfigured(data.configured !== false);
+        setLookupError(data.error || 'Lookup failed');
+        setLookupEvents([]);
+      } else {
+        setLookupConfigured(true);
+        setLookupEvents(data.events || []);
+        if ((data.events || []).length === 0) {
+          setLookupError('No upcoming fixtures match. Try a different team or sport.');
+        }
+      }
+    } catch (e: any) {
+      setLookupError(e?.message || 'Lookup failed');
+      setLookupEvents([]);
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  // Pulling an event into the calculator: align outcome count to the
+  // event's market shape (3 for 1X2, 2 for h2h-no-draw), copy the
+  // averaged bookmaker odds into the target inputs.
+  const applyEvent = (ev: any) => {
+    const outcomes = ev.outcomes || [];
+    if (outcomes.length < 2) return;
+    setNumOutcomes(outcomes.length);
+    setTargetOdds(outcomes.map((o: any) => String(o.avgOdds.toFixed(2))));
+  };
 
   // Resize the per-outcome arrays when count changes.
   useEffect(() => {
@@ -941,7 +999,78 @@ function OddsCalculatorPanel() {
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            {/* Live bookmaker lookup → auto-fill the target odds below.
+                Free-tier The Odds API; cached server-side for 60 min. */}
+            <div className="rounded-md border border-blue-500/20 bg-blue-500/[0.04] p-2.5 space-y-2">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-blue-300" />
+                <p className="text-xs font-semibold text-blue-300">Get odds from a real fixture</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_auto] gap-2">
+                <Select value={lookupSport} onValueChange={setLookupSport}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SPORTS.map(s => (
+                      <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="e.g. Arsenal — leave blank to see the next 20 fixtures"
+                  value={lookupQuery}
+                  onChange={e => setLookupQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') runLookup(); }}
+                />
+                <Button size="sm" onClick={runLookup} disabled={lookupLoading} className="h-8 text-xs">
+                  {lookupLoading ? <><Loader2 className="w-3 h-3 animate-spin mr-1" />Searching</> : 'Search'}
+                </Button>
+              </div>
+              {!lookupConfigured && (
+                <p className="text-[11px] text-amber-300">
+                  Odds lookup not configured. Add <code className="font-mono">THE_ODDS_API_KEY</code> to Netlify env vars
+                  (sign up at <a href="https://the-odds-api.com/account/" target="_blank" rel="noreferrer" className="underline">the-odds-api.com</a>, free tier).
+                </p>
+              )}
+              {lookupError && lookupConfigured && (
+                <p className="text-[11px] text-amber-300">{lookupError}</p>
+              )}
+              {lookupEvents.length > 0 && (
+                <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                  {lookupEvents.map(ev => {
+                    const dt = new Date(ev.commenceAt);
+                    return (
+                      <button
+                        key={ev.id}
+                        type="button"
+                        onClick={() => applyEvent(ev)}
+                        className="w-full text-left rounded-md border border-border/40 bg-background/40 hover:bg-blue-500/10 hover:border-blue-500/40 px-2.5 py-2 transition-colors"
+                      >
+                        <div className="flex justify-between items-baseline gap-2 text-xs">
+                          <span className="font-medium truncate">{ev.homeTeam} v {ev.awayTeam}</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {dt.toLocaleString('en-NG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                          {ev.outcomes.map((o: any, i: number) => (
+                            <span key={i}>
+                              <span className="text-foreground">{o.avgOdds.toFixed(2)}×</span>{' '}
+                              <span className="text-muted-foreground/80">{o.name}</span>
+                            </span>
+                          ))}
+                        </div>
+                        <p className="mt-1 text-[10px] text-muted-foreground/70">
+                          Avg across {ev.outcomes[0]?.bookmakerCount || 0} bookmakers · tap to load
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <Label className="text-xs">Target odds per outcome (what the user should see)</Label>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {targetOdds.map((o, i) => (
