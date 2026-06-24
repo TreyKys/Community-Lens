@@ -48,7 +48,7 @@ export async function GET(request: Request) {
       vipUsers,
       ownerUsers,
     ] = await Promise.all([
-      supabaseAdmin.from('treasury_log').select('amount_tngn, type'),
+      supabaseAdmin.from('treasury_log').select('amount_tngn, type, created_at'),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).eq('is_vip', true),
       supabaseAdmin.from('users').select('id', { count: 'exact', head: true }).gte('created_at', dayAgo),
@@ -73,9 +73,48 @@ export async function GET(request: Request) {
     const sumByType = (t: string) => treasuryRows
       .filter((r: any) => r.type === t)
       .reduce((s: number, r: any) => s + Number(r.amount_tngn || 0), 0);
+    const sumByTypeSince = (t: string, since: string) => treasuryRows
+      .filter((r: any) => r.type === t && r.created_at && r.created_at >= since)
+      .reduce((s: number, r: any) => s + Number(r.amount_tngn || 0), 0);
 
-    const entryRake      = sumByType('entry_rake');
-    const resolutionRake = sumByType('resolution_rake');
+    const entryRake             = sumByType('entry_rake');
+    const resolutionRake        = sumByType('resolution_rake');
+    const lockedSettlementPnl   = sumByType('locked_settlement_pnl');
+    const multiplierPnl         = sumByType('multiplier_pnl');
+    const boostRake             = sumByType('boost_rake');
+    const multiplierVoidRefund  = sumByType('multiplier_void_refund'); // negative numbers — boost refunds on all-void slips
+
+    // ── Vig revenue ──────────────────────────────────────────────────
+    // The single number the founders care about: "what did the book net
+    // from price-making this period?". Composed of every house-revenue
+    // line on treasury_log:
+    //   + entry_rake          — 1.5% shave at bet placement
+    //   + resolution_rake     — parimutuel house cut at resolution
+    //   + locked_settlement_pnl — signed P&L from locked-odds settlement
+    //   + multiplier_pnl      — signed P&L from Multiplier settlement
+    //   + boost_rake          — revenue from ₦70 boost ticket sales
+    //   + multiplier_void_refund — negative refunds when all legs void
+    // Signed sum is the truth — if users beat the book on a market
+    // worse than the entry rake, vigRevenue dips for that day. Costs
+    // (VIP payouts, insurance, promo exposure) sit OUTSIDE vig revenue
+    // and are subtracted only for the houseRevenueNet metric below.
+    const vigRevenueLifetime =
+      entryRake + resolutionRake + lockedSettlementPnl + multiplierPnl + boostRake + multiplierVoidRefund;
+    const vigRevenue24h =
+      sumByTypeSince('entry_rake', dayAgo)
+      + sumByTypeSince('resolution_rake', dayAgo)
+      + sumByTypeSince('locked_settlement_pnl', dayAgo)
+      + sumByTypeSince('multiplier_pnl', dayAgo)
+      + sumByTypeSince('boost_rake', dayAgo)
+      + sumByTypeSince('multiplier_void_refund', dayAgo);
+    const vigRevenue7d =
+      sumByTypeSince('entry_rake', weekAgo)
+      + sumByTypeSince('resolution_rake', weekAgo)
+      + sumByTypeSince('locked_settlement_pnl', weekAgo)
+      + sumByTypeSince('multiplier_pnl', weekAgo)
+      + sumByTypeSince('boost_rake', weekAgo)
+      + sumByTypeSince('multiplier_void_refund', weekAgo);
+
     const insurancePaid  = (insuranceCost.data || [])
       .reduce((s, r: any) => s + Number(r.refund_amount_tngn || 0), 0);
 
@@ -206,7 +245,10 @@ export async function GET(request: Request) {
     };
     const promoExposure = welcomePromo.creditGrantedTotal;
 
-    const houseRevenueNet = entryRake + resolutionRake - vipEarningsTotal - insurancePaid - promoExposure;
+    // Net house revenue = vig gross minus the lines we pay out of
+    // book revenue (referral rake-share, insurance, the welcome promo).
+    // This is the bottom line — "what did the company keep?".
+    const houseRevenueNet = vigRevenueLifetime - vipEarningsTotal - insurancePaid - promoExposure;
 
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
@@ -214,6 +256,13 @@ export async function GET(request: Request) {
         entryRake,
         resolutionRake,
         totalRake: entryRake + resolutionRake,
+        lockedSettlementPnl,
+        multiplierPnl,
+        boostRake,
+        multiplierVoidRefund,
+        vigRevenueLifetime,
+        vigRevenue24h,
+        vigRevenue7d,
         vipPaidOut: vipEarningsTotal,
         insurancePaid,
         promoExposure,

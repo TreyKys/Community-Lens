@@ -96,14 +96,44 @@ function TreasuryPanel() {
 
   return (
     <div className="space-y-5">
-      {/* ── Revenue ─────────────────────────────────────────────────── */}
+      {/* ── Vig revenue ─────────────────────────────────────────────────
+          The headline metric: what the book has actually netted from
+          price-making. Sum of every house-revenue line in treasury_log
+          (entry rake, pool rake, locked-odds P&L, multiplier P&L, boost
+          ticket sales). Signed — if users beat the book worse than the
+          entry rake on a market, that day's vig dips. */}
       <div>
-        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Revenue</h3>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Vig revenue</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard label="House Net" value={f(t.houseRevenueNet)} sub="After VIP + insurance" icon={Coins} color="text-emerald-400" />
+          <StatCard label="Vig (Lifetime)" value={f(t.vigRevenueLifetime)} sub="All vig captured to date" icon={Coins} color="text-emerald-400" />
+          <StatCard label="Vig (7d)" value={f(t.vigRevenue7d)} sub="Past 7 days" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Vig (24h)" value={f(t.vigRevenue24h)} sub="Last 24 hours" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Boost Sales" value={f(t.boostRake)} sub="₦70 Boost tickets sold" icon={Sparkles} color="text-amber-400" />
+        </div>
+      </div>
+
+      {/* ── Revenue breakdown ───────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Revenue breakdown</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="House Net" value={f(t.houseRevenueNet)} sub="Vig − VIP − insurance − promo" icon={Coins} color="text-emerald-400" />
           <StatCard label="Entry Rake" value={f(t.entryRake)} sub="1.5% of every stake" icon={Activity} color="text-emerald-400" />
-          <StatCard label="Pool Rake" value={f(t.resolutionRake)} sub="10% at resolution" icon={Activity} color="text-emerald-400" />
-          <StatCard label="Total Rake" value={f(t.totalRake)} sub="Gross before deductions" icon={Coins} color="text-amber-400" />
+          <StatCard label="Pool Rake" value={f(t.resolutionRake)} sub="10% at resolution (parimutuel)" icon={Activity} color="text-emerald-400" />
+          <StatCard label="Total Rake" value={f(t.totalRake)} sub="Entry + Pool, gross" icon={Coins} color="text-amber-400" />
+          <StatCard
+            label="Locked-odds P&L"
+            value={f(t.lockedSettlementPnl)}
+            sub="Net book P&L on locked markets"
+            icon={Activity}
+            color={t.lockedSettlementPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}
+          />
+          <StatCard
+            label="Multiplier P&L"
+            value={f(t.multiplierPnl)}
+            sub="Net book P&L on slips"
+            icon={Activity}
+            color={t.multiplierPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}
+          />
         </div>
       </div>
 
