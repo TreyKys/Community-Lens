@@ -722,44 +722,107 @@ function VipLeaderboardPanel() {
 // ── Market Creation ───────────────────────────────────────────────────────
 // ── Odds Calculator ───────────────────────────────────────────────────────
 //
-// A pure exploration tool — adjust seed size, seed probability, vig and
-// category, and instantly see the resulting opening odds, implied
-// probabilities, and how the line moves across stake sizes. Helps the
-// admin choose seeding parameters BEFORE creating a market. No DB,
-// no side effects: everything runs through lib/lockedOdds in the
-// browser.
+// Two modes:
+//
+//   FORWARD: pick seed size + per-outcome seed probability + vig, see the
+//            opening odds users will face at common stake sizes.
+//
+//   REVERSE: paste target odds (e.g. from Sportybet) → tool derives the
+//            seed probability split needed to produce those odds.
+//            Sanity-checks the implied vig + shows a preview using the
+//            actual locked-odds algorithm so you see the real opening
+//            line (which is slightly tighter than the raw target because
+//            of the thin-pool surcharge at market open).
+//
+// Pure exploration tool — no DB, no side effects. Supports 2–6 outcomes.
 function OddsCalculatorPanel() {
+  const [mode, setMode] = useState<'forward' | 'reverse'>('forward');
   const [category, setCategory] = useState('sports');
   const [numOutcomes, setNumOutcomes] = useState(2);
   const [seedSize, setSeedSize] = useState('10000');
-  const [seedProb, setSeedProb] = useState('0.5'); // P(outcome 0) for binary
   const [vigOverride, setVigOverride] = useState('');
 
+  // Forward: probability for EACH outcome (sums to 1).
+  const [seedProbs, setSeedProbs] = useState<string[]>(['0.5', '0.5']);
+  // Reverse: target displayed odds for EACH outcome.
+  const [targetOdds, setTargetOdds] = useState<string[]>(['1.85', '1.85']);
+
+  // Resize the per-outcome arrays when count changes.
+  useEffect(() => {
+    setSeedProbs(prev => {
+      if (prev.length === numOutcomes) return prev;
+      const even = (1 / numOutcomes).toFixed(2);
+      return Array.from({ length: numOutcomes }, () => even);
+    });
+    setTargetOdds(prev => {
+      if (prev.length === numOutcomes) return prev;
+      // Default to fair odds at uniform implied probability + 8% vig.
+      const fair = (numOutcomes / 1.08).toFixed(2);
+      return Array.from({ length: numOutcomes }, () => fair);
+    });
+  }, [numOutcomes]);
+
   const seedSizeNum = Number(seedSize);
-  const seedProbNum = Number(seedProb);
+  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
   const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
 
-  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
-  const validProb = numOutcomes !== 2 || (Number.isFinite(seedProbNum) && seedProbNum > 0.02 && seedProbNum < 0.98);
+  // Category default vig — mirrors VIG_DEFAULTS in lib/lockedOdds.
+  const CATEGORY_VIGS: Record<string, number> = {
+    sports: 0.07, sports_top: 0.06, sports_props: 0.07, combat: 0.08,
+    economy: 0.09, crypto: 0.08, entertainment: 0.09, politics: 0.10, culture: 0.10,
+  };
+  const categoryVig = CATEGORY_VIGS[category] ?? 0.08;
+  const effectiveVig = Number.isFinite(vigNum as number) ? (vigNum as number) : categoryVig;
 
-  // Seed split.
+  // ─── REVERSE math ─────────────────────────────────────────────────
+  // Given target displayed odds, derive the seed probability split
+  // implied by them. The implied vig is the sum-of-reciprocals minus 1;
+  // if it's outside our [4%, 15%] bounds we flag it. Seed probabilities
+  // are the normalised reciprocals so they sum to exactly 1 — these are
+  // the chosen/total ratios the algorithm uses to open the line.
+  const reverseTargets = targetOdds.map(s => Number(s));
+  const reverseValid = reverseTargets.every(o => Number.isFinite(o) && o >= 1.05 && o <= 50);
+  const reverseImpliedSum = reverseValid ? reverseTargets.reduce((a, o) => a + 1 / o, 0) : 0;
+  const reverseImpliedVig = reverseValid ? reverseImpliedSum - 1 : 0;
+  const reverseProbs = reverseValid && reverseImpliedSum > 0
+    ? reverseTargets.map(o => (1 / o) / reverseImpliedSum)
+    : [];
+  // Warn if the implied vig is outside the engine's clamped band.
+  const reverseVigWarning =
+    reverseValid && (reverseImpliedVig < 0.04 || reverseImpliedVig > 0.15)
+      ? `Implied vig is ${(reverseImpliedVig * 100).toFixed(1)}% — outside the engine band (4–15%). Adjust your odds so the implied vig sits inside that range.`
+      : null;
+
+  // ─── FORWARD probability validation ─────────────────────────────
+  const forwardProbs = seedProbs.map(s => Number(s));
+  const forwardProbSum = forwardProbs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
+  const forwardProbsValid =
+    forwardProbs.every(p => Number.isFinite(p) && p > 0.02 && p < 0.98) &&
+    Math.abs(forwardProbSum - 1) < 0.005;
+
+  // ─── Seed split (the actual pool numbers fed to the algorithm) ──
   const seedPool: number[] = (() => {
     if (!validSeed) return [];
-    if (numOutcomes === 2 && validProb) {
-      const a = Math.round(seedSizeNum * seedProbNum);
-      return [a, seedSizeNum - a];
+    if (mode === 'forward') {
+      if (!forwardProbsValid) return [];
+      const out = forwardProbs.map(p => Math.round(seedSizeNum * p));
+      // absorb rounding crumb into outcome 0 so sum is exact
+      const drift = seedSizeNum - out.reduce((a, n) => a + n, 0);
+      out[0] += drift;
+      return out;
     }
-    const share = Math.round(seedSizeNum / numOutcomes);
-    const out = Array.from({ length: numOutcomes }, () => share);
-    out[0] = seedSizeNum - share * (numOutcomes - 1);
+    // reverse
+    if (!reverseValid || reverseProbs.length !== numOutcomes) return [];
+    const out = reverseProbs.map(p => Math.round(seedSizeNum * p));
+    const drift = seedSizeNum - out.reduce((a, n) => a + n, 0);
+    out[0] += drift;
     return out;
   })();
 
+  // Stakes shown in the opening-odds preview table.
   const SAMPLE_STAKES = [200, 500, 1000, 5000];
 
-  // For each (stake, outcome) compute the locked odds. Returns null grid
-  // if inputs are invalid.
-  const grid = (seedPool.length >= 2 && validSeed && validProb)
+  const grid = seedPool.length === numOutcomes && seedPool.length >= 2
     ? SAMPLE_STAKES.map(stake => ({
         stake,
         perOutcome: seedPool.map((_, i) => {
@@ -775,7 +838,6 @@ function OddsCalculatorPanel() {
       }))
     : null;
 
-  // Implied probability from the seed split (what the opening line says).
   const totalSeed = seedPool.reduce((a, b) => a + b, 0);
 
   return (
@@ -787,10 +849,29 @@ function OddsCalculatorPanel() {
           <Badge variant="outline" className="text-[9px] border-blue-500/30 text-blue-300">EXPLORE</Badge>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Tune seed size, probability and vig to find the opening line you want — then create the market with those numbers.
+          {mode === 'forward'
+            ? 'Tune seed size, probability and vig — see the opening line you’ll quote.'
+            : 'Paste the odds you want (e.g. from Sportybet) — we derive the seed split to produce them.'}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Mode toggle */}
+        <div className="inline-flex bg-muted/40 rounded-md p-0.5">
+          {(['forward', 'reverse'] as const).map(m => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={cn(
+                'px-3 py-1.5 rounded text-xs font-medium transition-colors',
+                mode === m ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {m === 'forward' ? 'Forward · seed → odds' : 'Reverse · odds → seed'}
+            </button>
+          ))}
+        </div>
+
+        {/* Common controls */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Category</Label>
@@ -799,6 +880,7 @@ function OddsCalculatorPanel() {
               <SelectContent>
                 <SelectItem value="sports">Sports (7%)</SelectItem>
                 <SelectItem value="sports_top">Sports — top (6%)</SelectItem>
+                <SelectItem value="sports_props">Sports — props (7%)</SelectItem>
                 <SelectItem value="combat">Combat (8%)</SelectItem>
                 <SelectItem value="economy">Economy (9%)</SelectItem>
                 <SelectItem value="crypto">Crypto (8%)</SelectItem>
@@ -813,8 +895,11 @@ function OddsCalculatorPanel() {
             <Select value={String(numOutcomes)} onValueChange={v => setNumOutcomes(Number(v))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="2">2 (Yes/No)</SelectItem>
-                <SelectItem value="3">3 (1X2)</SelectItem>
+                <SelectItem value="2">2 (Yes / No)</SelectItem>
+                <SelectItem value="3">3 (e.g. 1X2)</SelectItem>
+                <SelectItem value="4">4</SelectItem>
+                <SelectItem value="5">5</SelectItem>
+                <SelectItem value="6">6</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -822,44 +907,102 @@ function OddsCalculatorPanel() {
             <Label className="text-xs">Seed size (₦)</Label>
             <Input type="number" value={seedSize} onChange={e => setSeedSize(e.target.value)}
               className={cn(!validSeed && 'border-red-500/40')} />
+            <p className="text-[10px] text-muted-foreground">₦1k – ₦14k</p>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Vig override</Label>
-            <Input type="number" step={0.01} placeholder="category default" value={vigOverride}
+            <Input type="number" step={0.01} placeholder={`default ${(categoryVig * 100).toFixed(0)}%`} value={vigOverride}
               onChange={e => setVigOverride(e.target.value)} />
+            <p className="text-[10px] text-muted-foreground">Blank = category default</p>
           </div>
         </div>
 
-        {numOutcomes === 2 && (
-          <div className="space-y-1">
-            <Label className="text-xs">Seed probability — P(outcome 0)</Label>
-            <Input type="number" step={0.01} value={seedProb} onChange={e => setSeedProb(e.target.value)}
-              className={cn(!validProb && 'border-red-500/40')} />
+        {/* MODE-SPECIFIC INPUTS */}
+        {mode === 'forward' ? (
+          <div className="space-y-2">
+            <Label className="text-xs">Seed probability per outcome (must sum to 1.00)</Label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {seedProbs.map((p, i) => (
+                <div key={i} className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground">Outcome {i}</p>
+                  <Input
+                    type="number" step={0.01} min={0.02} max={0.98}
+                    value={p}
+                    onChange={e => setSeedProbs(prev => prev.map((v, j) => j === i ? e.target.value : v))}
+                  />
+                </div>
+              ))}
+            </div>
+            <p className={cn(
+              'text-[10px]',
+              Math.abs(forwardProbSum - 1) > 0.005 ? 'text-red-400' : 'text-muted-foreground',
+            )}>
+              Sum: {forwardProbSum.toFixed(3)} {Math.abs(forwardProbSum - 1) > 0.005 && '— must equal 1.000'}
+            </p>
           </div>
-        )}
-
-        {/* Seed split + implied prob */}
-        {seedPool.length >= 2 && (
-          <div className="flex flex-wrap gap-2 text-xs">
-            {seedPool.map((s, i) => (
-              <div key={i} className="bg-card/40 rounded px-2.5 py-1.5 border border-border/40">
-                <span className="text-muted-foreground">Outcome {i}: </span>
-                <span className="font-semibold">₦{s.toLocaleString()}</span>
-                <span className="text-muted-foreground"> · {totalSeed > 0 ? Math.round((s / totalSeed) * 100) : 0}% implied</span>
+        ) : (
+          <div className="space-y-2">
+            <Label className="text-xs">Target odds per outcome (what the user should see)</Label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {targetOdds.map((o, i) => (
+                <div key={i} className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground">Outcome {i}</p>
+                  <Input
+                    type="number" step={0.01} min={1.05} max={50}
+                    placeholder="e.g. 1.85"
+                    value={o}
+                    onChange={e => setTargetOdds(prev => prev.map((v, j) => j === i ? e.target.value : v))}
+                  />
+                </div>
+              ))}
+            </div>
+            {reverseValid && (
+              <div className="text-[10px] text-muted-foreground">
+                Implied vig from your odds:{' '}
+                <span className={reverseVigWarning ? 'text-amber-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+                  {(reverseImpliedVig * 100).toFixed(2)}%
+                </span>
               </div>
-            ))}
+            )}
+            {reverseVigWarning && (
+              <p className="text-[11px] text-amber-300">{reverseVigWarning}</p>
+            )}
           </div>
         )}
 
-        {/* Odds grid across sample stakes */}
+        {/* Seed split readout — both modes */}
+        {seedPool.length >= 2 && (
+          <div className="rounded-md bg-card/40 border border-border/40 p-2.5">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Seed split</p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              {seedPool.map((s, i) => (
+                <div key={i} className="bg-background/40 rounded px-2 py-1 border border-border/30">
+                  <span className="text-muted-foreground">Outcome {i}: </span>
+                  <span className="font-semibold">₦{s.toLocaleString()}</span>
+                  <span className="text-muted-foreground"> · {totalSeed > 0 ? Math.round((s / totalSeed) * 100) : 0}%</span>
+                </div>
+              ))}
+            </div>
+            {mode === 'reverse' && (
+              <p className="text-[10px] text-muted-foreground mt-2">
+                Use these seed values on the Create form: probability {seedPool.length === 2 ? `for outcome 0 = ${(seedPool[0] / totalSeed).toFixed(3)}` : 'shown above per outcome'}, total seed ₦{totalSeed.toLocaleString()}.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Opening odds preview — both modes use the SAME algorithm */}
         {grid ? (
           <div className="overflow-x-auto">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">
+              Opening line — what users will see
+            </p>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-muted-foreground border-b border-border/40">
                   <th className="text-left py-2 pr-3 font-medium">Stake</th>
                   {seedPool.map((_, i) => (
-                    <th key={i} className="text-left py-2 px-3 font-medium">Outcome {i} odds</th>
+                    <th key={i} className="text-left py-2 px-3 font-medium">Outcome {i}</th>
                   ))}
                 </tr>
               </thead>
@@ -884,11 +1027,21 @@ function OddsCalculatorPanel() {
               </tbody>
             </table>
             <p className="text-[10px] text-muted-foreground mt-2">
-              Odds shorten as stake grows (slippage protection). Bigger seed = more stable odds. Higher vig = shorter odds, more house margin.
+              {mode === 'reverse'
+                ? 'Note: the displayed odds at opening are slightly tighter than your targets — the engine adds a 2% thin-pool surcharge on fresh markets that fades as real volume comes in.'
+                : 'Odds shorten as stake grows (slippage protection). Bigger seed = more stable opening line.'}
             </p>
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Enter a valid seed (₦1k–₦14k) and probability to see odds.</p>
+          <div className="rounded-md bg-amber-500/[0.06] border border-amber-500/20 p-3 text-xs text-amber-200/90">
+            {!validSeed && <p>• Seed size must be between ₦1,000 and ₦14,000.</p>}
+            {mode === 'forward' && validSeed && !forwardProbsValid && (
+              <p>• Each probability must be 0.02–0.98 and the row must sum to 1.000.</p>
+            )}
+            {mode === 'reverse' && validSeed && !reverseValid && (
+              <p>• Each target odds must be between 1.05 and 50.</p>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
