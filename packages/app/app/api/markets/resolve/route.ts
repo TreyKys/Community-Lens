@@ -316,12 +316,23 @@ async function resolveLockedOddsMarket(args: {
     } catch { /* non-critical */ }
   }
 
-  // Mark losers + insurance + VIP rake share.
+  // Mark losers + insurance + loss notification.
+  // The win path notifies — without a matching loss notification users
+  // wouldn't know their bet was resolved at all (they'd just notice the
+  // balance hadn't changed). UX-asymmetric notifications also feel
+  // misleading: silence on a loss reads as "still pending".
   for (const p of summary.perBet) {
     if (p.won) continue;
     const lb = lockedBets.find(x => x.id === p.betId)!;
     await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', lb.id);
     await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: lb.userId,
+        type: 'bet_lost',
+        message: `Your prediction didn't land this time — better luck on the next call.`,
+      });
+    } catch { /* non-critical */ }
   }
 
   // VIP cuts — routed in one pass from the summary so we don't
@@ -574,10 +585,19 @@ export async function POST(request: Request) {
       }
     }
 
-    // Mark losers + apply Random Bet Insurance + route VIP rake share
+    // Mark losers + apply Random Bet Insurance + route VIP rake share +
+    // loss notification (mirrors the locked-odds branch above so the
+    // user always hears from us when their bet resolves).
     for (const bet of losingBets) {
       await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', bet.id);
       await applyFirstBetInsurance(bet.user_id, bet, marketId);
+      try {
+        await supabaseAdmin.from('notifications').insert({
+          user_id: bet.user_id,
+          type: 'bet_lost',
+          message: `Your prediction didn't land this time — better luck on the next call.`,
+        });
+      } catch { /* non-critical */ }
 
       // This bet's pro-rata share of the gross rake.
       const betRakeContribution = (bet.net_stake_tngn / totalPool) * grossRake;

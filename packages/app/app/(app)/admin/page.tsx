@@ -2672,13 +2672,17 @@ function CreditsPanel() {
   const [history, setHistory] = useState<any[]>([]);
 
   const loadHistory = useCallback(async () => {
-    const { data } = await supabase
-      .from('treasury_log')
-      .select('amount_tngn, user_id, created_at, metadata')
-      .eq('type', 'manual_credit')
-      .order('created_at', { ascending: false })
-      .limit(50);
-    setHistory(data || []);
+    // Goes through /api/admin/credits (GET) because treasury_log is RLS-
+    // locked to owner reads from authenticated clients now. Service-role
+    // queries (this endpoint) still see every row.
+    try {
+      const res = await fetch('/api/admin/credits', { headers: adminHeaders() });
+      if (!res.ok) return;
+      const { history } = await res.json();
+      setHistory(history || []);
+    } catch {
+      /* leave history empty */
+    }
   }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);

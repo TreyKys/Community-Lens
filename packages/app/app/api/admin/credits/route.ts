@@ -11,6 +11,27 @@ function supabaseAdmin() {
   );
 }
 
+// Recent manual_credit history for the admin Credits panel. Moved
+// server-side so we could lock down treasury_log with RLS without
+// breaking the panel — the table is no longer client-readable, but
+// service-role queries (this route) still see everything.
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from('treasury_log')
+    .select('amount_tngn, user_id, created_at, metadata')
+    .eq('type', 'manual_credit')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ history: data || [] });
+}
+
 export async function POST(request: Request) {
   try {
     if (!isAdminRequest(request)) {
