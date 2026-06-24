@@ -9,9 +9,16 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { Loader2, Plus, Trash2, AlertTriangle, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+);
 
 // Admin "edit anything" dialog for an already-created market. Loads the
 // full market on open, lets admin edit text + options, then PATCHes via
@@ -46,6 +53,14 @@ type MarketShape = {
   options: string[];
   // pool_by_outcome read for the "has stakes" hint but never edited.
   pool_by_outcome: number[];
+  // ── Locked-odds conversion gating ────────────────────────────────
+  // Read so the dialog can decide whether to surface the migration
+  // section. Converting an already-locked, post-lock, or already-staked
+  // market is unsafe (see /api/admin/markets/[id] PATCH for the full
+  // rule set); we hide the UI in those cases.
+  is_locked_odds: boolean;
+  status: string;
+  total_bets: number;
 };
 
 // Convert an ISO timestamp to the value format <input type="datetime-local">
@@ -85,6 +100,17 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
   const [betsByOutcome, setBetsByOutcome] = useState<number[]>([]);
   const [poolByOutcome, setPoolByOutcome] = useState<number[]>([]);
 
+  // ── Locked-odds conversion state ─────────────────────────────────
+  // Optional migration of a legacy parimutuel market to the locked-
+  // odds engine. Only surfaced when the market is eligible (see
+  // MarketShape comments). Defaults preserve the current engine.
+  const [convertToLocked, setConvertToLocked] = useState(false);
+  const [convSeedSize, setConvSeedSize] = useState('10000');
+  const [convSeedProbability, setConvSeedProbability] = useState('0.5');
+  const [convSeedProbsMulti, setConvSeedProbsMulti] = useState<string[]>([]);
+  const [convVigOverride, setConvVigOverride] = useState('');
+  const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
+
   // Load market detail when the dialog opens. We use the existing
   // /api/admin/markets/[id] GET which returns the full forensic dossier;
   // we only need a slice but the endpoint is cheap and already wired.
@@ -120,6 +146,9 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
           closes_at: m.closes_at ?? null,
           options: opts,
           pool_by_outcome: pool,
+          is_locked_odds: !!m.is_locked_odds,
+          status: m.status ?? 'open',
+          total_bets: Number(body?.summary?.total_bets ?? 0),
         };
         setMarket(shaped);
         setTitle(shaped.title ?? '');
@@ -130,6 +159,22 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
         setOptions(opts);
         setBetsByOutcome(counts);
         setPoolByOutcome(pool);
+
+        // Reset conversion form to defaults each time we open a market.
+        // Default seedProbsMulti to a uniform split that sums to 1.00.
+        setConvertToLocked(false);
+        setConvSeedSize('10000');
+        setConvSeedProbability('0.5');
+        setConvVigOverride('');
+        const n = opts.length;
+        if (n >= 3) {
+          const uniform = Math.floor((1 / n) * 100) / 100;
+          const arr = Array.from({ length: n }, () => uniform.toFixed(2));
+          arr[n - 1] = (uniform + (1 - uniform * n)).toFixed(2);
+          setConvSeedProbsMulti(arr);
+        } else {
+          setConvSeedProbsMulti([]);
+        }
       } catch (e: any) {
         if (!cancelled) setLoadError(e?.message || 'Failed to load market');
       } finally {
@@ -139,6 +184,22 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
 
     return () => { cancelled = true; };
   }, [open, marketId]);
+
+  // Reserve hint for the conversion section. Loaded only when the
+  // admin toggles the migration on — keeps the dialog cheap when the
+  // section stays collapsed.
+  useEffect(() => {
+    if (!convertToLocked) return;
+    supabase
+      .from('reserve_health')
+      .select('deployable_tngn')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data && typeof data.deployable_tngn !== 'undefined') {
+          setReserveDeployable(Number(data.deployable_tngn));
+        }
+      });
+  }, [convertToLocked]);
 
   const updateOption = (idx: number, value: string) => {
     setOptions(prev => prev.map((o, i) => (i === idx ? value : o)));
@@ -198,6 +259,58 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
       cleanedOpts.length !== market.options.length ||
       cleanedOpts.some((v, i) => v !== market.options[i]);
     if (optionsChanged) patch.options = cleanedOpts;
+
+    // Build the locked-odds conversion payload, if the admin opted in.
+    // We do the same client-side validation as the create-market form so
+    // bad input doesn't round-trip — server re-validates regardless.
+    if (convertToLocked && market) {
+      const seedSizeNum = Number(convSeedSize);
+      if (!Number.isFinite(seedSizeNum) || seedSizeNum < 1_000 || seedSizeNum > 14_000) {
+        toast({ title: 'Seed size must be ₦1,000–₦14,000', variant: 'destructive' });
+        return;
+      }
+      const numOutcomes = cleanedOpts.length;
+      let convSeedPool: number[] | null = null;
+      let convBinaryProb: number | null = null;
+      if (numOutcomes === 2) {
+        const p = Number(convSeedProbability);
+        if (!Number.isFinite(p) || p < 0.05 || p > 0.95) {
+          toast({ title: 'Seed probability must be between 0.05 and 0.95', variant: 'destructive' });
+          return;
+        }
+        convBinaryProb = p;
+      } else {
+        const probs = convSeedProbsMulti.slice(0, numOutcomes).map(s => Number(s));
+        const sum = probs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
+        if (!probs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98) || Math.abs(sum - 1) > 0.005) {
+          toast({
+            title: 'Seed probabilities invalid',
+            description: 'Each outcome must be 0.02–0.98 and they must sum to 1.00.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        const raw = probs.map(p => Math.round(seedSizeNum * p));
+        const drift = seedSizeNum - raw.reduce((a, v) => a + v, 0);
+        raw[0] += drift;
+        convSeedPool = raw;
+      }
+      let convVigNum: number | null = null;
+      if (convVigOverride.trim() !== '') {
+        const v = Number(convVigOverride);
+        if (!Number.isFinite(v) || v < 0.04 || v > 0.15) {
+          toast({ title: 'Vig must be between 0.04 and 0.15', variant: 'destructive' });
+          return;
+        }
+        convVigNum = v;
+      }
+      patch.convertToLockedOdds = {
+        seedSizeTngn: seedSizeNum,
+        seedPool: convSeedPool,
+        seedProbability: convBinaryProb,
+        vigPct: convVigNum,
+      };
+    }
 
     if (Object.keys(patch).length === 0) {
       toast({ title: 'No changes', description: 'Nothing to save.' });
@@ -363,6 +476,39 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                 </p>
               )}
             </div>
+
+            {/* ── Migrate legacy market → locked-odds ───────────────────
+                Selectively converts a parimutuel market created before
+                the locked-odds engine landed. Only surfaced when the
+                market is still parimutuel, still open, and has zero
+                bets — the server enforces the same gating, but hiding
+                the UI keeps the dialog uncluttered for the 95% of
+                markets where this doesn't apply. */}
+            {!market.is_locked_odds && market.status === 'open' && (
+              <ConvertToLockedOddsSection
+                eligible={market.total_bets === 0}
+                totalBets={market.total_bets}
+                numOutcomes={options.length}
+                convertToLocked={convertToLocked}
+                setConvertToLocked={setConvertToLocked}
+                seedSize={convSeedSize}
+                setSeedSize={setConvSeedSize}
+                seedProbability={convSeedProbability}
+                setSeedProbability={setConvSeedProbability}
+                seedProbsMulti={convSeedProbsMulti}
+                setSeedProbsMulti={setConvSeedProbsMulti}
+                vigOverride={convVigOverride}
+                setVigOverride={setConvVigOverride}
+                reserveDeployable={reserveDeployable}
+              />
+            )}
+
+            {market.is_locked_odds && (
+              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2 text-[11px] text-emerald-300/90 flex items-center gap-2">
+                <Zap className="w-3.5 h-3.5" />
+                <span>This market already runs on the locked-odds engine.</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -374,5 +520,219 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Locked-odds migration section ───────────────────────────────────
+//
+// Mirror of the create-market form's LockedOddsConfigBlock, scoped to
+// the in-flight market being edited. Renders a checkbox; when checked,
+// surfaces seed size + per-outcome probability inputs + vig override
+// and a split preview. The actual conversion happens server-side via
+// the PATCH endpoint, which re-validates and enforces the
+// no-existing-bets gate before flipping is_locked_odds.
+function ConvertToLockedOddsSection(props: {
+  eligible: boolean;
+  totalBets: number;
+  numOutcomes: number;
+  convertToLocked: boolean;
+  setConvertToLocked: (v: boolean) => void;
+  seedSize: string;
+  setSeedSize: (v: string) => void;
+  seedProbability: string;
+  setSeedProbability: (v: string) => void;
+  seedProbsMulti: string[];
+  setSeedProbsMulti: (v: string[] | ((prev: string[]) => string[])) => void;
+  vigOverride: string;
+  setVigOverride: (v: string) => void;
+  reserveDeployable: number | null;
+}) {
+  const {
+    eligible, totalBets, numOutcomes,
+    convertToLocked, setConvertToLocked,
+    seedSize, setSeedSize,
+    seedProbability, setSeedProbability,
+    seedProbsMulti, setSeedProbsMulti,
+    vigOverride, setVigOverride,
+    reserveDeployable,
+  } = props;
+
+  const seedSizeNum = Number(seedSize);
+  const seedProbNum = Number(seedProbability);
+  const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
+  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
+  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
+  const seedFitsReserve = reserveDeployable == null || seedSizeNum <= reserveDeployable;
+
+  const multiProbs = seedProbsMulti.slice(0, numOutcomes).map(s => Number(s));
+  const multiProbSum = multiProbs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
+  const validMultiProbs =
+    numOutcomes < 3
+      ? true
+      : multiProbs.length === numOutcomes
+        && multiProbs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98)
+        && Math.abs(multiProbSum - 1) <= 0.005;
+  const validProb =
+    numOutcomes === 2
+      ? (Number.isFinite(seedProbNum) && seedProbNum >= 0.05 && seedProbNum <= 0.95)
+      : validMultiProbs;
+
+  const splitPreview: number[] = (() => {
+    if (!validSeed || numOutcomes < 2) return [];
+    if (numOutcomes === 2) {
+      if (!validProb) return [];
+      const yes = Math.round(seedSizeNum * seedProbNum);
+      return [yes, seedSizeNum - yes];
+    }
+    if (validMultiProbs) {
+      const raw = multiProbs.map(p => Math.round(seedSizeNum * p));
+      const drift = seedSizeNum - raw.reduce((a, v) => a + v, 0);
+      raw[0] += drift;
+      return raw;
+    }
+    return [];
+  })();
+
+  if (!eligible) {
+    return (
+      <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.03] p-3">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="text-xs font-medium">Locked-odds migration unavailable</p>
+            <p className="text-[11px] text-muted-foreground">
+              This market already has {totalBets} bet{totalBets === 1 ? '' : 's'} on it.
+              Conversion is only allowed before any user has staked — flipping the engine
+              mid-market would either strand existing bets or rewrite their price.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.03] p-3 space-y-3">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={convertToLocked}
+          onChange={e => setConvertToLocked(e.target.checked)}
+          className="w-4 h-4 accent-emerald-500"
+        />
+        <span className="text-sm font-medium">Migrate to locked-odds engine</span>
+        <Badge variant="outline" className="text-[9px] border-emerald-500/30 text-emerald-300">
+          PRO TIER
+        </Badge>
+      </label>
+      <p className="text-[11px] text-muted-foreground -mt-2 ml-6">
+        Seeds the market with house tNGN at the chosen probabilities and switches
+        future bets to the locked-odds engine. Reversible only by manual SQL.
+      </p>
+
+      {convertToLocked && (
+        <div className="space-y-3 ml-6 pt-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Seed size (₦)</Label>
+              <Input
+                type="number"
+                min={1000}
+                max={14000}
+                value={seedSize}
+                onChange={e => setSeedSize(e.target.value)}
+                className={cn(!validSeed && 'border-red-500/40')}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                ₦1k – ₦14k.{' '}
+                {reserveDeployable != null && (
+                  <span className={seedFitsReserve ? 'text-emerald-400' : 'text-red-400'}>
+                    Reserve: ₦{reserveDeployable.toLocaleString()} available.
+                  </span>
+                )}
+              </p>
+            </div>
+            {numOutcomes === 2 && (
+              <div className="space-y-1">
+                <Label className="text-xs">Seed probability (YES, 0–1)</Label>
+                <Input
+                  type="number"
+                  min={0.05}
+                  max={0.95}
+                  step={0.01}
+                  value={seedProbability}
+                  onChange={e => setSeedProbability(e.target.value)}
+                  className={cn(!validProb && 'border-red-500/40')}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {validProb && validSeed && splitPreview.length === 2 && (
+                    <>Split: ₦{splitPreview[0].toLocaleString()} YES · ₦{splitPreview[1].toLocaleString()} NO</>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {numOutcomes >= 3 && (
+            <div className="space-y-2">
+              <Label className="text-xs">Seed probability per outcome (must sum to 1.00)</Label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {Array.from({ length: numOutcomes }).map((_, i) => (
+                  <div key={i} className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground">Outcome {i}</p>
+                    <Input
+                      type="number"
+                      step={0.01}
+                      min={0.02}
+                      max={0.98}
+                      value={seedProbsMulti[i] ?? ''}
+                      onChange={e => setSeedProbsMulti(prev => {
+                        const next = prev.slice(0, numOutcomes);
+                        while (next.length < numOutcomes) next.push('');
+                        next[i] = e.target.value;
+                        return next;
+                      })}
+                      className={cn(!validMultiProbs && 'border-red-500/40')}
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className={cn(
+                'text-[10px]',
+                Math.abs(multiProbSum - 1) > 0.005 ? 'text-red-400' : 'text-muted-foreground',
+              )}>
+                Sum: {multiProbSum.toFixed(3)}{' '}
+                {Math.abs(multiProbSum - 1) > 0.005 && '— must equal 1.000'}
+              </p>
+              {validMultiProbs && validSeed && splitPreview.length === numOutcomes && (
+                <p className="text-[10px] text-muted-foreground">
+                  Split: {splitPreview.map((v, i) => `₦${v.toLocaleString()} (#${i})`).join(' · ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <Label className="text-xs">Vig override (0.04–0.15, blank = category default)</Label>
+            <Input
+              type="number"
+              min={0.04}
+              max={0.15}
+              step={0.01}
+              value={vigOverride}
+              onChange={e => setVigOverride(e.target.value)}
+              placeholder="default for category"
+              className={cn(!validVig && 'border-red-500/40')}
+            />
+          </div>
+
+          {!seedFitsReserve && (
+            <p className="text-[11px] text-red-400">
+              Seed exceeds deployable reserve. Reduce seed size or settle a market first.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

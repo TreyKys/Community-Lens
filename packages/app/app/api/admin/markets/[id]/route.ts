@@ -214,6 +214,37 @@ export async function GET(
 
 const ALLOWED_TEXT_FIELDS = ['title', 'question', 'description', 'category'] as const;
 
+// Bounds for locked-odds conversion. Mirror the values used at
+// market-creation time (packages/app/app/api/admin/market/route.ts).
+const MIN_SEED_TNGN = 1_000;
+const MAX_SEED_TNGN = 14_000;
+const MIN_SEED_PROB = 0.05;
+const MAX_SEED_PROB = 0.95;
+const MIN_VIG = 0.04;
+const MAX_VIG = 0.15;
+
+function buildSeedPoolJsonb(
+  totalSeedTngn: number,
+  numOutcomes: number,
+  binaryYesProb: number | null,
+  explicitSeedPool: number[] | null,
+): Record<string, number> {
+  if (explicitSeedPool && explicitSeedPool.length === numOutcomes) {
+    const out: Record<string, number> = {};
+    explicitSeedPool.forEach((v, i) => { out[String(i)] = Math.max(0, Math.round(Number(v) || 0)); });
+    return out;
+  }
+  if (numOutcomes === 2 && binaryYesProb !== null) {
+    const yes = Math.round(totalSeedTngn * binaryYesProb);
+    return { '0': yes, '1': totalSeedTngn - yes };
+  }
+  const share = Math.round(totalSeedTngn / numOutcomes);
+  const out: Record<string, number> = {};
+  for (let i = 0; i < numOutcomes; i++) out[String(i)] = share;
+  out['0'] = totalSeedTngn - share * (numOutcomes - 1);
+  return out;
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string } },
@@ -325,6 +356,125 @@ export async function PATCH(
     patch.pool_by_outcome = newPool;
   }
 
+  // ── Convert legacy parimutuel market → locked-odds ───────────────
+  // Old markets created before the locked-odds engine still settle
+  // through the parimutuel path. Admin can selectively migrate one
+  // here. Hard constraints (not negotiable):
+  //   • Market must currently be parimutuel (is_locked_odds = false).
+  //   • Market must be open (post-lock markets are sealed).
+  //   • Market must have zero bets — converting in-flight bets would
+  //     either strand them (no locked_odds row) or rewrite the price
+  //     they agreed to. We refuse rather than guess.
+  //   • Seed must fit the deployable reserve (same rule as create).
+  //
+  // Conversion mutates: is_locked_odds, seed_pool, seed_probability,
+  // vig_pct, is_paused. Everything else stays put.
+  if (body.convertToLockedOdds && typeof body.convertToLockedOdds === 'object') {
+    const cfg = body.convertToLockedOdds as {
+      seedSizeTngn?: number | string;
+      seedPool?: number[] | null;
+      seedProbability?: number | null;
+      vigPct?: number | string | null;
+    };
+
+    const seedSize = Number(cfg.seedSizeTngn);
+    if (!Number.isFinite(seedSize) || seedSize < MIN_SEED_TNGN || seedSize > MAX_SEED_TNGN) {
+      return NextResponse.json(
+        { error: `Seed size must be between ₦${MIN_SEED_TNGN.toLocaleString()} and ₦${MAX_SEED_TNGN.toLocaleString()} tNGN` },
+        { status: 400 },
+      );
+    }
+
+    const { data: m, error: mErr } = await supabaseAdmin
+      .from('markets')
+      .select('id, is_locked_odds, status, options')
+      .eq('id', marketId)
+      .maybeSingle();
+    if (mErr) return NextResponse.json({ error: mErr.message || 'Could not read market' }, { status: 500 });
+    if (!m) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
+    if (m.is_locked_odds) {
+      return NextResponse.json({ error: 'Market is already locked-odds' }, { status: 409 });
+    }
+    if (m.status !== 'open') {
+      return NextResponse.json(
+        { error: `Cannot convert a ${m.status} market — locked-odds requires status=open.` },
+        { status: 409 },
+      );
+    }
+
+    const opts: string[] = Array.isArray(m.options) ? m.options : [];
+    if (opts.length < 2) {
+      return NextResponse.json({ error: 'Market needs at least 2 options before conversion' }, { status: 400 });
+    }
+
+    const { count: existingBets, error: betsErr } = await supabaseAdmin
+      .from('user_bets')
+      .select('id', { count: 'exact', head: true })
+      .eq('market_id', marketId);
+    if (betsErr) return NextResponse.json({ error: betsErr.message || 'Could not count bets' }, { status: 500 });
+    if ((existingBets ?? 0) > 0) {
+      return NextResponse.json(
+        { error: `Cannot convert: ${existingBets} bet(s) already placed. Conversion is only allowed on markets with zero stakes.` },
+        { status: 409 },
+      );
+    }
+
+    let binaryProb: number | null = null;
+    if (opts.length === 2) {
+      if (cfg.seedProbability !== undefined && cfg.seedProbability !== null) {
+        const p = Number(cfg.seedProbability);
+        if (!Number.isFinite(p) || p < MIN_SEED_PROB || p > MAX_SEED_PROB) {
+          return NextResponse.json(
+            { error: `Seed probability must be between ${MIN_SEED_PROB} and ${MAX_SEED_PROB}` },
+            { status: 400 },
+          );
+        }
+        binaryProb = p;
+      } else {
+        binaryProb = 0.5;
+      }
+    }
+
+    const explicit = Array.isArray(cfg.seedPool)
+      ? cfg.seedPool.map(Number).filter(v => Number.isFinite(v))
+      : null;
+
+    const { data: reserve } = await supabaseAdmin
+      .from('reserve_health')
+      .select('deployable_tngn')
+      .maybeSingle();
+    const deployable = Number(reserve?.deployable_tngn ?? 0);
+    if (seedSize > deployable) {
+      return NextResponse.json(
+        { error: `Seed of ₦${seedSize.toLocaleString()} exceeds deployable reserve of ₦${Math.round(deployable).toLocaleString()}` },
+        { status: 400 },
+      );
+    }
+
+    let resolvedVig = 0.08;
+    if (cfg.vigPct !== undefined && cfg.vigPct !== null && cfg.vigPct !== '') {
+      const v = Number(cfg.vigPct);
+      if (!Number.isFinite(v) || v < MIN_VIG || v > MAX_VIG) {
+        return NextResponse.json(
+          { error: 'Vig must be between 0.04 (4%) and 0.15 (15%)' },
+          { status: 400 },
+        );
+      }
+      resolvedVig = v;
+    }
+
+    patch.is_locked_odds = true;
+    patch.seed_pool = buildSeedPoolJsonb(
+      seedSize,
+      opts.length,
+      binaryProb,
+      explicit && explicit.length === opts.length ? explicit : null,
+    );
+    patch.seed_probability = binaryProb;
+    patch.vig_pct = resolvedVig;
+    patch.is_paused = false;
+  }
+
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'No supported fields in body' }, { status: 400 });
   }
@@ -333,7 +483,7 @@ export async function PATCH(
     .from('markets')
     .update(patch)
     .eq('id', marketId)
-    .select('id, is_trending, title, question, description, category, closes_at, options, pool_by_outcome')
+    .select('id, is_trending, title, question, description, category, closes_at, options, pool_by_outcome, is_locked_odds, seed_pool, vig_pct')
     .maybeSingle();
 
   if (error) {
