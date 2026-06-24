@@ -1,4 +1,4 @@
-import { Building2, ShieldCheck, MessageSquare, Mail } from 'lucide-react';
+import { Building2, ShieldCheck, Mail } from 'lucide-react';
 
 // Public company page. Doubles as the verification document for partners
 // (payment processors, SMS aggregators) who need to see the relationship
@@ -51,10 +51,8 @@ export default function CompanyPage() {
         <div className="mt-3 rounded-xl border border-border/60 bg-card/40 px-4 py-2">
           <Row label="Legal name" value="NeuroDev Labs Technologies" />
           <Row label="Registration No." value="BN 9430461 (CAC)" />
+          <Row label="D-U-N-S Number" value="669827712" />
           <Row label="Tax Identification" value="2622473979523" />
-          <Row label="Nature of business" value="Software development, web design and intranet development" />
-          <Row label="Registered address" value="2 Uba Crescent, Victory Estate Iba, Iba Ojo, Lagos State, Nigeria" />
-          <Row label="Country" value="Nigeria" />
         </div>
       </Section>
 
@@ -73,26 +71,10 @@ export default function CompanyPage() {
         </p>
       </Section>
 
-      <Section icon={MessageSquare} title="Use of SMS / Messaging">
-        <p>
-          NeuroDev Labs uses SMS strictly for <strong className="text-foreground">transactional
-          one-time passcodes (OTP)</strong> to verify a user&apos;s phone number at sign-in. We do
-          not send marketing or promotional SMS, and every message is triggered by an action the
-          user has just taken on our platform.
-        </p>
-        <p className="text-xs bg-muted/30 border border-border/50 rounded-lg px-3 py-2 font-mono">
-          Sample: &quot;Your Opinions.ng verification code is 123456. It expires in 10 minutes.&quot;
-        </p>
-        <p>
-          We maintain a zero-tolerance anti-spam policy and honour opt-out and data-deletion requests
-          in line with our Privacy Policy and the Nigeria Data Protection Act.
-        </p>
-      </Section>
-
       <Section icon={Mail} title="Contact">
         <p>
           For partnership, compliance, or verification enquiries, reach us at{' '}
-          <a href="mailto:hello@opinions.ng" className="text-emerald-400 underline">hello@opinions.ng</a>.
+          <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline">opng@neurodevlabs.cloud</a>.
         </p>
       </Section>
 

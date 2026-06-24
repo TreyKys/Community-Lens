@@ -329,7 +329,7 @@ function LeaderboardPreviewPanel() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetch(`/api/admin/leaderboard?window=${window}&limit=50`, { credentials: 'include' })
+    fetch(`/api/admin/leaderboard?window=${window}&limit=3`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => { if (alive) setRows(d.rows || []); })
       .catch(() => { if (alive) setRows([]); })
@@ -339,11 +339,9 @@ function LeaderboardPreviewPanel() {
 
   const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
 
-  // Prize structure mirrors the public teaser (/leaderboard).
+  // Prize structure — top 3 only at rollout. Cash for #1, credit for #2/#3.
   const WEEKLY_PRIZES: Record<number, string> = {
-    1: '₦15,000 cash', 2: '₦3,000 credit', 3: '₦3,000 credit',
-    4: '₦2,000 credit', 5: '₦2,000 credit',
-    6: '₦1,000 credit', 7: '₦1,000 credit', 8: '₦1,000 credit', 9: '₦1,000 credit', 10: '₦1,000 credit',
+    1: '₦20,000 cash', 2: '₦5,000 credit', 3: '₦3,000 credit',
   };
   const DAILY_PRIZES: Record<number, string> = { 1: '₦500 credit', 2: '₦300 credit', 3: '₦200 credit' };
 
@@ -361,11 +359,11 @@ function LeaderboardPreviewPanel() {
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400" />
-          Leaderboard Preview
+          Top 3 Predictors
           <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-300">PRE-LAUNCH</Badge>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Live ranking from real points data. This is exactly what users will see at rollout.
+          Live ranking from real data — exactly what users will see at rollout.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -395,6 +393,11 @@ function LeaderboardPreviewPanel() {
           </p>
         ) : (
           <div className="overflow-x-auto">
+            <p className="text-xs text-foreground/90 mb-2 font-medium">
+              {window === 'weekly' ? 'Top 3 predictors this week' :
+                window === 'daily' ? 'Top 3 predictors today' :
+                'Top 3 predictors of all time'}
+            </p>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-muted-foreground border-b border-border/40">
@@ -436,13 +439,27 @@ function LeaderboardPreviewPanel() {
                 })}
               </tbody>
             </table>
-            {window !== 'alltime' && (
-              <p className="text-[10px] text-muted-foreground mt-2">
-                Strikethrough = not yet prize-eligible
-                ({window === 'weekly' ? '₦2,000+ committed AND 5+ resolved predictions this week' : '3+ resolved predictions today'}).
-                Accuracy shown is all-time.
+            <div className="mt-3 space-y-1.5">
+              {window !== 'alltime' && (
+                <p className="text-[10px] text-muted-foreground">
+                  Strikethrough = not yet prize-eligible
+                  ({window === 'weekly' ? '₦2,000+ committed AND 5+ resolved predictions this week' : '3+ resolved predictions today'}).
+                  Accuracy shown is all-time.
+                </p>
+              )}
+              {/* Methodology + jackpot-qualification copy. The jackpot
+                  itself is on hold — this line creates FOMO + drives
+                  deposits while the engine is being ironed out. */}
+              <p className="text-[10px] text-muted-foreground">
+                <strong className="text-foreground">How the rank works:</strong> based on accuracy and volume.
+                More resolved correct picks and more committed ₦ both push you up.
               </p>
-            )}
+              {window === 'weekly' && (
+                <p className="text-[10px] text-amber-300/90">
+                  🎯 The week&rsquo;s top 3 also qualify for next week&rsquo;s <strong>Jackpot Markets</strong>.
+                </p>
+              )}
+            </div>
           </div>
         )}
       </CardContent>

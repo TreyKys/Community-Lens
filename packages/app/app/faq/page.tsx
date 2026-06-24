@@ -38,16 +38,12 @@ const FAQS: { q: string; a: string }[] = [
     a: 'Up to 5 markets if your stake is under ₦500, and up to 10 markets if your stake is ₦500 or more. Each pick must be from a different event, with combined odds of at least 3.0×.',
   },
   {
-    q: 'What are Boosts and why do they cost ₦70?',
-    a: 'A Boost is the ticket that lets you place one Multiplier. You get 5 free when you join and earn more over time, and you can buy extra Boosts for ₦70 each. Singles (normal predictions) never need a Boost — Boosts are only for Multipliers.',
+    q: 'What are Boosts?',
+    a: 'A Boost is the ticket that lets you place one Multiplier. You get 5 free when you join and earn more over time, and you can buy extra Boosts at the price shown in the app. Singles (normal predictions) never need a Boost — Boosts are only for Multipliers.',
   },
   {
     q: 'How do deposits and withdrawals work?',
     a: 'Deposit by card, bank transfer or USSD through Squad — minimum ₦500, credited after confirmation. Withdraw to any Nigerian bank account, minimum ₦200, reviewed and paid within 24 hours (usually much faster). A small conversion spread applies, shown before you confirm.',
-  },
-  {
-    q: 'What fees do you charge?',
-    a: 'Our margin is built into the odds and pool you see — there are no surprise deductions after the fact. The number shown to you when you stake or withdraw is the real number you get. Bonus credits must be wagered before they can be withdrawn.',
   },
   {
     q: 'What is the leaderboard?',

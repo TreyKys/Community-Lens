@@ -146,7 +146,7 @@ export default function TermsPage() {
             full amount you commit to a forecast. Past results are not indicative of future outcomes.
             Only commit funds you can afford to lose. If you feel your engagement is becoming
             compulsive, please take a break and reach out to{' '}
-            <a href="mailto:hello@opinions.ng" className="text-emerald-400 underline">hello@opinions.ng</a>.
+            <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline">opng@neurodevlabs.cloud</a>.
           </p>
         </Section>
 
@@ -199,8 +199,8 @@ export default function TermsPage() {
         <Section title="14. Contact">
           <p>
             Questions or disputes:{' '}
-            <a href="mailto:hello@opinions.ng" className="text-emerald-400 underline">
-              hello@opinions.ng
+            <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline">
+              opng@neurodevlabs.cloud
             </a>
           </p>
         </Section>

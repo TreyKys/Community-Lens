@@ -22,32 +22,24 @@ export const metadata: Metadata = {
   alternates: { canonical: '/trust' },
 };
 
-// ── EDIT ME: placeholders the founder fills in before publishing ─────
-// Keep them at the top so they're easy to find. None of these should
-// ship with TBD values to production — sweep this block before merging
-// to main.
+// ── EDIT ME: identity + external profile URLs ────────────────────────
+// Keep them at the top so they're easy to find. Profile URLs default to
+// null while the profile is in flight; the ExternalProfileCard renders
+// a dim "Soon" tile in that case so the grid stays balanced.
 const TRUST = {
-  cac:        '9430461',                       // CAC Business Name (already on /terms)
-  duns:       'TBD — drop here',               // NeuroDev Labs D-U-N-S Number
-  founder:    'TBD — founder full name',
-  founderRole:'Founder & CEO',
-  founderX:   'TBD — https://x.com/founder',
-  founderLi:  'TBD — https://linkedin.com/in/founder',
-  officeAddr: 'Lagos, Nigeria',                // street address optional; city is enough
+  cac:        '9430461',         // CAC Business Name (already on /terms)
+  duns:       '669827712',       // NeuroDev Labs D-U-N-S Number
+  officeAddr: 'Lagos, Nigeria',  // city only — no street address by choice
   contractAddress: 'TBD — 0x… (TruthMarket.sol on Polygon)',
-  polygonscanUrl:  'https://polygonscan.com',  // replace with contract URL once verified
-  // External profiles. Set to null while the profile is in flight; the
-  // ExternalProfileCard skips nulls. Lets us ship now and fill in as
-  // each platform comes online.
+  polygonscanUrl:  'https://polygonscan.com',
   profiles: {
     x:           'https://x.com/opinions_ng',
     instagram:   'https://www.instagram.com/opinionshq_ng',
-    crunchbase:  null as string | null,            // TBD — drop URL once live
-    linkedin:    null as string | null,            // TBD — Company Page
-    founderLi:   null as string | null,            // TBD — personal LinkedIn
-    nairaland:   null as string | null,            // TBD — thread URL
-    github:      null as string | null,            // TBD — public org or docs repo
-    polygonscan: null as string | null,            // TBD — verified contract page
+    crunchbase:  null as string | null,
+    linkedin:    null as string | null,            // Company Page
+    nairaland:   null as string | null,
+    github:      null as string | null,
+    polygonscan: null as string | null,            // verified contract page
   },
 } as const;
 
@@ -80,17 +72,10 @@ export default function TrustPage() {
             <Row k="CAC RC Number" v={TRUST.cac} mono />
             <Row k="D-U-N-S Number" v={TRUST.duns} mono />
             <Row k="Registered address" v={TRUST.officeAddr} />
-            <Row k="Founder"       v={`${TRUST.founder} · ${TRUST.founderRole}`} />
-            <Row k="Founder online" v={
-              <span className="flex flex-wrap gap-x-3 gap-y-1">
-                {TRUST.founderX && <a className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2" href={TRUST.founderX} target="_blank" rel="noopener noreferrer">X</a>}
-                {TRUST.founderLi && <a className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2" href={TRUST.founderLi} target="_blank" rel="noopener noreferrer">LinkedIn</a>}
-              </span>
-            } />
           </KeyValue>
           <p className="text-xs text-muted-foreground">
-            We are not anonymous. Every name above is searchable. If anything you read on this page
-            turns out to be wrong, write to us and we&rsquo;ll correct it.
+            NeuroDev Labs Technologies is a regulated business operating under Nigerian law.
+            If anything you read on this page turns out to be wrong, write to us and we&rsquo;ll correct it.
           </p>
         </Section>
 
@@ -204,8 +189,7 @@ export default function TrustPage() {
             <ExternalProfileCard label="X (Twitter)"      href={TRUST.profiles.x} />
             <ExternalProfileCard label="Instagram"        href={TRUST.profiles.instagram} />
             <ExternalProfileCard label="Crunchbase"       href={TRUST.profiles.crunchbase} />
-            <ExternalProfileCard label="LinkedIn (Company)" href={TRUST.profiles.linkedin} />
-            <ExternalProfileCard label="LinkedIn (Founder)" href={TRUST.profiles.founderLi} />
+            <ExternalProfileCard label="LinkedIn" href={TRUST.profiles.linkedin} />
             <ExternalProfileCard label="Nairaland Thread" href={TRUST.profiles.nairaland} />
             <ExternalProfileCard label="GitHub" href={TRUST.profiles.github} icon={Github} />
             <ExternalProfileCard label="Polygonscan (Verified Contract)" href={TRUST.profiles.polygonscan} />
@@ -219,9 +203,8 @@ export default function TrustPage() {
           </p>
           <ul className="space-y-2 text-sm">
             <li className="flex gap-2"><span className="text-emerald-400 font-semibold mt-0.5">·</span>
-              We are <strong>not a licensed gambling operator</strong>. Opinions.ng is a
-              prediction information market, not a sportsbook. We do not hold a gaming licence
-              and we will tell you so directly rather than dress it up.
+              Opinions.ng is an event-prediction information market — players forecast public
+              outcomes, not a sportsbook.
             </li>
             <li className="flex gap-2"><span className="text-emerald-400 font-semibold mt-0.5">·</span>
               We are 18+ only. If you cannot afford to lose your stake, do not place one.

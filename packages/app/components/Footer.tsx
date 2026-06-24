@@ -17,7 +17,7 @@ export function Footer() {
         <span className="text-muted-foreground/40">·</span>
         <Link href="/company" className="hover:text-foreground transition-colors">Company</Link>
         <span className="text-muted-foreground/40">·</span>
-        <a href="mailto:hello@opinions.ng" className="hover:text-foreground transition-colors">Contact</a>
+        <a href="mailto:opng@neurodevlabs.cloud" className="hover:text-foreground transition-colors">Contact</a>
       </div>
       <p>© {new Date().getFullYear()} Opinions.ng. All rights reserved.</p>
       <p className="text-[11px] text-muted-foreground/70">
