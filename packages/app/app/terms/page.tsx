@@ -12,7 +12,7 @@ export default function TermsPage() {
     <article className="max-w-3xl mx-auto px-4 py-10 md:py-16 prose-invert prose">
       <header className="mb-10 border-b border-emerald-500/15 pb-6">
         <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-emerald-400 font-semibold mb-2">
-          <Shield className="w-3 h-3" /> Legal · Effective 2026-06-07
+          <Shield className="w-3 h-3" /> Legal · Effective 2026-06-24
         </div>
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Terms of Service</h1>
         <p className="text-muted-foreground text-sm mt-2">
@@ -30,16 +30,25 @@ export default function TermsPage() {
             the platform, or the Service in these Terms mean Opinions.ng as operated by NeuroDev Labs.
           </p>
           <p>
-            Opinions.ng is a pari-mutuel <strong>event-prediction information market</strong>. Participants
-            commit funds to express a forecast on the outcome of a real-world public event, and returns are
-            determined by the distribution of forecasts across all participants — not by a counterparty house.
-            We are <strong>not a sportsbook, casino, or licensed gaming operator</strong>. Pools are funded
-            entirely by participants and distributed pro-rata among correct forecasts in accordance with the
-            rules of each market.
+            Opinions.ng is an <strong>event-prediction information market</strong>. Participants
+            commit funds to express a forecast on the outcome of a real-world public event. We are
+            <strong> not a sportsbook, casino, or licensed gaming operator</strong>.
           </p>
           <p>
+            Markets settle in one of two ways, each clearly identified on the market page:
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li><strong>Pool (pari-mutuel) markets</strong> — returns are determined by the
+              distribution of forecasts across all participants; pools are funded by participants and
+              distributed pro-rata among correct forecasts.</li>
+            <li><strong>Locked-odds markets</strong> — your return rate is fixed at the moment you
+              confirm your prediction and is the rate shown to you at that time. The displayed amount
+              is a guaranteed minimum that may increase as opposing forecasts are added; you will not
+              be paid less than the figure shown when you staked.</li>
+          </ul>
+          <p>
             Each market clearly states the resolution criteria and the source of truth that
-            will be used to settle it. Resolution is final.
+            will be used to settle it. Resolution is final, subject to Section 5.
           </p>
         </Section>
 
@@ -81,16 +90,43 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="5. Market Resolution & Disputes">
+        <Section title="5. Multipliers & Boosts">
+          <p>
+            A <strong>Multiplier</strong> is a single ticket combining between two and ten separate
+            predictions across different markets. <strong>Every selection must be correct</strong> for
+            the ticket to return; if any selection is wrong, the entire ticket is lost. The combined
+            return rate is the product of the locked rates of each selection, fixed when you place the
+            ticket and capped at a maximum payout disclosed at placement.
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>A selection whose market is <strong>voided</strong> (see Section 6) becomes neutral —
+              it is treated as a 1.0× multiplier and the remaining selections still run.</li>
+            <li>If <strong>every</strong> selection on a ticket is voided, your stake (net of the
+              entry fee) and any Boost consumed are refunded.</li>
+            <li>Selection counts, minimum combined odds, minimum per-selection odds, one-selection-
+              per-event and maximum-payout limits are enforced at placement and may change.</li>
+          </ul>
+          <p>
+            A <strong>Boost</strong> is a consumable ticket required to place a Multiplier. Boosts may
+            be granted promotionally, accrued over time, or purchased for a fixed price shown at the
+            point of sale. Boosts have no cash value, are non-transferable, and are non-refundable
+            except where expressly stated (such as a fully-voided Multiplier). Single predictions do
+            not require a Boost.
+          </p>
+        </Section>
+
+        <Section title="6. Market Resolution & Disputes">
           <p>
             Markets are resolved against the source of truth named on the market page. We make
-            our best effort to resolve quickly and correctly. In the event of a clear oracle
-            error, we may void and refund the affected market. Resolution decisions are final
+            our best effort to resolve quickly and correctly. We may <strong>void</strong> a market —
+            and refund the affected predictions — where an event is cancelled, a result is genuinely
+            ambiguous or disputed, our data source fails, or resolution is otherwise prevented by
+            circumstances beyond our reasonable control. Resolution decisions are final
             after the 48-hour dispute window has elapsed.
           </p>
         </Section>
 
-        <Section title="6. Prohibited Conduct">
+        <Section title="7. Prohibited Conduct">
           <ul className="list-disc pl-5 space-y-1">
             <li>Manipulating, coordinating or attempting to coordinate market resolution.</li>
             <li>Using bots, scripts or automated systems without our written permission.</li>
@@ -104,7 +140,7 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="7. Risk Disclosure">
+        <Section title="8. Risk Disclosure">
           <p>
             Taking positions on event-prediction markets involves financial risk. You may lose the
             full amount you commit to a forecast. Past results are not indicative of future outcomes.
@@ -114,7 +150,19 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="8. Privacy">
+        <Section title="9. Rewards, Points & Leaderboard">
+          <p>
+            We may operate points, leaderboards, contests and prize pools. Points and leaderboard
+            standings have <strong>no cash value</strong> except where we expressly award a prize.
+            Prize eligibility, scoring, windows and amounts are set by us, may change at any time, and
+            require that you have not breached these Terms. Prizes paid as bonus credit are subject to
+            the rollover requirement in Section 3; cash prizes may require completed KYC. We may
+            withhold or reverse rewards obtained through manipulation, collusion, multi-accounting or
+            error.
+          </p>
+        </Section>
+
+        <Section title="10. Privacy">
           <p>
             Our handling of your personal data is governed by our{' '}
             <a href="/privacy" className="text-emerald-400 underline">Privacy Policy</a>, which
@@ -122,7 +170,7 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="9. Liability & Indemnity">
+        <Section title="11. Liability & Indemnity">
           <p>
             To the maximum extent permitted by law, Opinions.ng is provided on an &quot;as is&quot;
             basis. We make no warranty as to availability, accuracy or fitness for any
@@ -132,7 +180,7 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="10. Changes to These Terms">
+        <Section title="12. Changes to These Terms">
           <p>
             We may update these Terms from time to time. Material changes will be notified via
             email or in-app banner, and you will be prompted to re-accept the updated Terms on
@@ -140,7 +188,7 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="11. Governing Law">
+        <Section title="13. Governing Law">
           <p>
             These Terms are governed by the laws of the Federal Republic of Nigeria. Disputes
             will be resolved in the courts of Lagos State unless required otherwise by
@@ -148,7 +196,7 @@ export default function TermsPage() {
           </p>
         </Section>
 
-        <Section title="12. Contact">
+        <Section title="14. Contact">
           <p>
             Questions or disputes:{' '}
             <a href="mailto:hello@opinions.ng" className="text-emerald-400 underline">

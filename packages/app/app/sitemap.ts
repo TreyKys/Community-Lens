@@ -19,6 +19,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // Nairaland, Trustpilot etc. all point here. High priority so Google
     // re-crawls it whenever those external profiles get added/updated.
     { url: `${SITE_URL}/trust`,        changeFrequency: 'weekly',  priority: 0.8 },
+    { url: `${SITE_URL}/faq`,          changeFrequency: 'monthly', priority: 0.6 },
     { url: `${SITE_URL}/terms`,        changeFrequency: 'monthly', priority: 0.3 },
     { url: `${SITE_URL}/privacy`,      changeFrequency: 'monthly', priority: 0.3 },
   ];

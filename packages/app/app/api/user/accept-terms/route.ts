@@ -10,7 +10,10 @@ const supabaseAdmin = createClient(
 // Bump this whenever the T&Cs change materially. Existing acceptances
 // remain valid for prior versions; users will need to re-accept on a
 // version mismatch handled by the client.
-const CURRENT_TOS_VERSION = '2026-06-07';
+// 2026-06-24: added locked-odds markets, Multipliers & Boosts, and the
+// rewards/leaderboard clause. Material change → users re-accept on next
+// sign-in.
+const CURRENT_TOS_VERSION = '2026-06-24';
 
 export async function POST(request: Request) {
   try {

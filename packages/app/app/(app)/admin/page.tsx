@@ -315,6 +315,141 @@ function CohortActivity({ cohorts, fallback }: { cohorts?: any; fallback: any })
   );
 }
 
+// ── Leaderboard preview (pre-rollout) ───────────────────────────────────
+//
+// What the public leaderboard will look like the day it launches. Ranks
+// predictors by points (volume + win + referral), with Daily / Weekly /
+// All-Time windows and the prize structure advertised on the teaser. The
+// data (points_log) has accrued since launch, so this is real, not mock.
+function LeaderboardPreviewPanel() {
+  const [window, setWindow] = useState<'daily' | 'weekly' | 'alltime'>('weekly');
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetch(`/api/admin/leaderboard?window=${window}&limit=50`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { if (alive) setRows(d.rows || []); })
+      .catch(() => { if (alive) setRows([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [window]);
+
+  const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
+
+  // Prize structure mirrors the public teaser (/leaderboard).
+  const WEEKLY_PRIZES: Record<number, string> = {
+    1: '₦15,000 cash', 2: '₦3,000 credit', 3: '₦3,000 credit',
+    4: '₦2,000 credit', 5: '₦2,000 credit',
+    6: '₦1,000 credit', 7: '₦1,000 credit', 8: '₦1,000 credit', 9: '₦1,000 credit', 10: '₦1,000 credit',
+  };
+  const DAILY_PRIZES: Record<number, string> = { 1: '₦500 credit', 2: '₦300 credit', 3: '₦200 credit' };
+
+  // Prize eligibility, per the teaser rules.
+  const eligible = (r: any) => {
+    if (window === 'weekly') return r.volume >= 2000 && r.resolvedBets >= 5;
+    if (window === 'daily') return r.resolvedBets >= 3;
+    return true;
+  };
+  const prizeFor = (rank: number) =>
+    window === 'weekly' ? WEEKLY_PRIZES[rank] : window === 'daily' ? DAILY_PRIZES[rank] : undefined;
+
+  return (
+    <Card className="border-amber-500/20 bg-amber-500/[0.02]">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-amber-400" />
+          Leaderboard Preview
+          <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-300">PRE-LAUNCH</Badge>
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Live ranking from real points data. This is exactly what users will see at rollout.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex gap-1.5">
+          {(['daily', 'weekly', 'alltime'] as const).map(w => (
+            <button
+              key={w}
+              onClick={() => setWindow(w)}
+              className={cn(
+                'px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors',
+                window === w ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                             : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+              )}
+            >
+              {w === 'alltime' ? 'All-Time' : w}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin mx-auto" />
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No points earned in this window yet. Once users predict, they&rsquo;ll rank here.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-muted-foreground border-b border-border/40">
+                  <th className="text-left py-2 pr-2 font-medium w-8">#</th>
+                  <th className="text-left py-2 px-2 font-medium">Predictor</th>
+                  <th className="text-right py-2 px-2 font-medium">Points</th>
+                  <th className="text-right py-2 px-2 font-medium">Accuracy</th>
+                  <th className="text-right py-2 px-2 font-medium hidden sm:table-cell">Volume</th>
+                  {window !== 'alltime' && <th className="text-right py-2 pl-2 font-medium">Prize</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const prize = prizeFor(r.rank);
+                  const elig = eligible(r);
+                  return (
+                    <tr key={r.userId} className="border-b border-border/20">
+                      <td className="py-2 pr-2 tabular-nums font-bold">
+                        {r.rank <= 3 ? ['🥇', '🥈', '🥉'][r.rank - 1] : r.rank}
+                      </td>
+                      <td className="py-2 px-2 truncate max-w-[140px]">@{r.username}</td>
+                      <td className="py-2 px-2 text-right tabular-nums font-semibold">{r.points.toLocaleString()}</td>
+                      <td className="py-2 px-2 text-right tabular-nums">
+                        {r.accuracy === null ? <span className="text-muted-foreground/50">—</span>
+                          : <span className={r.accuracy >= 50 ? 'text-emerald-400' : 'text-muted-foreground'}>{r.accuracy}%</span>}
+                      </td>
+                      <td className="py-2 px-2 text-right tabular-nums text-muted-foreground hidden sm:table-cell">{f(r.volume)}</td>
+                      {window !== 'alltime' && (
+                        <td className="py-2 pl-2 text-right">
+                          {prize ? (
+                            <span className={cn('text-[10px]', elig ? 'text-amber-300' : 'text-muted-foreground/40 line-through')}>
+                              {prize}
+                            </span>
+                          ) : ''}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {window !== 'alltime' && (
+              <p className="text-[10px] text-muted-foreground mt-2">
+                Strikethrough = not yet prize-eligible
+                ({window === 'weekly' ? '₦2,000+ committed AND 5+ resolved predictions this week' : '3+ resolved predictions today'}).
+                Accuracy shown is all-time.
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Reserve health (locked-odds book monitoring) ────────────────────────
 //
 // Lights up only once there's at least one is_locked_odds market in
@@ -3342,9 +3477,10 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-4 md:grid-cols-8">
+        <TabsList className="grid w-full grid-cols-4 md:grid-cols-9">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
           <TabsTrigger value="vip">VIP</TabsTrigger>
           <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
@@ -3356,6 +3492,7 @@ export default function AdminPage() {
 
         <TabsContent value="treasury" className="pt-4"><TreasuryPanel /></TabsContent>
         <TabsContent value="users" className="pt-4"><UsersPanel /></TabsContent>
+        <TabsContent value="leaderboard" className="pt-4"><LeaderboardPreviewPanel /></TabsContent>
         <TabsContent value="vip" className="pt-4"><VIPPanel /></TabsContent>
         <TabsContent value="ai" className="pt-4"><AIMarketGenerator /></TabsContent>
         <TabsContent value="create" className="pt-4">
