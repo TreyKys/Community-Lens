@@ -40,6 +40,55 @@ interface Bet {
   };
 }
 
+// ── Multiplier slip shape ─────────────────────────────────────────────
+// One row per parlay, plus its leg list with each leg's market joined in
+// for a clean per-leg display. Status mirrors multiplier_slips.status:
+// active = still live; won = all legs landed (paid); lost = a leg lost;
+// voided = whole slip refunded (e.g. all legs voided). Loaded alongside
+// single bets so the Picks page is one trip, not two.
+interface SlipLeg {
+  id: string;
+  market_id: number;
+  outcome_index: number;
+  locked_odds: number;
+  realized_odds: number | null;
+  status: 'active' | 'won' | 'lost' | 'void';
+  markets: {
+    id: number;
+    title: string | null;
+    question: string;
+    options: string[];
+    status: string;
+    closes_at: string;
+    resolved_outcome: number | null;
+  } | null;
+}
+
+interface Slip {
+  id: string;
+  slip_stake_tngn: number;
+  net_slip_stake_tngn: number;
+  combined_odds: number;
+  effective_combined_odds: number;
+  payout_tngn: number;
+  final_payout_tngn: number | null;
+  legs_total: number;
+  legs_resolved: number;
+  legs_won: number;
+  status: 'active' | 'won' | 'lost' | 'voided';
+  created_at: string;
+  settled_at: string | null;
+  multiplier_legs: SlipLeg[];
+}
+
+// Unified item type so the Live / Correct / Missed tabs can hold both
+// kinds in placement-time order. The Picks page intentionally interleaves
+// single bets and slips — users place both and want to see them in one
+// chronological feed, not in two separate sections.
+type FeedItem =
+  | { kind: 'bet'; item: Bet; sortAt: string }
+  | { kind: 'slip'; item: Slip; sortAt: string };
+
 // Live "pot win" projection for an ACTIVE bet, using the current pool
 // snapshot. Same math as lib/payout (pari-mutuel with 10% pool rake).
 function projectActivePayout(bet: Bet): { payout: number; multiplier: number } | null {
@@ -372,9 +421,137 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+// ── Multiplier slip card ──────────────────────────────────────────────
+// Displays a parlay's status, leg list, stake, and projected/actual
+// payout. Mirrors the visual hierarchy of BetCard (status banner →
+// title → stake/projection → footer) so the two card types feel like
+// part of one feed.
+function SlipCard({ slip }: { slip: Slip }) {
+  const legs = slip.multiplier_legs || [];
+  const isResolved = slip.status === 'won' || slip.status === 'lost' || slip.status === 'voided';
+  const finalPayout = slip.final_payout_tngn ?? slip.payout_tngn;
+  const profit = slip.status === 'won'  ? finalPayout - slip.slip_stake_tngn
+              : slip.status === 'lost' ? -slip.slip_stake_tngn
+              : 0;
+
+  const statusConfig: Record<Slip['status'], {
+    icon: typeof Clock; color: string; bg: string; border: string; label: string;
+  }> = {
+    active:  { icon: Clock,         color: 'text-blue-400',    bg: 'bg-blue-500/10',    border: 'border-blue-500/20',    label: `Live · ${slip.legs_resolved}/${slip.legs_total} legs in` },
+    won:     { icon: CheckCircle2,  color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Multiplier hit' },
+    lost:    { icon: XCircle,       color: 'text-red-400',     bg: 'bg-red-500/10',     border: 'border-red-500/20',     label: 'Multiplier missed' },
+    voided:  { icon: Shield,        color: 'text-amber-400',   bg: 'bg-amber-500/10',   border: 'border-amber-500/20',   label: 'Refunded (all-void)' },
+  };
+  const cfg = statusConfig[slip.status];
+  const Icon = cfg.icon;
+
+  // Projected payout at placement. When still active we show
+  // payout_tngn (which already reflects the slip cap); after settle we
+  // show final_payout_tngn.
+  const projectedPayout = isResolved ? finalPayout : slip.payout_tngn;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+      className={cn('bg-card border rounded-xl overflow-hidden transition-all', cfg.border)}
+    >
+      <div className={cn('px-4 py-2 flex items-center justify-between', cfg.bg)}>
+        <div className="flex items-center gap-2">
+          <Icon className={cn('w-3.5 h-3.5', cfg.color)} />
+          <span className={cn('text-xs font-semibold uppercase tracking-wider', cfg.color)}>
+            {cfg.label}
+          </span>
+        </div>
+        <Badge variant="outline" className="text-purple-300 border-purple-400/30 text-[9px] px-1.5 py-0">
+          MULTIPLIER · {slip.legs_total}-LEG
+        </Badge>
+      </div>
+
+      <div className="p-4 space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-sm font-semibold">{slip.combined_odds.toFixed(2)}× combined</p>
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            Placed {new Date(slip.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
+          </p>
+        </div>
+
+        <div className="rounded-md border border-border/50 divide-y divide-border/50">
+          {legs.map((leg, idx) => {
+            const opts = leg.markets?.options as string[] | undefined;
+            const pickLabel = opts?.[leg.outcome_index] ?? `Outcome ${leg.outcome_index}`;
+            const legStatus = leg.status;
+            const legIcon = legStatus === 'won' ? CheckCircle2
+                          : legStatus === 'lost' ? XCircle
+                          : legStatus === 'void' ? Shield
+                          : Clock;
+            const legColor = legStatus === 'won' ? 'text-emerald-400'
+                           : legStatus === 'lost' ? 'text-red-400'
+                           : legStatus === 'void' ? 'text-amber-400'
+                           : 'text-muted-foreground';
+            const LegIcon = legIcon;
+            return (
+              <div key={leg.id} className="flex items-start gap-2 px-2.5 py-2">
+                <LegIcon className={cn('w-3 h-3 mt-0.5 shrink-0', legColor)} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium truncate">
+                    {leg.markets?.title || leg.markets?.question || `Market #${leg.market_id}`}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    Pick: {pickLabel} · {Number(leg.locked_odds).toFixed(2)}×
+                  </p>
+                </div>
+                <span className={cn('text-[10px] font-semibold uppercase tracking-wider', legColor)}>
+                  {legStatus === 'void' ? 'Void' : legStatus}
+                </span>
+              </div>
+            );
+          })}
+          {legs.length === 0 && (
+            <p className="text-[11px] text-muted-foreground px-2.5 py-2">
+              Leg details unavailable — refresh in a moment.
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Stake</p>
+            <p className="text-sm font-bold tabular-nums">₦{Math.round(slip.slip_stake_tngn).toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {isResolved ? (slip.status === 'won' ? 'Paid' : slip.status === 'voided' ? 'Refunded' : 'Lost') : 'If correct'}
+            </p>
+            <p className={cn('text-sm font-bold tabular-nums',
+              slip.status === 'won' ? 'text-emerald-400' :
+              slip.status === 'lost' ? 'text-muted-foreground' :
+              'text-foreground'
+            )}>
+              ₦{Math.round(slip.status === 'voided' ? slip.slip_stake_tngn : projectedPayout).toLocaleString()}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">P/L</p>
+            <p className={cn('text-sm font-bold tabular-nums',
+              profit > 0 ? 'text-emerald-400' :
+              profit < 0 ? 'text-red-400' :
+              'text-muted-foreground'
+            )}>
+              {isResolved && slip.status !== 'voided' ? (profit >= 0 ? '+' : '') + `₦${Math.round(profit).toLocaleString()}` : '—'}
+            </p>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function BetsPage() {
   const [session, setSession] = useState<any>(null);
   const [bets, setBets] = useState<Bet[]>([]);
+  const [slips, setSlips] = useState<Slip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -392,21 +569,49 @@ export default function BetsPage() {
     if (!session?.user?.id) return;
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('user_bets')
-        .select('*, markets(id, title, question, options, status, closes_at, merkle_root, total_pool, pool_by_outcome)')
-        .eq('user_id', session.user.id)
-        .order('placed_at', { ascending: false });
+      // Pull singles and slips in parallel — slips were previously
+      // invisible on this page, so users who placed a Multiplier
+      // couldn't find it anywhere after placement.
+      const [betsRes, slipsRes] = await Promise.all([
+        supabase
+          .from('user_bets')
+          .select('*, markets(id, title, question, options, status, closes_at, merkle_root, total_pool, pool_by_outcome)')
+          .eq('user_id', session.user.id)
+          .order('placed_at', { ascending: false }),
+        supabase
+          .from('multiplier_slips')
+          .select(`
+            id, slip_stake_tngn, net_slip_stake_tngn, combined_odds,
+            effective_combined_odds, payout_tngn, final_payout_tngn,
+            legs_total, legs_resolved, legs_won, status, created_at, settled_at,
+            multiplier_legs (
+              id, market_id, outcome_index, locked_odds, realized_odds, status,
+              markets:market_id (id, title, question, options, status, closes_at, resolved_outcome)
+            )
+          `)
+          .eq('user_id', session.user.id)
+          .order('created_at', { ascending: false }),
+      ]);
 
-      if (error) throw error;
-      const next = (data || []) as Bet[];
+      if (betsRes.error) throw betsRes.error;
+      if (slipsRes.error) throw slipsRes.error;
 
-      // Detect any active → won transitions and celebrate
+      const nextBets = (betsRes.data || []) as Bet[];
+      const nextSlips = (slipsRes.data || []) as unknown as Slip[];
+
+      // Detect active → won transitions across BOTH singles and slips.
+      // Slips share the same prevStatusRef map keyed by id — bet ids
+      // are uuid, slip ids are uuid, no collision risk.
       let newlyWon = 0;
-      for (const bet of next) {
+      for (const bet of nextBets) {
         const prev = prevStatusRef.current.get(bet.id);
         if (prev && prev !== 'won' && bet.status === 'won') newlyWon++;
         prevStatusRef.current.set(bet.id, bet.status);
+      }
+      for (const slip of nextSlips) {
+        const prev = prevStatusRef.current.get(slip.id);
+        if (prev && prev !== 'won' && slip.status === 'won') newlyWon++;
+        prevStatusRef.current.set(slip.id, slip.status as any);
       }
       if (newlyWon > 0) {
         fireWinConfetti();
@@ -416,7 +621,8 @@ export default function BetsPage() {
         });
       }
 
-      setBets(next);
+      setBets(nextBets);
+      setSlips(nextSlips);
     } catch {
       toast({ title: 'Failed to load predictions', variant: 'destructive' });
     } finally { setIsLoading(false); }
@@ -424,15 +630,23 @@ export default function BetsPage() {
 
   useEffect(() => { fetchBets(); }, [fetchBets]);
 
-  // Realtime subscription to the user's bet updates — fires confetti on wins
+  // Realtime subscriptions to the user's bet AND slip updates — fires
+  // confetti on wins regardless of product. Two distinct postgres_changes
+  // bindings on a single channel so we don't pay for two websockets.
   useEffect(() => {
     if (!session?.user?.id) return;
     const channel = supabase
-      .channel(`bets:${session.user.id}`)
+      .channel(`picks:${session.user.id}`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'user_bets',
+        filter: `user_id=eq.${session.user.id}`,
+      }, () => { fetchBets(); })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'multiplier_slips',
         filter: `user_id=eq.${session.user.id}`,
       }, () => { fetchBets(); })
       .subscribe();
@@ -490,14 +704,34 @@ export default function BetsPage() {
     );
   }
 
-  const active = bets.filter(b => b.status === 'active');
-  const won = bets.filter(b => b.status === 'won');
-  const lost = bets.filter(b => b.status === 'lost' || b.status === 'refunded');
+  // Build a unified feed of bets + slips, sorted by placement time
+  // descending so a freshly-placed slip lands at the top of Live, where
+  // the user expects to find it. Slips and bets coexist in the same tab
+  // because users place both kinds in the same session and don't think
+  // of them as separate inventories.
+  const allItems: FeedItem[] = [
+    ...bets.map<FeedItem>(b => ({ kind: 'bet', item: b, sortAt: b.placed_at })),
+    ...slips.map<FeedItem>(s => ({ kind: 'slip', item: s, sortAt: s.created_at })),
+  ].sort((a, b) => b.sortAt.localeCompare(a.sortAt));
+
+  const isLive    = (it: FeedItem) => it.item.status === 'active';
+  const isWon     = (it: FeedItem) => it.item.status === 'won';
+  // Missed bucket catches anything resolved-but-not-won: lost, refunded
+  // (singles), voided (slips). Refunded/voided keep their own status
+  // badge so the user can tell at a glance they got their stake back.
+  const isMissed  = (it: FeedItem) =>
+    it.item.status === 'lost' ||
+    (it.kind === 'bet' && it.item.status === 'refunded') ||
+    (it.kind === 'slip' && it.item.status === 'voided');
+
+  const active = allItems.filter(isLive);
+  const won    = allItems.filter(isWon);
+  const lost   = allItems.filter(isMissed);
 
   const tabs = [
-    { id: 'active', label: 'Live', count: active.length, bets: active },
-    { id: 'won', label: 'Correct', count: won.length, bets: won },
-    { id: 'lost', label: 'Missed', count: lost.length, bets: lost },
+    { id: 'active', label: 'Live', count: active.length, items: active },
+    { id: 'won', label: 'Correct', count: won.length, items: won },
+    { id: 'lost', label: 'Missed', count: lost.length, items: lost },
   ];
 
   return (
@@ -505,7 +739,10 @@ export default function BetsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">My Predictions</h1>
-          <p className="text-sm text-muted-foreground">{bets.length} total prediction{bets.length !== 1 ? 's' : ''}</p>
+          <p className="text-sm text-muted-foreground">
+            {allItems.length} total prediction{allItems.length !== 1 ? 's' : ''}
+            {slips.length > 0 && <> · {slips.length} Multiplier{slips.length !== 1 ? 's' : ''}</>}
+          </p>
         </div>
         <Button variant="ghost" size="sm" onClick={fetchBets} className="text-muted-foreground">
           Refresh
@@ -530,7 +767,7 @@ export default function BetsPage() {
               <div className="space-y-3">
                 {[...Array(3)].map((_, i) => <div key={i} className="h-40 bg-muted/30 rounded-xl animate-pulse" />)}
               </div>
-            ) : t.bets.length === 0 ? (
+            ) : t.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <AlertCircle className="w-10 h-10 text-muted-foreground/50 mb-3" />
                 <p className="text-muted-foreground">
@@ -544,13 +781,17 @@ export default function BetsPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {t.bets.map(bet => (
-                  <BetCard
-                    key={bet.id}
-                    bet={bet}
-                    onDownloadReceipt={handleDownloadReceipt}
-                    onShareCard={handleShareCard}
-                  />
+                {t.items.map(it => (
+                  it.kind === 'slip' ? (
+                    <SlipCard key={`slip-${it.item.id}`} slip={it.item} />
+                  ) : (
+                    <BetCard
+                      key={`bet-${it.item.id}`}
+                      bet={it.item}
+                      onDownloadReceipt={handleDownloadReceipt}
+                      onShareCard={handleShareCard}
+                    />
+                  )
                 ))}
               </div>
             )}
