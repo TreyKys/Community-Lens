@@ -13,6 +13,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Loader2, Lock, TrendingUp, Clock, CheckCircle2, ExternalLink, Info, ChevronDown, Sparkles, AlertTriangle, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { calculatePotentialPayout } from '@/lib/payout';
+import { displayFloorPayout } from '@/lib/displayMultiplier';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
 import { useSlip } from '@/components/multiplier/SlipProvider';
 import { getDisplayPool } from '@/lib/displayPool';
@@ -366,73 +367,41 @@ function BettingInterface({
         </div>
       )}
 
-      {payoutPreview && (
-        <div className={cn(
-          'rounded-xl border p-3.5 animate-in fade-in slide-in-from-bottom-1',
-          payoutPreview.isFirstMover
-            ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/[0.10] via-amber-500/[0.04] to-transparent'
-            : 'border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent'
-        )}>
-          {payoutPreview.isFirstMover ? (
-            // First-mover state: the pool has no opposing money, so the
-            // parimutuel formula collapses to "user paying themselves
-            // back, minus rake" — that's the 0.89×/₦177 we used to
-            // display, which is a lie about what would actually happen.
-            // What actually happens:
-            //   • If no one predicts the other side by close → market
-            //     voids and the full stake is refunded (= 1.00×).
-            //   • If opposition does arrive → the pool builds and the
-            //     real payout is computed parimutuel-style at close,
-            //     typically much higher than 1× for the lone correct
-            //     caller (they take a large slice of the losing pool).
-            // We show neither number because both are speculative; the
-            // honest thing is to explain what's actually being locked.
-            <>
-              <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-amber-300/95 font-semibold">
-                <Sparkles className="w-3 h-3" /> First on this market
-              </div>
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-2xl md:text-3xl font-black text-amber-200 tracking-tight tabular-nums leading-none">
-                  ₦{Math.round(stakeNum).toLocaleString()}
-                </span>
-                <span className="text-sm text-amber-200/80 font-semibold">
-                  stake locked
-                </span>
-              </div>
-              <p className="text-[11px] text-amber-100/80 leading-relaxed mt-2">
-                No one&rsquo;s predicted the other side yet. If nobody does
-                by close, your stake is refunded in full. If they do,
-                you&rsquo;re first in line on the winning pool and the
-                payout is calculated at close — typically much larger
-                when you&rsquo;re the lone correct caller.
-              </p>
-            </>
-          ) : (
-            <>
-              {/* Lead with the multiplier — it reads like betting odds, which is
-                  the mental model Nigerian users arrive with. ₦ amount stays as
-                  the secondary anchor (they still want to see the actual naira).
-                  "% implied" demoted to muted footer text — it's a probability
-                  puzzle that creates more confusion than clarity at this stage. */}
-              <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-                <Sparkles className="w-3 h-3" /> Your stake locks at
-              </div>
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
-                  {payoutPreview.multiplier.toFixed(2)}×
-                </span>
-                <span className="text-sm text-emerald-300/80 font-semibold tabular-nums">
-                  ₦{Math.round(payoutPreview.payout).toLocaleString()} if correct
-                </span>
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                <span>Final payout calculated from pool at close.</span>
+      {payoutPreview && (() => {
+        // First-mover state: parimutuel formula collapses to "user pays
+        // themselves back minus rake" — that's the bogus 0.89× we used
+        // to show. Replace with the friendly floor (1.03× / 1.02× —
+        // same as locked-odds; see lib/displayMultiplier) shown in the
+        // same emerald positive frame. The backend honours this number
+        // at settlement: a market that voids credits MAX(net_stake,
+        // floor_payout), so the displayed promise is real.
+        const floor = payoutPreview.isFirstMover ? displayFloorPayout(stakeNum) : null;
+        return (
+          <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
+            <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
+              <Sparkles className="w-3 h-3" /> Your stake locks at
+            </div>
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
+                {(floor ? floor.multiplier : payoutPreview.multiplier).toFixed(2)}×
+              </span>
+              <span className="text-sm text-emerald-300/80 font-semibold tabular-nums">
+                ₦{Math.round(floor ? floor.payout : payoutPreview.payout).toLocaleString()} if correct
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+              <span>
+                {floor
+                  ? 'Climbs every time someone predicts the other way.'
+                  : 'Final payout calculated from pool at close.'}
+              </span>
+              {!floor && (
                 <span className="text-muted-foreground/60 tabular-nums">{Math.round(payoutPreview.impliedProb * 100)}% implied</span>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Negative-EV warning. Triggers when the prospective stake is
           large enough relative to the opposing pool that the user would

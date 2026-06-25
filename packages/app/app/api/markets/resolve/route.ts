@@ -6,6 +6,7 @@ import {
   type LockedBet,
   type MarketResolution,
 } from '@/lib/lockedSettlement';
+import { displayFloorPayout } from '@/lib/displayMultiplier';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -490,18 +491,26 @@ export async function POST(request: Request) {
     const losingPool = losingBets.reduce((s, b) => s + b.net_stake_tngn, 0);
     const totalPool = winningPool + losingPool;
 
-    // Void if no losers or no winners — refund every bet at net stake.
+    // Void if no losers or no winners — refund every bet at the
+    // friendly floor (see lib/displayMultiplier). The bet modal
+    // displays this floor as the guaranteed minimum on first-mover /
+    // empty-opposing-pool states; honouring it here keeps the
+    // displayed promise real. House eats the small ₦ delta vs.
+    // net_stake — that's the cost of the cold-start incentive that
+    // gets first movers to seed pools at all.
     if (winningPool === 0 || losingPool === 0) {
       for (const bet of bets) {
+        const floor = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
+        const credit = Math.max(Number(bet.net_stake_tngn) || 0, floor);
         await supabaseAdmin.rpc('credit_user', {
           p_user_id: bet.user_id,
-          p_tngn_delta: bet.net_stake_tngn,
+          p_tngn_delta: credit,
           p_bonus_delta: 0,
         });
-        await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', bet.id);
+        await supabaseAdmin.from('user_bets').update({ status: 'refunded', payout_tngn: credit }).eq('id', bet.id);
       }
       await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
-      return NextResponse.json({ status: 'voided', reason: 'No losers — all bets refunded' });
+      return NextResponse.json({ status: 'voided', reason: 'No losers — all bets refunded at first-mover floor' });
     }
 
     // 10% of total pool comes out as house rake. Whatever's left is split
