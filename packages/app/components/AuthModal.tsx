@@ -8,8 +8,51 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Lock, Check } from 'lucide-react';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
+
+// Referral field shared across all three signup forms (email / phone /
+// password). When `locked` it renders read-only with a lock affordance —
+// the code arrived from an invite link (?ref= or a /r/CODE landing) and
+// must not be editable, so the invite that drove the acquisition is the
+// one that gets credited.
+function ReferralField({
+  id, value, onChange, locked,
+}: { id: string; value: string; onChange: (v: string) => void; locked: boolean }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id} className="flex items-center justify-between">
+        <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
+      </Label>
+      <div className="relative">
+        <Input
+          id={id}
+          type="text"
+          placeholder="e.g. ALEX25"
+          value={value}
+          onChange={(e) => onChange(e.target.value.toUpperCase())}
+          maxLength={20}
+          readOnly={locked}
+          aria-readonly={locked}
+          tabIndex={locked ? -1 : undefined}
+          className={cn(
+            'uppercase tracking-wider',
+            locked && 'pr-9 bg-emerald-500/[0.06] border-emerald-500/40 text-emerald-300 cursor-not-allowed',
+          )}
+        />
+        {locked && (
+          <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-400 pointer-events-none" />
+        )}
+      </div>
+      {locked && (
+        <p className="text-[10px] text-emerald-400/90 flex items-center gap-1">
+          <Check className="w-3 h-3" /> Applied from your invite link
+        </p>
+      )}
+    </div>
+  );
+}
 
 // Event name + first-claim guard for opening the auth dialog from outside
 // this component (e.g. WelcomeModal's "Claim my bonus" CTA). AuthModal
@@ -39,7 +82,30 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [referralCode, setReferralCode] = useState('');
+  const [referralLocked, setReferralLocked] = useState(false);
   const { toast } = useToast();
+
+  // Capture an invite code from the URL (?ref=CODE) or a /r/CODE landing
+  // page (localStorage, with the lock flag). Either source locks the
+  // field — the invitee shouldn't be able to swap the code that paid for
+  // their acquisition. The actual redeem still runs post-signup in
+  // applyPostAuthHooks, which reads pending_referral_code.
+  useEffect(() => {
+    try {
+      const fromUrl = new URL(window.location.href).searchParams.get('ref');
+      const stored = localStorage.getItem('pending_referral_code');
+      const lockedFlag = localStorage.getItem('referral_locked') === '1';
+      const code = (fromUrl || stored || '').trim().toUpperCase().slice(0, 20);
+      if (code) {
+        setReferralCode(code);
+        if (fromUrl || lockedFlag) {
+          setReferralLocked(true);
+          localStorage.setItem('pending_referral_code', code);
+          localStorage.setItem('referral_locked', '1');
+        }
+      }
+    } catch { /* private mode / SSR guard — no-op */ }
+  }, []);
 
   // Imperative open from outside the component (e.g. WelcomeModal,
   // future deep-link/CTA buttons). See module-scope comment for why
@@ -88,7 +154,10 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
         } catch {
           // fire-and-forget on network failure
         } finally {
-          try { localStorage.removeItem('pending_referral_code'); } catch {}
+          try {
+            localStorage.removeItem('pending_referral_code');
+            localStorage.removeItem('referral_locked');
+          } catch {}
         }
       }
     } catch {}
@@ -427,20 +496,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                     autoComplete="email"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ref" className="flex items-center justify-between">
-                    <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
-                  </Label>
-                  <Input
-                    id="ref"
-                    type="text"
-                    placeholder="e.g. ALEX25"
-                    value={referralCode}
-                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                    maxLength={20}
-                    className="uppercase tracking-wider"
-                  />
-                </div>
+                <ReferralField id="ref" value={referralCode} onChange={setReferralCode} locked={referralLocked} />
                 <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
                   <Checkbox
                     checked={acceptedTerms}
@@ -481,20 +537,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                   />
                   <p className="text-[10px] text-muted-foreground">We&apos;ll text you a 6-digit code</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ref-phone" className="flex items-center justify-between">
-                    <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
-                  </Label>
-                  <Input
-                    id="ref-phone"
-                    type="text"
-                    placeholder="e.g. ALEX25"
-                    value={referralCode}
-                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                    maxLength={20}
-                    className="uppercase tracking-wider"
-                  />
-                </div>
+                <ReferralField id="ref-phone" value={referralCode} onChange={setReferralCode} locked={referralLocked} />
                 <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
                   <Checkbox
                     checked={acceptedTerms}
@@ -547,20 +590,7 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
                   />
                   <p className="text-[10px] text-muted-foreground">Min. 8 characters for security</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ref-pwd" className="flex items-center justify-between">
-                    <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
-                  </Label>
-                  <Input
-                    id="ref-pwd"
-                    type="text"
-                    placeholder="e.g. ALEX25"
-                    value={referralCode}
-                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                    maxLength={20}
-                    className="uppercase tracking-wider"
-                  />
-                </div>
+                <ReferralField id="ref-pwd" value={referralCode} onChange={setReferralCode} locked={referralLocked} />
                 <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
                   <Checkbox
                     checked={acceptedTerms}
