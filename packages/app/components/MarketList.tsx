@@ -379,7 +379,8 @@ function BettingInterface({
         return (
           <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
             <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-              <Sparkles className="w-3 h-3" /> Your stake locks at
+              <Sparkles className="w-3 h-3" />
+              {floor ? 'First on this market — locks at' : 'Your stake locks at'}
             </div>
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
@@ -389,16 +390,22 @@ function BettingInterface({
                 ₦{Math.round(floor ? floor.payout : payoutPreview.payout).toLocaleString()} if correct
               </span>
             </div>
-            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-              <span>
-                {floor
-                  ? 'Climbs every time someone predicts the other way.'
-                  : 'Final payout calculated from pool at close.'}
-              </span>
-              {!floor && (
+            {floor ? (
+              // Three facts the user needs to know to feel safe placing
+              // first: (1) they're the first mover, (2) the upside grows
+              // as the other side fills, (3) the floor sticks even if
+              // no one else predicts. Two lines because trying to cram
+              // all three into one breadcrumb reads as small print.
+              <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground leading-snug">
+                <p>Your payout <span className="text-emerald-300">climbs</span> as others predict the other way.</p>
+                <p>If no one does, you still keep this floor.</p>
+              </div>
+            ) : (
+              <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                <span>Final payout calculated from pool at close.</span>
                 <span className="text-muted-foreground/60 tabular-nums">{Math.round(payoutPreview.impliedProb * 100)}% implied</span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         );
       })()}
