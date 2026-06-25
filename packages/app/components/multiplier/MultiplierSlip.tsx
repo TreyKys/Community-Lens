@@ -27,7 +27,7 @@ const REASON_COPY: Record<string, string> = {
   too_few_legs: 'Add at least 2 picks to build a Multiplier.',
   too_many_legs: 'Too many picks for this stake. Raise your stake or drop a pick.',
   duplicate_event: 'Only one pick per event.',
-  leg_below_min_odds: 'One pick is too short-priced (min 1.20× each).',
+  leg_below_min_odds: 'One pick is too short-priced (min 1.15× each).',
   combined_below_min: 'Combined odds must reach 3.00×. Add a longer pick.',
   stake_below_min: 'Minimum stake is ₦100.',
 };

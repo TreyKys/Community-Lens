@@ -1,354 +1,214 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { pollWhileVisible } from '@/lib/pollWhileVisible';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { useToast } from '@/hooks/use-toast';
-import {
-  Trophy, Sparkles, Loader2, CheckCircle2, Crown, Zap, Flame,
-} from 'lucide-react';
-import { AuthModal } from '@/components/AuthModal';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Trophy, Crown, Sparkles, Flame, Loader2, AlertCircle } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { pollWhileVisible } from '@/lib/pollWhileVisible';
 
-type SlotsState = { taken: number; cap: number; remaining: number; closed: boolean };
+// Public leaderboard — flipped live from the previous waitlist
+// teaser. Daily / Weekly / All-time tabs, top-3 podium, then a full
+// list of ranked predictors. Driven by /api/leaderboard (service-role
+// reads of leaderboard_points), cached 60s at the edge so a Twitter
+// burst won't melt the RPC.
 
-// Reward summary shown on the teaser — matches what we're marketing on
-// social. Numbers are intentionally rounded; full T&Cs live on /terms.
-const WEEKLY_PRIZES = [
-  { rank: '1', reward: '₦15,000', type: 'CASH (withdrawable)', badge: 'Champion', icon: Crown, color: 'text-amber-400' },
-  { rank: '2', reward: '₦3,000', type: 'Bonus credits', badge: 'Silver', icon: Trophy, color: 'text-slate-300' },
-  { rank: '3', reward: '₦3,000', type: 'Bonus credits', badge: 'Bronze', icon: Trophy, color: 'text-orange-400' },
-  { rank: '4–5', reward: '₦2,000 each', type: 'Bonus credits', badge: 'Top 5', icon: Sparkles, color: 'text-emerald-400' },
-  { rank: '6–10', reward: '₦1,000 each', type: 'Bonus credits', badge: 'Top 10', icon: Sparkles, color: 'text-emerald-300' },
-];
+interface Row {
+  rank: number;
+  userId: string;
+  username: string;
+  avatarId: number;
+  points: number;
+  accuracy: number | null;
+  resolvedBets: number;
+  wonBets: number;
+}
 
-const DAILY_PRIZES = [
-  { rank: '1', reward: '₦500 bonus credits', label: 'Daily MVP' },
-  { rank: '2', reward: '₦300 bonus credits', label: '—' },
-  { rank: '3', reward: '₦200 bonus credits', label: '—' },
-];
+type WindowKey = 'daily' | 'weekly' | 'alltime';
 
-export default function LeaderboardTeaserPage() {
-  const { toast } = useToast();
-  const [session, setSession] = useState<any>(null);
-  const [slots, setSlots] = useState<SlotsState | null>(null);
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [source, setSource] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [joined, setJoined] = useState(false);
+const WINDOW_LABEL: Record<WindowKey, string> = {
+  daily:   'Today',
+  weekly:  'This Week',
+  alltime: 'All-Time',
+};
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (alive) setSession(data.session);
-    })();
-    return () => { alive = false; };
-  }, []);
+// Tier thresholds match lib/displayMultiplier + the share-card tier
+// ladder. Keep the badge palette consistent across the product so a
+// user who's seen their accuracy card recognises the colour.
+function tierFor(accuracy: number | null, resolved: number): { label: string; color: string } {
+  if (accuracy == null || resolved < 5) return { label: 'ROOKIE',          color: 'text-slate-400' };
+  if (accuracy >= 80)                  return { label: 'PRO FORECASTER',  color: 'text-amber-400' };
+  if (accuracy >= 75)                  return { label: 'ELITE',           color: 'text-amber-500' };
+  if (accuracy >= 70)                  return { label: 'TOP FORECASTER',  color: 'text-emerald-400' };
+  if (accuracy >= 60)                  return { label: 'SHARP',           color: 'text-cyan-400' };
+  if (accuracy >= 50)                  return { label: 'RISING',          color: 'text-violet-400' };
+  return { label: 'CONTENDER', color: 'text-slate-400' };
+}
 
+function Podium({ rows }: { rows: Row[] }) {
+  // Lay out top 3 as a #1-centre podium (visual gold standard) only if
+  // we actually have 3 entries — otherwise fall back to a left-aligned
+  // strip so a brand-new daily board with one entry still looks intentional.
+  if (rows.length < 3) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {rows.map(r => <PodiumCard key={r.userId} row={r} />)}
+      </div>
+    );
+  }
+  const [first, second, third] = rows;
+  return (
+    <div className="grid grid-cols-3 gap-3 items-end">
+      <div className="pt-6"><PodiumCard row={second} /></div>
+      <div><PodiumCard row={first} /></div>
+      <div className="pt-10"><PodiumCard row={third} /></div>
+    </div>
+  );
+}
+
+function PodiumCard({ row }: { row: Row }) {
+  const tier = tierFor(row.accuracy, row.resolvedBets);
+  const podium = row.rank === 1 ? { color: 'text-amber-400',  glow: 'shadow-[0_0_40px_rgba(251,191,36,0.25)]', icon: Crown,    bg: 'bg-amber-500/[0.06] border-amber-500/30' }
+              : row.rank === 2 ? { color: 'text-slate-300',  glow: 'shadow-[0_0_30px_rgba(203,213,225,0.15)]', icon: Trophy,   bg: 'bg-slate-500/[0.05] border-slate-500/30' }
+              :                  { color: 'text-orange-400', glow: 'shadow-[0_0_30px_rgba(251,146,60,0.18)]', icon: Trophy,   bg: 'bg-orange-500/[0.05] border-orange-500/30' };
+  const Icon = podium.icon;
+  return (
+    <Link href={`/u/${row.userId}`} className="block">
+      <Card className={cn('border transition-all hover:scale-[1.02]', podium.bg, podium.glow)}>
+        <CardContent className="p-3 text-center space-y-1.5">
+          <Icon className={cn('w-5 h-5 mx-auto', podium.color)} />
+          <p className={cn('text-[10px] uppercase tracking-[0.12em] font-bold', podium.color)}>#{row.rank}</p>
+          <p className="text-sm font-bold truncate">@{row.username}</p>
+          <p className="text-lg font-black tabular-nums">{row.points.toLocaleString()}<span className="text-[10px] text-muted-foreground ml-1">pts</span></p>
+          {row.accuracy != null && (
+            <p className="text-[10px] text-muted-foreground">
+              <span className="tabular-nums">{row.accuracy}%</span> accuracy · {row.resolvedBets} resolved
+            </p>
+          )}
+          <Badge variant="outline" className={cn('text-[9px] border-transparent', tier.color)}>
+            {tier.label}
+          </Badge>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function ListRow({ row }: { row: Row }) {
+  const tier = tierFor(row.accuracy, row.resolvedBets);
+  return (
+    <Link href={`/u/${row.userId}`} className="block">
+      <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:border-emerald-500/30 hover:bg-emerald-500/[0.03] transition-colors">
+        <span className="text-xs font-mono w-7 text-right text-muted-foreground tabular-nums">#{row.rank}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">@{row.username}</p>
+          <p className="text-[10px] text-muted-foreground">
+            {row.accuracy != null
+              ? <><span className="tabular-nums">{row.accuracy}%</span> · {row.resolvedBets} resolved · <span className={tier.color}>{tier.label}</span></>
+              : <span className={tier.color}>{tier.label} — building a record</span>}
+          </p>
+        </div>
+        <span className="text-sm font-bold tabular-nums">{row.points.toLocaleString()}<span className="text-[9px] text-muted-foreground ml-1">pts</span></span>
+      </div>
+    </Link>
+  );
+}
+
+export default function LeaderboardPage() {
+  const [windowKey, setWindowKey] = useState<WindowKey>('weekly');
+  const [rows, setRows] = useState<Row[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Reload on tab change + 60s visibility-gated poll so a phone left
+  // open during a Sunday afternoon doesn't burn battery refetching.
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const res = await fetch('/api/leaderboard/waitlist');
+        const res = await fetch(`/api/leaderboard?window=${windowKey}&limit=50`);
         const data = await res.json();
-        if (alive) setSlots(data);
+        if (alive) setRows(data.rows || []);
       } catch {
-        // non-critical
+        if (alive) setRows([]);
+      } finally {
+        if (alive) setIsLoading(false);
       }
     };
-    // 60s + visibility-gated; background tabs no longer poll. The slot
-    // counter is a vanity FOMO bar, never time-critical.
+    setIsLoading(true);
+    load();
     const cleanup = pollWhileVisible(load, 60_000);
     return () => { alive = false; cleanup(); };
-  }, []);
+  }, [windowKey]);
 
-  const submitWaitlist = async (payload: { userId?: string; email?: string; phone?: string; source?: string }) => {
-    setIsSubmitting(true);
-    try {
-      const res = await fetch('/api/leaderboard/waitlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not join waitlist');
-      setJoined(true);
-      toast({
-        title: data.alreadyJoined ? "You're already in 🎯" : "You're on the list 🏆",
-        description: 'We\'ll email you the moment the leaderboard goes live.',
-      });
-    } catch (err: any) {
-      toast({ title: 'Could not join', description: err.message, variant: 'destructive' });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleSignedInJoin = () => {
-    if (!session?.user?.id) return;
-    submitWaitlist({ userId: session.user.id, source: source || 'logged_in_one_click' });
-  };
-
-  const handleAnonJoin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) {
-      toast({ title: 'Email required', variant: 'destructive' });
-      return;
-    }
-    submitWaitlist({
-      email: email.trim(),
-      phone: phone.trim() || undefined,
-      source: source.trim() || undefined,
-    });
-  };
-
-  const fillPct = slots ? Math.min(100, Math.round((slots.taken / slots.cap) * 100)) : 0;
-  const isClosed = slots?.closed;
+  const podiumRows = rows.slice(0, 3);
+  const tailRows = rows.slice(3);
 
   return (
     <div className="relative min-h-screen">
-      {/* Background glow */}
       <div className="fixed inset-0 z-0 pointer-events-none opacity-40">
-        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_0%,rgba(251,191,36,0.18),transparent_60%)]" />
-        <div className="absolute top-1/3 right-0 w-[400px] h-[400px] rounded-full bg-amber-500/15 blur-[140px] mix-blend-screen" />
-        <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] rounded-full bg-emerald-500/10 blur-[150px] mix-blend-screen" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[500px] rounded-full bg-amber-500/10 blur-[150px]" />
+        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] rounded-full bg-emerald-500/10 blur-[150px]" />
       </div>
 
-      <div className="relative z-10 max-w-3xl mx-auto p-4 md:p-8 space-y-6 pb-24">
-        {/* Hero */}
-        <div className="text-center space-y-3 pt-4">
-          <Badge className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1">
-            <Flame className="w-3 h-3 mr-1" /> Launching Soon — Pre-Register
+      <div className="relative z-10 max-w-3xl mx-auto p-4 md:p-8 space-y-5 pb-24">
+        <div className="text-center space-y-2 pt-2">
+          <Badge className="bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-3 py-0.5">
+            <Flame className="w-3 h-3 mr-1" /> Live now
           </Badge>
-          <h1 className="text-3xl md:text-5xl font-bold tracking-tight">
-            The Opinions.ng <span className="text-amber-400">Leaderboard</span>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
+            The <span className="text-amber-400">Leaderboard</span>
           </h1>
-          <p className="text-sm md:text-base text-muted-foreground max-w-xl mx-auto">
-            Predict smarter. Back your calls. Win cash + bonus credits every week and every day.
-            Pre-register now to lock your seat — slots are limited.
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            The country&rsquo;s sharpest forecasters, ranked by points. Updates every Monday 00:00 WAT.
           </p>
         </div>
 
-        {/* Slots / FOMO bar */}
-        {slots && (
-          <Card className={`border ${isClosed ? 'border-red-500/40 bg-red-500/5' : 'border-amber-500/40 bg-amber-500/5'}`}>
-            <CardContent className="p-4 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold uppercase tracking-wider">
-                  {isClosed ? 'Waitlist Closed' : 'Slots Claimed'}
-                </span>
-                <span className="font-mono">
-                  {slots.taken.toLocaleString()} / {slots.cap.toLocaleString()}
-                </span>
-              </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${isClosed ? 'bg-red-500' : 'bg-gradient-to-r from-amber-500 to-emerald-400'}`}
-                  style={{ width: `${fillPct}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {isClosed
-                  ? 'Pre-registration is closed. The leaderboard goes live to claimed seats first.'
-                  : `${slots.remaining.toLocaleString()} seats left — once it fills, signups halt until launch.`}
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        <Tabs value={windowKey} onValueChange={(v) => setWindowKey(v as WindowKey)}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="daily">Today</TabsTrigger>
+            <TabsTrigger value="weekly">This Week</TabsTrigger>
+            <TabsTrigger value="alltime">All-Time</TabsTrigger>
+          </TabsList>
 
-        {/* Signup card */}
-        {!joined ? (
-          <Card className="border-amber-500/30">
-            <CardContent className="p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <h2 className="text-lg font-semibold">Claim your seat</h2>
-              </div>
-
-              {isClosed ? (
-                <p className="text-sm text-muted-foreground">
-                  We&apos;ve hit the cap for the launch cohort. Follow us on X and IG for the next intake window.
-                </p>
-              ) : session ? (
-                // Signed-in: 1-click flow
-                <div className="space-y-3">
+          {(['daily', 'weekly', 'alltime'] as WindowKey[]).map(k => (
+            <TabsContent key={k} value={k} className="pt-4 space-y-5">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : rows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <AlertCircle className="w-10 h-10 text-muted-foreground/40 mb-3" />
                   <p className="text-sm text-muted-foreground">
-                    You&apos;re signed in as <span className="text-foreground font-medium">{session.user.email}</span>.
-                    One click and you&apos;re in.
+                    No-one&rsquo;s on the board {WINDOW_LABEL[k].toLowerCase()} yet.
                   </p>
-                  <div className="space-y-2">
-                    <Label className="text-xs">How did you hear about us? (optional)</Label>
-                    <Input
-                      placeholder="X / Instagram / friend / Google"
-                      value={source}
-                      onChange={(e) => setSource(e.target.value)}
-                    />
-                  </div>
-                  <Button
-                    onClick={handleSignedInJoin}
-                    disabled={isSubmitting}
-                    className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold"
-                  >
-                    {isSubmitting
-                      ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Reserving…</>
-                      : <><Crown className="w-4 h-4 mr-2" />Reserve My Seat</>
-                    }
-                  </Button>
+                  <p className="text-[11px] text-muted-foreground/70 mt-1">Be the first to land a correct call.</p>
                 </div>
               ) : (
-                // Anonymous: form + auth nudge
-                <form className="space-y-3" onSubmit={handleAnonJoin}>
-                  <div className="space-y-2">
-                    <Label className="text-xs">Email *</Label>
-                    <Input
-                      type="email"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <Label className="text-xs">Phone (optional)</Label>
-                      <Input
-                        type="tel"
-                        placeholder="+234…"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                      />
+                <>
+                  <Podium rows={podiumRows} />
+                  {tailRows.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 px-3">
+                        <Sparkles className="w-3 h-3 text-emerald-400" />
+                        <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-muted-foreground">
+                          Top {Math.min(rows.length, 50)} · {WINDOW_LABEL[k]}
+                        </p>
+                      </div>
+                      {tailRows.map(r => <ListRow key={r.userId} row={r} />)}
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs">How did you hear about us?</Label>
-                      <Input
-                        placeholder="X / IG / friend…"
-                        value={source}
-                        onChange={(e) => setSource(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    type="submit"
-                    disabled={isSubmitting || !email}
-                    className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold"
-                  >
-                    {isSubmitting
-                      ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Reserving…</>
-                      : <>Reserve My Seat</>
-                    }
-                  </Button>
-
-                  <div className="pt-2 text-center text-xs text-muted-foreground">
-                    Already an account? <span className="text-amber-300">Sign in</span> for a 1-click reservation.
-                    <div className="mt-2 flex justify-center">
-                      <AuthModal />
-                    </div>
-                  </div>
-                </form>
+                  )}
+                </>
               )}
-            </CardContent>
-          </Card>
-        ) : (
-          <Card className="border-emerald-500/40 bg-emerald-500/5">
-            <CardContent className="p-5 flex items-center gap-3">
-              <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold">You&apos;re on the list.</p>
-                <p className="text-xs text-muted-foreground">
-                  We&apos;ll email you the second the leaderboard goes live. Bring your A-game.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+            </TabsContent>
+          ))}
+        </Tabs>
 
-        {/* Weekly prizes */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <Trophy className="w-4 h-4 text-amber-400" />
-            <h3 className="text-base font-semibold">Weekly Prize Pool</h3>
-            <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-300">
-              Resets Mon 00:00 WAT
-            </Badge>
-          </div>
-          <Card>
-            <CardContent className="p-0 divide-y divide-border/40">
-              {WEEKLY_PRIZES.map((p) => (
-                <div key={p.rank} className="flex items-center gap-3 p-3">
-                  <div className="w-10 text-center font-bold tabular-nums text-sm">
-                    #{p.rank}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{p.reward}</div>
-                    <div className="text-[11px] text-muted-foreground">{p.type}</div>
-                  </div>
-                  <Badge variant="outline" className="text-[10px] gap-1">
-                    <p.icon className={`w-3 h-3 ${p.color}`} />
-                    {p.badge}
-                  </Badge>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-          <p className="text-[11px] text-muted-foreground mt-2 px-1">
-            Eligibility: ₦2,000+ committed AND 5+ resolved predictions in the cycle.
-          </p>
-        </div>
-
-        {/* Daily prizes */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <Zap className="w-4 h-4 text-emerald-400" />
-            <h3 className="text-base font-semibold">Daily Prize Pool</h3>
-            <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-300">
-              Resets midnight WAT
-            </Badge>
-          </div>
-          <Card>
-            <CardContent className="p-0 divide-y divide-border/40">
-              {DAILY_PRIZES.map((p) => (
-                <div key={p.rank} className="flex items-center gap-3 p-3">
-                  <div className="w-10 text-center font-bold tabular-nums text-sm">
-                    #{p.rank}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{p.reward}</div>
-                    <div className="text-[11px] text-muted-foreground">{p.label}</div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-          <p className="text-[11px] text-muted-foreground mt-2 px-1">
-            Eligibility: 3+ resolved predictions in the day.
-          </p>
-        </div>
-
-        {/* How points work */}
-        <Card className="bg-card/40 border-muted/40">
-          <CardContent className="p-5 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-purple-400" />
-              How Points Are Earned
-            </h3>
-            <ul className="text-xs text-muted-foreground space-y-1.5 list-disc pl-5">
-              <li><span className="text-foreground font-medium">Predicting:</span> 1 pt per ₦250 committed (a ₦1,000 prediction = 4 pts).</li>
-              <li><span className="text-foreground font-medium">Correct calls:</span> 1 pt per ₦100 of profit on resolved predictions.</li>
-              <li><span className="text-foreground font-medium">Normal referral:</span> 200 pts + ₦200 bonus credits per signup.</li>
-              <li><span className="text-foreground font-medium">VIP referral:</span> 1,000 pts + commission share from referees&apos; activity.</li>
-            </ul>
-            <p className="text-[10px] text-muted-foreground/80 pt-2">
-              Cash prizes require KYC. Bonus credits must be used in predictions 1× before withdrawal.
-              Full T&amp;Cs at <a href="/terms" className="underline">/terms</a>.
-            </p>
-          </CardContent>
-        </Card>
+        <p className="text-[10px] text-center text-muted-foreground/60 pt-2">
+          1 pt per ₦250 staked · 1 pt per ₦100 profit · referral bonuses count too.
+        </p>
       </div>
     </div>
   );

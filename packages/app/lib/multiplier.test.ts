@@ -102,7 +102,7 @@ describe('validateSlip', () => {
     expect(r.error).toBe('duplicate_event');
   });
 
-  it('rejects a leg below the minimum odds (1.20×)', () => {
+  it('rejects a leg below the minimum odds (1.15×)', () => {
     const r = validateSlip([leg(1, 0, 1.10), leg(2, 0, 3.0), leg(3, 0, 2.0)], 200);
     expect(r.ok).toBe(false);
     expect(r.error).toBe('leg_below_min_odds');

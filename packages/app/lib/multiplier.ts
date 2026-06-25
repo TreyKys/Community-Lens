@@ -35,10 +35,14 @@ export const MULT_MAX_LEGS_TIER2 = 10;
 
 /**
  * A leg must price at least this to be eligible. Stops users stuffing a
- * slip with 1.01× near-certainties to farm Boosts / grind a guaranteed
- * combined return. 1.20× forces every leg to carry real risk.
+ * slip with 1.05× near-certainties to farm Boosts / grind a guaranteed
+ * combined return. 1.15× still permits "strong favourite" picks
+ * (Champions-League side vs Conference side, top-of-the-table at home)
+ * while excluding trivial filler. Lowered from 1.20 once the combined
+ * floor (MULT_MIN_COMBINED_ODDS) proved to be doing most of the
+ * sure-thing-farming defence on its own.
  */
-export const MULT_MIN_LEG_ODDS = 1.20;
+export const MULT_MIN_LEG_ODDS = 1.15;
 
 /**
  * The combined product must clear this. Blocks risk-free arbitrage and

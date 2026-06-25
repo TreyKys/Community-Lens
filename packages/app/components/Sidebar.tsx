@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote } from 'lucide-react';
+import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote, Crown } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -71,6 +71,9 @@ export function Sidebar() {
         </Button>
         <Button variant="ghost" className="w-full justify-start gap-2 hover:bg-muted/50" onClick={() => router.push('/bets')}>
           <Receipt className="h-4 w-4" /> Picks
+        </Button>
+        <Button variant="ghost" className="w-full justify-start gap-2 hover:bg-muted/50" onClick={() => router.push('/leaderboard')}>
+          <Crown className="h-4 w-4 text-amber-400" /> Leaderboard
         </Button>
       </div>
 
