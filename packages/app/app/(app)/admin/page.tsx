@@ -668,10 +668,12 @@ function OwnerActivityPanel() {
                       </div>
                       {/* User attribution — Owner Activity's recent list is
                           flat across every owner, so without this the row
-                          doesn't say who staked it. email is already on
-                          the payload (api/admin/owner-activity adds it). */}
+                          doesn't say who staked it. Show the @username
+                          (the public identifier on the leaderboard + share
+                          cards); fall back to first_name, then a shortened
+                          UUID if nothing else is set. */}
                       <div className="text-[10px] text-muted-foreground/80 truncate">
-                        {r.email || r.user_id}
+                        {r.username ? `@${r.username}` : (r.first_name || `user ${String(r.user_id).slice(0, 8)}`)}
                       </div>
                     </div>
                   </div>

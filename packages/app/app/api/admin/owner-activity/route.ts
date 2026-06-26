@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const [userRows, recent, lifetimeBets, last24h] = await Promise.all([
       supabaseAdmin
         .from('users')
-        .select('id, email, tngn_balance, bonus_balance')
+        .select('id, email, username, first_name, tngn_balance, bonus_balance')
         .in('id', ownerIds),
       supabaseAdmin
         .from('user_bets')
@@ -79,12 +79,17 @@ export async function GET(request: Request) {
       bonus_balance: Number(usersById[o.user_id]?.bonus_balance ?? 0),
     }));
 
-    const recentDetailed = recentRows.map(r => ({
-      ...r,
-      market_question: marketsById[r.market_id]?.question ?? null,
-      outcome_label:   marketsById[r.market_id]?.options?.[r.outcome_index] ?? null,
-      email:           usersById[r.user_id]?.email ?? null,
-    }));
+    const recentDetailed = recentRows.map(r => {
+      const u = usersById[r.user_id] as any;
+      return {
+        ...r,
+        market_question: marketsById[r.market_id]?.question ?? null,
+        outcome_label:   marketsById[r.market_id]?.options?.[r.outcome_index] ?? null,
+        email:           u?.email ?? null,
+        username:        u?.username ?? null,
+        first_name:      u?.first_name ?? null,
+      };
+    });
 
     const sumPayouts = (rows: any[]) => rows
       .filter(r => r.status === 'won')
