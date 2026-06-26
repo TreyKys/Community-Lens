@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote, Crown } from 'lucide-react';
@@ -46,6 +46,7 @@ const CATEGORIES: Category[] = [
 export function Sidebar() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const currentCategory = searchParams.get('category') || 'trending';
   const currentSubcategory = searchParams.get('subcategory');
 
@@ -64,16 +65,35 @@ export function Sidebar() {
 
   return (
     <div className="w-64 border-r bg-background min-h-screen p-4 flex flex-col gap-1 md:flex">
-      {/* Desktop Top Links */}
+      {/* Leaderboard — promoted to its own section above the user links
+          and the market category list. We rendered it inside the Profile
+          / Picks group originally, but that group was wrapped in
+          `hidden md:flex` (kept off mobile because the bottom tab bar
+          covers Profile + Picks there), so Leaderboard disappeared
+          entirely on phones. Split it out, give it a visible label, and
+          render on every breakpoint. */}
+      <div className="flex flex-col gap-1 mb-3 border-b pb-3">
+        <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-muted-foreground px-3 mb-1">
+          League
+        </p>
+        <Button
+          variant={pathname?.startsWith('/leaderboard') ? 'secondary' : 'ghost'}
+          className="w-full justify-start gap-2 hover:bg-muted/50"
+          onClick={() => router.push('/leaderboard')}
+        >
+          <Crown className="h-4 w-4 text-amber-400 drop-shadow-[0_0_8px_currentColor]" /> Leaderboard
+        </Button>
+      </div>
+
+      {/* Desktop-only top links — duplicates Profile + Picks from the
+          mobile bottom tab bar, so they stay hidden on mobile to avoid
+          two entry points for the same destination at once. */}
       <div className="hidden md:flex flex-col gap-1 mb-4 border-b pb-4">
         <Button variant="ghost" className="w-full justify-start gap-2 hover:bg-muted/50" onClick={() => router.push('/profile')}>
           <User className="h-4 w-4" /> Profile
         </Button>
         <Button variant="ghost" className="w-full justify-start gap-2 hover:bg-muted/50" onClick={() => router.push('/bets')}>
           <Receipt className="h-4 w-4" /> Picks
-        </Button>
-        <Button variant="ghost" className="w-full justify-start gap-2 hover:bg-muted/50" onClick={() => router.push('/leaderboard')}>
-          <Crown className="h-4 w-4 text-amber-400" /> Leaderboard
         </Button>
       </div>
 
