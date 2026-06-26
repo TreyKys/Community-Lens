@@ -56,6 +56,8 @@ export async function GET(
       ownerAccountRow,
       allBets,
       recentBets,
+      allSlips,
+      recentSlips,
       squadDeposits,
       withdrawals,
       ownedCodes,
@@ -88,6 +90,30 @@ export async function GET(
         .eq('user_id', user.id)
         .order('placed_at', { ascending: false })
         .limit(50),
+      // Multiplier slips — summary roll-up across every slip the user has
+      // ever placed. Cheap query, just status + the payout columns; the
+      // forensic drawer can compute counts + totals from this.
+      supabaseAdmin
+        .from('multiplier_slips')
+        .select('slip_stake_tngn, final_payout_tngn, status')
+        .eq('user_id', user.id),
+      // Recent slips with their legs + each leg's market joined in, so
+      // the drawer can render the per-leg breakdown without an N+1.
+      // Mirrors the shape the user-facing /bets page uses.
+      supabaseAdmin
+        .from('multiplier_slips')
+        .select(`
+          id, slip_stake_tngn, net_slip_stake_tngn, combined_odds,
+          effective_combined_odds, payout_tngn, final_payout_tngn,
+          legs_total, legs_resolved, legs_won, status, created_at, settled_at,
+          multiplier_legs (
+            id, market_id, outcome_index, locked_odds, realized_odds, status,
+            markets:market_id (id, title, question, options, status, resolved_outcome)
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(25),
       supabaseAdmin
         .from('squad_transactions')
         .select('transaction_ref, amount_ngn, tngn_credited, spread_captured, status, created_at')
@@ -202,6 +228,26 @@ export async function GET(
       netResult: betSummary.totalWon - betSummary.totalStaked,
     };
 
+    // Slip summary — same shape as betSummaryWithNet so the drawer can
+    // render counts + net result in the same Stat layout.
+    const allSlipRows = (allSlips.data || []) as any[];
+    const wonSlips = allSlipRows.filter(s => s.status === 'won');
+    const settledSlips = allSlipRows.filter(s => s.status === 'won' || s.status === 'lost');
+    const slipSummary = {
+      total: allSlipRows.length,
+      active: allSlipRows.filter(s => s.status === 'active').length,
+      won: wonSlips.length,
+      lost: allSlipRows.filter(s => s.status === 'lost').length,
+      voided: allSlipRows.filter(s => s.status === 'voided').length,
+      totalStaked: allSlipRows.reduce((s, x) => s + Number(x.slip_stake_tngn || 0), 0),
+      totalWon: wonSlips.reduce((s, x) => s + Number(x.final_payout_tngn || 0), 0),
+      winRate: settledSlips.length > 0 ? wonSlips.length / settledSlips.length : 0,
+    };
+    const slipSummaryWithNet = {
+      ...slipSummary,
+      netResult: slipSummary.totalWon - slipSummary.totalStaked,
+    };
+
     const depositRows = squadDeposits.data || [];
     const completedDeposits = depositRows.filter(d => d.status === 'completed');
     const depositSummary = {
@@ -270,6 +316,10 @@ export async function GET(
           outcome_label: marketsById[b.market_id]?.options?.[b.outcome_index] ?? null,
           market_status: marketsById[b.market_id]?.status ?? null,
         })),
+      },
+      slips: {
+        summary: slipSummaryWithNet,
+        recent: (recentSlips.data || []) as any[],
       },
       deposits: {
         summary: depositSummary,

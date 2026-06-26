@@ -5,7 +5,7 @@ import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, User as UserIcon, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, Users as UsersIcon, Award, Activity, Bell } from 'lucide-react';
+import { Loader2, User as UserIcon, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, Users as UsersIcon, Award, Activity, Bell, Layers, CheckCircle2, XCircle, Shield, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -82,6 +82,7 @@ export function UserDetailDrawer({ userId, onClose }: Props) {
                 {[
                   { value: 'overview',     label: 'Overview',     icon: UserIcon },
                   { value: 'bets',         label: `Bets (${data.bets.summary.total})`, icon: TrendingUp },
+                  { value: 'slips',        label: `Slips (${data.slips?.summary?.total ?? 0})`, icon: Layers },
                   { value: 'deposits',     label: `Deposits (${data.deposits.summary.count})`, icon: ArrowDownToLine },
                   { value: 'withdrawals',  label: `Withdrawals (${data.withdrawals.summary.count})`, icon: ArrowUpFromLine },
                   { value: 'referrals',    label: `Referrals (${data.referrals.refereesCount})`, icon: UsersIcon },
@@ -177,6 +178,95 @@ export function UserDetailDrawer({ userId, onClose }: Props) {
                       </div>
                     </>
                   )}
+                </RowList>
+              </TabsContent>
+
+              {/* SLIPS — Multiplier parlays ─────────────────────────── */}
+              <TabsContent value="slips" className="p-6 mt-0 space-y-4">
+                {data.slips?.summary && data.slips.summary.total > 0 && (
+                  <Section title="Slip totals">
+                    <Stat label="Total" value={data.slips.summary.total} />
+                    <Stat label="Won" value={data.slips.summary.won} color="text-emerald-400" />
+                    <Stat label="Lost" value={data.slips.summary.lost} color="text-red-400" />
+                    <Stat label="Voided" value={data.slips.summary.voided} color="text-amber-400" />
+                    <Stat label="Staked" value={f(data.slips.summary.totalStaked)} />
+                    <Stat label="Paid out" value={f(data.slips.summary.totalWon)} color="text-emerald-400" />
+                    <Stat
+                      label="Net result"
+                      value={`${data.slips.summary.netResult >= 0 ? '+' : ''}${f(data.slips.summary.netResult)}`}
+                      color={data.slips.summary.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'}
+                    />
+                  </Section>
+                )}
+                <RowList rows={data.slips?.recent || []} empty="No Multiplier slips placed yet.">
+                  {(s: any) => {
+                    const legs = Array.isArray(s.multiplier_legs) ? s.multiplier_legs : [];
+                    const finalPayout = Number(s.final_payout_tngn ?? s.payout_tngn ?? 0);
+                    return (
+                      <div className="space-y-2">
+                        {/* Header — status + combined odds + stake/payout */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <StatusBadge status={s.status} />
+                          <span className="text-sm font-semibold tabular-nums">
+                            {Number(s.combined_odds || 0).toFixed(2)}×
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {s.legs_total}-leg · {s.legs_resolved}/{s.legs_total} in
+                          </span>
+                          <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
+                            {dt(s.created_at)}
+                          </span>
+                        </div>
+
+                        {/* Per-leg breakdown — what the slip actually was. */}
+                        <div className="rounded-md border border-border/40 divide-y divide-border/40">
+                          {legs.map((leg: any) => {
+                            const opts = Array.isArray(leg?.markets?.options) ? leg.markets.options : [];
+                            const pick = opts[leg.outcome_index] ?? `outcome ${leg.outcome_index}`;
+                            const question = leg?.markets?.title || leg?.markets?.question || `Market #${leg.market_id}`;
+                            const LegIcon =
+                              leg.status === 'won'  ? CheckCircle2 :
+                              leg.status === 'lost' ? XCircle :
+                              leg.status === 'void' ? Shield      : Clock;
+                            const legColor =
+                              leg.status === 'won'  ? 'text-emerald-400' :
+                              leg.status === 'lost' ? 'text-red-400'     :
+                              leg.status === 'void' ? 'text-amber-400'   : 'text-muted-foreground';
+                            return (
+                              <div key={leg.id} className="flex items-start gap-2 px-2.5 py-1.5">
+                                <LegIcon className={cn('w-3 h-3 mt-0.5 shrink-0', legColor)} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[11px] truncate">{question}</div>
+                                  <div className="text-[10px] text-muted-foreground truncate">
+                                    Pick: <span className="text-foreground/80">{pick}</span> · <span className="tabular-nums">{Number(leg.locked_odds).toFixed(2)}×</span>
+                                  </div>
+                                </div>
+                                <span className={cn('text-[10px] font-semibold uppercase tracking-wider', legColor)}>
+                                  {leg.status === 'void' ? 'void' : leg.status}
+                                </span>
+                              </div>
+                            );
+                          })}
+                          {legs.length === 0 && (
+                            <p className="text-[11px] text-muted-foreground px-2.5 py-1.5">
+                              Legs unavailable.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Footer — stake / payout / P&L */}
+                        <div className="flex items-center gap-4 text-[11px] text-muted-foreground tabular-nums">
+                          <span>Stake: <span className="text-foreground">{f(s.slip_stake_tngn)}</span></span>
+                          <span>
+                            {s.status === 'won'    ? <>Paid: <span className="text-emerald-400">{f(finalPayout)}</span></> :
+                             s.status === 'voided' ? <>Refund: <span className="text-amber-400">{f(s.slip_stake_tngn)}</span></> :
+                             s.status === 'lost'   ? <span className="text-red-400">Lost</span> :
+                                                     <>Projected: <span className="text-foreground">{f(s.payout_tngn)}</span></>}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }}
                 </RowList>
               </TabsContent>
 
