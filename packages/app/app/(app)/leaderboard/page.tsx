@@ -84,7 +84,7 @@ function PodiumCard({ row }: { row: Row }) {
           <p className="text-lg font-black tabular-nums">{row.points.toLocaleString()}<span className="text-[10px] text-muted-foreground ml-1">pts</span></p>
           {row.accuracy != null && (
             <p className="text-[10px] text-muted-foreground">
-              <span className="tabular-nums">{row.accuracy}%</span> accuracy · {row.resolvedBets} resolved
+              <span className="tabular-nums">{row.accuracy}%</span> accuracy
             </p>
           )}
           <Badge variant="outline" className={cn('text-[9px] border-transparent', tier.color)}>
@@ -106,7 +106,7 @@ function ListRow({ row }: { row: Row }) {
           <p className="text-sm font-semibold truncate">@{row.username}</p>
           <p className="text-[10px] text-muted-foreground">
             {row.accuracy != null
-              ? <><span className="tabular-nums">{row.accuracy}%</span> · {row.resolvedBets} resolved · <span className={tier.color}>{tier.label}</span></>
+              ? <><span className="tabular-nums">{row.accuracy}%</span> accuracy · <span className={tier.color}>{tier.label}</span></>
               : <span className={tier.color}>{tier.label} — building a record</span>}
           </p>
         </div>

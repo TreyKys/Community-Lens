@@ -652,21 +652,30 @@ function OwnerActivityPanel() {
             <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Recent bets</h4>
             <div className="space-y-1">
               {data.recent.slice(0, 10).map((r: any) => (
-                <div key={r.id} className="flex items-center justify-between text-xs bg-card/40 rounded-md px-3 py-1.5 border border-fuchsia-500/10">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Badge className={cn('text-[10px] h-5',
+                <div key={r.id} className="flex items-center justify-between gap-2 text-xs bg-card/40 rounded-md px-3 py-1.5 border border-fuchsia-500/10">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <Badge className={cn('text-[10px] h-5 shrink-0',
                       r.status === 'won'      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
                       r.status === 'lost'     ? 'bg-red-500/20 text-red-400 border-red-500/30' :
                       r.status === 'refunded' ? 'bg-muted text-muted-foreground border-muted' :
                                                 'bg-blue-500/20 text-blue-400 border-blue-500/30')}>
                       {r.status.toUpperCase()}
                     </Badge>
-                    <span className="truncate">
-                      {r.market_question || `market #${r.market_id}`}
-                      {r.outcome_label ? ` · ${r.outcome_label}` : ''}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate">
+                        {r.market_question || `market #${r.market_id}`}
+                        {r.outcome_label ? ` · ${r.outcome_label}` : ''}
+                      </div>
+                      {/* User attribution — Owner Activity's recent list is
+                          flat across every owner, so without this the row
+                          doesn't say who staked it. email is already on
+                          the payload (api/admin/owner-activity adds it). */}
+                      <div className="text-[10px] text-muted-foreground/80 truncate">
+                        {r.email || r.user_id}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-muted-foreground">
+                  <div className="flex items-center gap-3 text-muted-foreground shrink-0">
                     <span>stake {f(r.stake_tngn)}</span>
                     {r.status === 'won' && <span className="text-emerald-400">+{f(r.payout_tngn)}</span>}
                   </div>
