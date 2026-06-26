@@ -180,20 +180,32 @@ export async function POST(req: Request) {
     ]);
 
     // Welcome Match: idempotent per-user, only fires on the first qualifying
-    // deposit and only inside the offer window. Match is matched on the
-    // tNGN-credited amount (post-spread) so what they predicted with is what
-    // we match. Failure here must not break the deposit flow.
+    // deposit and only inside the offer window. We pass the GROSS deposit
+    // (not the post-spread number) so the RPC's min-deposit threshold lines
+    // up with what the user sees in the WalletModal — "Minimum deposit is
+    // ₦500" → depositing exactly ₦500 must qualify, even though our 1%
+    // spread leaves only ₦495 in their wallet. Failure here must not break
+    // the deposit flow. A notification fires alongside the treasury log so
+    // the user actually sees that the bonus landed.
     let welcomeCredit = 0;
     try {
       const { data: matchAmt } = await supabaseAdmin.rpc('claim_welcome_match', {
         p_user_id: userId,
-        p_deposit_amount: tNGNToCredit,
+        p_deposit_amount: amountInNGN,
       });
       welcomeCredit = Number(matchAmt || 0);
       if (welcomeCredit > 0) {
         await supabaseAdmin.from('treasury_log').insert([
           { type: 'welcome_match', amount_tngn: welcomeCredit, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
         ]);
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: userId,
+            type: 'welcome_match',
+            message: `🎉 Welcome bonus! ₦${welcomeCredit.toLocaleString()} matched on your first deposit. Spend it on your next prediction.`,
+            amount: welcomeCredit,
+          });
+        } catch { /* notification non-critical */ }
       }
     } catch (e: any) {
       console.error('Welcome match grant failed (deposit still credited):', e?.message || e);

@@ -137,17 +137,30 @@ export async function POST(request: Request) {
     // redirect lands ~1s before its webhook), and once verify flips the
     // status to 'completed' the webhook short-circuits without granting
     // the match. Net effect: first deposits silently missed the bonus.
+    //
+    // We pass the GROSS deposit (not post-spread) so the RPC's
+    // min-deposit threshold lines up with the WalletModal copy that
+    // says "Minimum deposit is ₦500" — depositing exactly ₦500 must
+    // qualify, even though the 1% spread leaves ₦495 in the wallet.
     let welcomeCredit = 0;
     try {
       const { data: matchAmt } = await supabaseAdmin.rpc('claim_welcome_match', {
         p_user_id: userId,
-        p_deposit_amount: tNGNToCredit,
+        p_deposit_amount: amountInNGN,
       });
       welcomeCredit = Number(matchAmt || 0);
       if (welcomeCredit > 0) {
         await supabaseAdmin.from('treasury_log').insert([
           { type: 'welcome_match', amount_tngn: welcomeCredit, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
         ]);
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: userId,
+            type: 'welcome_match',
+            message: `🎉 Welcome bonus! ₦${welcomeCredit.toLocaleString()} matched on your first deposit. Spend it on your next prediction.`,
+            amount: welcomeCredit,
+          });
+        } catch { /* notification non-critical */ }
       }
     } catch (e: any) {
       console.error('Welcome match grant failed (deposit still credited):', e?.message || e);
