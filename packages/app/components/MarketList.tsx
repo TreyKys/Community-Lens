@@ -368,44 +368,36 @@ function BettingInterface({
       )}
 
       {payoutPreview && (() => {
-        // First-mover state: parimutuel formula collapses to "user pays
-        // themselves back minus rake" — that's the bogus 0.89× we used
-        // to show. Replace with the friendly floor (1.03× / 1.02× —
-        // same as locked-odds; see lib/displayMultiplier) shown in the
-        // same emerald positive frame. The backend honours this number
-        // at settlement: a market that voids credits MAX(net_stake,
-        // floor_payout), so the displayed promise is real.
-        const floor = payoutPreview.isFirstMover ? displayFloorPayout(stakeNum) : null;
+        // No "first-mover" concept on screen anymore. Every parimutuel
+        // bet displays the SAME thing a locked-odds bet does: a clean
+        // guaranteed rate. We show MAX(pro-rata projection, floor) so:
+        //   - empty / thin opposing pool → the floor (1.03× / 1.02×)
+        //     binds, exactly what settlement pays.
+        //   - rich opposing pool → the higher pro-rata number shows.
+        // The settlement path pays MAX(pro-rata, floor) too, so the
+        // displayed "₦X if correct" is always a real promise — never
+        // the old sub-1.00× "you'd pay yourself back" number, and never
+        // a scary "needs an opposing prediction" warning.
+        const floor = displayFloorPayout(stakeNum);
+        const useFloor = floor.payout >= payoutPreview.payout;
+        const shownMultiplier = useFloor ? floor.multiplier : payoutPreview.multiplier;
+        const shownPayout = useFloor ? floor.payout : payoutPreview.payout;
         return (
           <div className="rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.04] to-transparent p-3.5 animate-in fade-in slide-in-from-bottom-1">
             <div className="flex items-center gap-1 mb-1 text-[10px] uppercase tracking-[0.12em] text-emerald-300/90 font-semibold">
-              <Sparkles className="w-3 h-3" />
-              {floor ? 'First on this market — locks at' : 'Your stake locks at'}
+              <Sparkles className="w-3 h-3" /> Your stake locks at
             </div>
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight tabular-nums leading-none">
-                {(floor ? floor.multiplier : payoutPreview.multiplier).toFixed(2)}×
+                {shownMultiplier.toFixed(2)}×
               </span>
               <span className="text-sm text-emerald-300/80 font-semibold tabular-nums">
-                ₦{Math.round(floor ? floor.payout : payoutPreview.payout).toLocaleString()} if correct
+                ₦{Math.round(shownPayout).toLocaleString()} if correct
               </span>
             </div>
-            {floor ? (
-              // Three facts the user needs to know to feel safe placing
-              // first: (1) they're the first mover, (2) the upside grows
-              // as the other side fills, (3) the floor sticks even if
-              // no one else predicts. Two lines because trying to cram
-              // all three into one breadcrumb reads as small print.
-              <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground leading-snug">
-                <p>Your payout <span className="text-emerald-300">climbs</span> as others predict the other way.</p>
-                <p>If no one does, you still keep this floor.</p>
-              </div>
-            ) : (
-              <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                <span>Final payout calculated from pool at close.</span>
-                <span className="text-muted-foreground/60 tabular-nums">{Math.round(payoutPreview.impliedProb * 100)}% implied</span>
-              </div>
-            )}
+            <div className="mt-2 text-[11px] text-muted-foreground leading-snug">
+              Guaranteed minimum. Climbs as more people predict the other way.
+            </div>
           </div>
         );
       })()}
