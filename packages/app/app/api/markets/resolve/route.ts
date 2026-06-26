@@ -268,20 +268,67 @@ async function resolveLockedOddsMarket(args: {
 
   const summary = settleLockedMarket(lockedBets, resolution);
 
-  // One-sided check (no winners): refund losers at net stake, mark
-  // market voided. Mirrors the existing parimutuel void path.
-  if (summary.isOneSided || lockedBets.filter(b => b.outcomeIndex === winningOutcomeIndex).length === 0) {
+  // No-winners case: the winning outcome had zero bets. Used to void
+  // + refund; the platform doesn't have a void state anymore. Every
+  // bet loses, house keeps the net stakes, market resolves normally.
+  // The all-winners case (everyone bet the winning side) used to share
+  // the same void block — that now falls through to the normal payment
+  // path below, where each winner gets their locked-odds floor payout
+  // and apply_house_pnl absorbs the negative gap.
+  const winnerCount = lockedBets.filter(b => b.outcomeIndex === winningOutcomeIndex).length;
+  if (winnerCount === 0) {
+    let totalHouseGain = 0;
     for (const lb of lockedBets) {
-      await supabaseAdmin.rpc('credit_user', {
-        p_user_id: lb.userId,
-        p_tngn_delta: lb.netStakeTngn,
-        p_bonus_delta: 0,
-      });
-      await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', lb.id);
+      await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', lb.id);
+      await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
+      try {
+        await supabaseAdmin.from('notifications').insert({
+          user_id: lb.userId,
+          type: 'bet_lost',
+          message: `Your prediction didn't land this time — better luck on the next call.`,
+        });
+      } catch { /* non-critical */ }
+      totalHouseGain += lb.netStakeTngn;
     }
-    await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
+
+    const { data: reserveAfter, error: reserveErr } = await supabaseAdmin
+      .rpc('apply_house_pnl', {
+        p_pnl_tngn: totalHouseGain,
+        p_market_id: marketId,
+      })
+      .single<{ total_tngn: number; floor_tngn: number; deployable_tngn: number }>();
+    if (reserveErr) {
+      console.error('apply_house_pnl failed at locked-odds no-winners settlement:', reserveErr);
+    }
+
+    await supabaseAdmin.from('treasury_log').insert({
+      type: 'locked_settlement_pnl',
+      amount_tngn: totalHouseGain,
+      market_id: marketId,
+      metadata: {
+        bet_count: lockedBets.length,
+        winners: 0,
+        losers: lockedBets.length,
+        no_winners: true,
+        reserve_after: reserveAfter ?? null,
+      },
+      created_at: new Date().toISOString(),
+    });
+
+    await supabaseAdmin.from('markets').update({
+      status: 'resolved',
+      resolved_outcome: winningOutcomeIndex,
+      resolved_at: new Date().toISOString(),
+    }).eq('id', marketId);
     await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
-    return NextResponse.json({ status: 'voided', reason: 'No winners — all bets refunded at net stake' });
+
+    return NextResponse.json({
+      success: true,
+      status: 'resolved',
+      winnersCount: 0,
+      losersCount: lockedBets.length,
+      houseGainTngn: totalHouseGain,
+    });
   }
 
   // Pay winners + award win points.
@@ -491,26 +538,107 @@ export async function POST(request: Request) {
     const losingPool = losingBets.reduce((s, b) => s + b.net_stake_tngn, 0);
     const totalPool = winningPool + losingPool;
 
-    // Void if no losers or no winners — refund every bet at the
-    // friendly floor (see lib/displayMultiplier). The bet modal
-    // displays this floor as the guaranteed minimum on first-mover /
-    // empty-opposing-pool states; honouring it here keeps the
-    // displayed promise real. House eats the small ₦ delta vs.
-    // net_stake — that's the cost of the cold-start incentive that
-    // gets first movers to seed pools at all.
-    if (winningPool === 0 || losingPool === 0) {
+    // The platform doesn't have a void state anymore — both empty-pool
+    // edge cases resolve normally:
+    //
+    //   winningPool === 0  → everyone bet a losing outcome. Mark every
+    //   bet lost, fire the loss UX (insurance + notification), route
+    //   the full gross pool to the house. No winners to share with.
+    //
+    //   losingPool === 0   → everyone bet the winner. There's no losing
+    //   pool to fund a pro-rata multiplier, so pay the friendly floor
+    //   (1.03/1.02× per lib/displayMultiplier) on each winning stake.
+    //   House tops up the small delta — same cost we'd pay on a
+    //   first-mover refund, just landed via a win row instead.
+    //
+    // VIP rake routing only fires in the standard mixed-pool branch
+    // below — there's no rake on the floor case (no losing pool to
+    // derive from) and no normal rake on the all-losers case either
+    // (we already route the entire pool to the house).
+    if (winningPool === 0) {
       for (const bet of bets) {
-        const floor = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
-        const credit = Math.max(Number(bet.net_stake_tngn) || 0, floor);
+        await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', bet.id);
+        await applyFirstBetInsurance(bet.user_id, bet, marketId);
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: bet.user_id,
+            type: 'bet_lost',
+            message: `Your prediction didn't land this time — better luck on the next call.`,
+          });
+        } catch { /* non-critical */ }
+      }
+
+      await supabaseAdmin.from('treasury_log').insert({
+        type: 'resolution_rake',
+        amount_tngn: totalPool,
+        market_id: marketId,
+        metadata: { gross_pool: totalPool, no_winners: true, vip_payout_total: 0 },
+        created_at: new Date().toISOString(),
+      });
+
+      await supabaseAdmin.from('markets').update({
+        status: 'resolved',
+        resolved_outcome: winningOutcomeIndex,
+        total_pool: totalPool,
+        resolved_at: new Date().toISOString(),
+      }).eq('id', marketId);
+
+      return NextResponse.json({
+        success: true,
+        status: 'resolved',
+        winnersCount: 0,
+        losersCount: bets.length,
+        totalPool,
+      });
+    }
+
+    if (losingPool === 0) {
+      for (const bet of winningBets) {
+        const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
+        const payout = Math.max(Number(bet.net_stake_tngn) || 0, floorPayout);
         await supabaseAdmin.rpc('credit_user', {
           p_user_id: bet.user_id,
-          p_tngn_delta: credit,
+          p_tngn_delta: payout,
           p_bonus_delta: 0,
         });
-        await supabaseAdmin.from('user_bets').update({ status: 'refunded', payout_tngn: credit }).eq('id', bet.id);
+        await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
+
+        const profit = Math.max(0, payout - Number(bet.stake_tngn));
+        const winPoints = Math.max(0, Math.floor(profit / 100));
+        if (winPoints > 0) {
+          await supabaseAdmin.rpc('award_points', {
+            p_user_id: bet.user_id,
+            p_reason: 'bet_win',
+            p_points: winPoints,
+            p_bet_id: bet.id,
+            p_metadata: { payout, profit, all_winners: true },
+          });
+        }
+
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: bet.user_id,
+            type: 'bet_won',
+            message: `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`,
+            amount: payout,
+          });
+        } catch { /* non-critical */ }
       }
-      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
-      return NextResponse.json({ status: 'voided', reason: 'No losers — all bets refunded at first-mover floor' });
+
+      await supabaseAdmin.from('markets').update({
+        status: 'resolved',
+        resolved_outcome: winningOutcomeIndex,
+        total_pool: totalPool,
+        resolved_at: new Date().toISOString(),
+      }).eq('id', marketId);
+
+      return NextResponse.json({
+        success: true,
+        status: 'resolved',
+        winnersCount: winningBets.length,
+        losersCount: 0,
+        totalPool,
+      });
     }
 
     // 10% of total pool comes out as house rake. Whatever's left is split
