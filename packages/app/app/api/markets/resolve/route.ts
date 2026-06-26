@@ -697,10 +697,19 @@ export async function POST(request: Request) {
       }
     }
 
-    // Pay winners + award win points
+    // Pay winners + award win points. Each winner is paid the MAX of
+    // the parimutuel share AND the friendly floor (1.03× under ₦500,
+    // 1.02× at/above — see lib/displayMultiplier). The floor is the
+    // promise the bet modal made at stake time; it has to bind here or
+    // a thinly-betted winner could be paid less than their displayed
+    // ₦X-if-correct number. House tops up the small delta when the
+    // floor exceeds the pro-rata share.
     for (const bet of winningBets) {
       const share = bet.net_stake_tngn / winningPool;
-      const payout = share * payoutPool;
+      const parimutuelPayout = share * payoutPool;
+      const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
+      const payout = Math.max(parimutuelPayout, floorPayout);
+
       await supabaseAdmin.rpc('credit_user', {
         p_user_id: bet.user_id,
         p_tngn_delta: payout,
@@ -717,7 +726,7 @@ export async function POST(request: Request) {
           p_reason: 'bet_win',
           p_points: winPoints,
           p_bet_id: bet.id,
-          p_metadata: { payout, profit },
+          p_metadata: { payout, profit, parimutuel: parimutuelPayout, floor: floorPayout },
         });
       }
 
@@ -725,7 +734,7 @@ export async function POST(request: Request) {
         await supabaseAdmin.from('notifications').insert({
           user_id: bet.user_id,
           type: 'bet_won',
-          message: `You won! ₦${payout.toLocaleString()} has been credited to your account. 🎉`,
+          message: `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`,
           amount: payout,
         });
       } catch (err) {

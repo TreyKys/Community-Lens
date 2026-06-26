@@ -76,18 +76,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Options must be an array with at least 2 items' }, { status: 400 });
     }
 
-    // Locked-odds is the only engine new markets get to use. The
-    // parimutuel branch was the legacy path; it stays alive for the
-    // resolve route so already-deployed parimutuel markets can still
-    // be settled by their existing rules, but creating new ones is
-    // not allowed — every market created from this point onward
-    // routes through the floor-up locked-odds engine.
-    if (!isLockedOdds) {
-      return NextResponse.json(
-        { error: 'New markets must use the locked-odds engine. Set isLockedOdds=true and provide seedSizeTngn (₦1,000–₦14,000).' },
-        { status: 400 },
-      );
-    }
+    // Both engines are allowed. Locked-odds when the admin seeds it
+    // (needs explicit isLockedOdds=true + seedSize); parimutuel when
+    // they don't want to hand-price the line. The "no refunds /
+    // never void with bets" guarantee on /api/markets/resolve covers
+    // both engines from db6e811 — empty-pool cases resolve normally,
+    // losers lose, the house keeps the pool. Refund as a settlement
+    // outcome is gone on either path.
 
     // ── Locked-odds branch: validate seed + vig before insert ───────
     let lockedFields: Record<string, any> = {
