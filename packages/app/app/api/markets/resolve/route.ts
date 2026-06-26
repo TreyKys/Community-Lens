@@ -173,29 +173,40 @@ async function resolveLockedOddsMarket(args: {
     return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
   }
 
-  // Defensive cleanup: a locked-odds market should never have legacy
-  // parimutuel bets (locked_odds NULL). If somehow we encounter one,
-  // refund it at net stake rather than running floor-up math without
-  // the inputs it needs. Log the surprise so admin can investigate.
+  // Integrity gate: a locked-odds market should never have a bet
+  // missing locked_odds / vig_at_stake_pct. The placement RPCs set
+  // both at stake time; a row missing either means something upstream
+  // misbehaved. The old code SILENTLY REFUNDED these rows, which is
+  // exactly the leftover pattern that wrongly refunded yesterday's
+  // losers — a future regression that minted a malformed bet would
+  // replay the bug.
+  //
+  // Now: abort the resolution and surface the problem. The bets stay
+  // ACTIVE (not refunded, not lost) and the market stays LOCKED, so
+  // ops can investigate, reconcile by hand, and re-run resolve once
+  // the malformed rows are explained. Nobody gets a wrong outcome.
   const malformed = rawBets.filter(b => b.locked_odds == null || b.vig_at_stake_pct == null);
   if (malformed.length > 0) {
-    console.error(`Locked-odds resolve: ${malformed.length} bets missing locked_odds/vig on market ${marketId}`);
-    for (const bet of malformed) {
-      await supabaseAdmin.rpc('credit_user', {
-        p_user_id: bet.user_id,
-        p_tngn_delta: bet.net_stake_tngn,
-        p_bonus_delta: 0,
-      });
-      await supabaseAdmin.from('user_bets').update({ status: 'refunded' }).eq('id', bet.id);
-    }
+    console.error(`Locked-odds resolve aborted: ${malformed.length} bet(s) missing locked_odds/vig on market ${marketId}`, {
+      malformedBetIds: malformed.map(b => b.id),
+    });
+    // Release the resolve-race claim so the market doesn't get stuck.
+    await supabaseAdmin
+      .from('markets')
+      .update({ resolved_outcome: null })
+      .eq('id', marketId);
+    return NextResponse.json(
+      {
+        error: 'Resolution halted: malformed bets detected on a locked-odds market. Investigate before retrying.',
+        marketId,
+        malformedBetCount: malformed.length,
+        malformedBetIds: malformed.map(b => b.id),
+      },
+      { status: 422 },
+    );
   }
 
-  const wellFormed = rawBets.filter(b => b.locked_odds != null && b.vig_at_stake_pct != null);
-  if (wellFormed.length === 0) {
-    await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: winningOutcomeIndex }).eq('id', marketId);
-    await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
-    return NextResponse.json({ status: 'voided', reason: 'All bets malformed; refunded at net stake' });
-  }
+  const wellFormed = rawBets;
 
   // Preload VIP referral info — same shape as the parimutuel branch.
   const losingUserIds = Array.from(new Set(
