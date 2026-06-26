@@ -1269,19 +1269,20 @@ function CreateMarketPanel() {
   }, [numOutcomesNow]);
 
   // Fetch the deployable reserve so the form can show a budget hint
-  // before submission. Read via the reserve_health view; failures are
-  // silent — the create endpoint enforces the real check.
+  // before submission. Goes through the admin server endpoint because
+  // reserve_health is now security_invoker = on and house_reserve is
+  // service-role only — a direct client read returns null. Failures
+  // are silent — the create endpoint enforces the real check.
   useEffect(() => {
     if (!isLockedOdds) return;
-    supabase
-      .from('reserve_health')
-      .select('deployable_tngn')
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data && typeof data.deployable_tngn !== 'undefined') {
-          setReserveDeployable(Number(data.deployable_tngn));
+    fetch('/api/admin/reserve-health', { headers: adminHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data.deployable !== 'undefined') {
+          setReserveDeployable(Number(data.deployable));
         }
-      });
+      })
+      .catch(() => { /* leave hint unset on failure */ });
   }, [isLockedOdds]);
 
   const PRESETS = [

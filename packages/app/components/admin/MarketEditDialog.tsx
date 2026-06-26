@@ -187,18 +187,19 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
 
   // Reserve hint for the conversion section. Loaded only when the
   // admin toggles the migration on — keeps the dialog cheap when the
-  // section stays collapsed.
+  // section stays collapsed. Goes through the admin server endpoint
+  // because reserve_health is now security_invoker = on and house_
+  // reserve is service-role only — a direct client read returns null.
   useEffect(() => {
     if (!convertToLocked) return;
-    supabase
-      .from('reserve_health')
-      .select('deployable_tngn')
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data && typeof data.deployable_tngn !== 'undefined') {
-          setReserveDeployable(Number(data.deployable_tngn));
+    fetch('/api/admin/reserve-health')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data.deployable !== 'undefined') {
+          setReserveDeployable(Number(data.deployable));
         }
-      });
+      })
+      .catch(() => { /* leave hint unset on failure */ });
   }, [convertToLocked]);
 
   const updateOption = (idx: number, value: string) => {
