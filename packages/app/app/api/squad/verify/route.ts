@@ -130,6 +130,18 @@ export async function POST(request: Request) {
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
     ]);
 
+    // Deposit-landed notification. Sits after the CAS claim succeeded so
+    // only the caller that actually credited (verify OR webhook, never
+    // both) fires it — no duplicate.
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        type: 'deposit_credited',
+        message: `Deposit received — ₦${Math.round(tNGNToCredit).toLocaleString()} added to your wallet. Ready to predict.`,
+        amount: tNGNToCredit,
+      });
+    } catch { /* notification non-critical */ }
+
     // Welcome Match grant. Webhook does the same thing; the RPC is
     // idempotent per user (PK on launch_promo_grants.user_id) so it
     // doesn't matter who calls it first. Previously this only ran from

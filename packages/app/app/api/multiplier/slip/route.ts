@@ -61,6 +61,20 @@ export async function POST(request: Request) {
       normalized.push({ market_id: marketId, outcome_index: outcomeIndex });
     }
 
+    // Apply the daily Boost recharge before checking the balance.
+    // recharge_boosts is a no-op when not yet due, but without this call
+    // a user whose recharge IS due — but who hasn't opened the Boost UI
+    // (which is the only other place recharge runs) — would be told
+    // "no Boosts" and blocked from placing a slip they're actually
+    // entitled to place. Idempotent and cheap.
+    try {
+      await supabaseAdmin.rpc('recharge_boosts', { p_user_id: user.id });
+    } catch (e) {
+      // Non-fatal: if recharge errors, placement still runs and the
+      // boost check inside place_multiplier_slip is the real gate.
+      console.error('recharge_boosts (pre-slip) failed:', e);
+    }
+
     const { data, error } = await supabaseAdmin
       .rpc('place_multiplier_slip', {
         p_user_id: user.id,

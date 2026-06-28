@@ -395,6 +395,16 @@ async function resolveLockedOddsMarket(args: {
       rake_share_amount: cut.amountTngn,
       metadata: { basis: cut.basis },
     });
+    // Tell the VIP they earned — silent credits feel like nothing's
+    // happening, and VIPs are the cohort we most want to keep engaged.
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: cut.vipReferrerId,
+        type: 'referral_earnings',
+        message: `You earned ₦${Math.round(cut.amountTngn).toLocaleString()} in referral commission from a referee's bet. 💸`,
+        amount: cut.amountTngn,
+      });
+    } catch { /* notification non-critical */ }
   }
 
   // House P&L → reserve. Single atomic RPC.
@@ -784,6 +794,15 @@ export async function POST(request: Request) {
             rake_share_pct: ref.sharePct,
             rake_share_amount: vipCut,
           });
+          // Tell the VIP they earned (mirrors the locked-odds branch).
+          try {
+            await supabaseAdmin.from('notifications').insert({
+              user_id: ref.vipId,
+              type: 'referral_earnings',
+              message: `You earned ₦${Math.round(vipCut).toLocaleString()} in referral commission from a referee's bet. 💸`,
+              amount: vipCut,
+            });
+          } catch { /* notification non-critical */ }
           vipPayoutTotal += vipCut;
         }
       }

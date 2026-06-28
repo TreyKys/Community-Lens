@@ -179,6 +179,18 @@ export async function POST(req: Request) {
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
     ]);
 
+    // Tell the user the deposit landed. Previously only the welcome
+    // bonus (first deposit only) notified, so a returning user who
+    // topped up heard nothing and had to refresh to see the balance.
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        type: 'deposit_credited',
+        message: `Deposit received — ₦${Math.round(tNGNToCredit).toLocaleString()} added to your wallet. Ready to predict.`,
+        amount: tNGNToCredit,
+      });
+    } catch { /* notification non-critical */ }
+
     // Welcome Match: idempotent per-user, only fires on the first qualifying
     // deposit and only inside the offer window. We pass the GROSS deposit
     // (not the post-spread number) so the RPC's min-deposit threshold lines

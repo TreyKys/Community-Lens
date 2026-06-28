@@ -112,17 +112,16 @@ export async function POST(request: Request) {
       const rebate = Math.min(Math.round(clippedLoss * REBATE_RATE), REBATE_CAP_NGN);
       if (rebate <= 0) continue;
 
-      // Credit bonus_balance.
-      const { data: u } = await supabaseAdmin
-        .from('users')
-        .select('bonus_balance')
-        .eq('id', userId)
-        .single();
-      const newBonus = (u?.bonus_balance || 0) + rebate;
-      const { error: upErr } = await supabaseAdmin
-        .from('users')
-        .update({ bonus_balance: newBonus })
-        .eq('id', userId);
+      // Credit bonus_balance atomically. The old read-then-write
+      // (SELECT balance → compute → UPDATE) raced with any concurrent
+      // credit on the same user (a bet settling, an admin credit) and
+      // silently dropped one of the two deltas. credit_user applies the
+      // delta inside a row lock, so concurrent credits compose.
+      const { error: upErr } = await supabaseAdmin.rpc('credit_user', {
+        p_user_id: userId,
+        p_tngn_delta: 0,
+        p_bonus_delta: rebate,
+      });
       if (upErr) {
         console.error(`weekly-rebate: failed to credit user=${userId}`, upErr);
         continue;
