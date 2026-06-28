@@ -138,25 +138,9 @@ async function resolveLockedOddsMarket(args: {
 }) {
   const { marketId, winningOutcomeIndex, market } = args;
 
-  // Settle any Multiplier legs riding on this market FIRST. Legs pay
-  // from the house at fixed odds and are independent of the single-bet
-  // pool — so a market that voids its singles for one-sidedness still
-  // settles its legs on the real winning outcome. p_voided=false here:
-  // the resolve route always carries a real winning outcome; a genuine
-  // event cancellation would call this with p_voided=true from a
-  // dedicated admin void action (not yet wired).
-  try {
-    await supabaseAdmin.rpc('settle_multiplier_for_market', {
-      p_market_id: marketId,
-      p_winning_outcome: winningOutcomeIndex,
-      p_voided: false,
-    });
-  } catch (e) {
-    console.error(`settle_multiplier_for_market failed for market ${marketId}:`, e);
-    // Don't abort single settlement on a multiplier hiccup — surface
-    // for ops and continue. Legs left active will retry-settle if the
-    // market is re-resolved.
-  }
+  // Multiplier legs on this market are settled by the POST handler
+  // before it branches here — for both engines — so nothing to do for
+  // legs in this function anymore.
 
   // Pull every active bet on this market, including the locked-odds
   // fields. The same row-shape supplies the LockedBet input to the
@@ -517,6 +501,30 @@ export async function POST(request: Request) {
         { error: 'Resolution already in progress or completed for this market' },
         { status: 409 },
       );
+    }
+
+    // Settle any Multiplier legs riding on THIS market — for BOTH
+    // engines. Legs pay from the house at fixed odds and are
+    // independent of the single-bet pool, so a leg can sit on any
+    // market regardless of its pricing engine. Previously this only
+    // ran inside the locked-odds branch, so a leg whose market
+    // resolved through the parimutuel path was orphaned forever — the
+    // slip never advanced and the user never saw a result. Running it
+    // here, before the engine branch, settles legs on every
+    // resolution. Idempotent: the RPC only touches status='active'
+    // legs, so a re-resolve or double-call is safe. p_voided=false —
+    // the resolve route always carries a real winning outcome.
+    try {
+      await supabaseAdmin.rpc('settle_multiplier_for_market', {
+        p_market_id: marketId,
+        p_winning_outcome: winningOutcomeIndex,
+        p_voided: false,
+      });
+    } catch (e) {
+      console.error(`settle_multiplier_for_market failed for market ${marketId}:`, e);
+      // Don't abort single-bet settlement on a multiplier hiccup —
+      // surface for ops and continue. Active legs retry-settle if the
+      // market is re-resolved or via the admin repair endpoint.
     }
 
     // Branch on the market's pricing engine BEFORE reading bets, so
