@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { POOL_RAKE_PCT } from '@/lib/displayPool';
+import { SharePickModal } from '@/components/SharePickModal';
 
 interface Bet {
   id: string;
@@ -108,10 +109,11 @@ function projectActivePayout(bet: Bet): { payout: number; multiplier: number } |
   return { payout, multiplier: payout / bet.stake_tngn };
 }
 
-function BetCard({ bet, onDownloadReceipt, onShareCard }: {
+function BetCard({ bet, onDownloadReceipt, onShareCard, onSharePick }: {
   bet: Bet;
   onDownloadReceipt: (betId: string) => void;
   onShareCard: (bet: Bet) => void;
+  onSharePick: (betId: string) => void;
 }) {
   const options = bet.markets?.options as string[] || [];
   const predicted = options[bet.outcome_index] || `Option ${bet.outcome_index}`;
@@ -229,9 +231,20 @@ function BetCard({ bet, onDownloadReceipt, onShareCard }: {
                 onClick={() => onShareCard(bet)}
               >
                 <Share2 className="w-3 h-3" />
-                Share
+                Win card
               </Button>
             )}
+            {/* OPx Picks — share the pick itself (any state). Generates
+                a themed link instead of a downloaded PNG. */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1 px-2 border-emerald-500/40 text-emerald-300"
+              onClick={() => onSharePick(bet.id)}
+            >
+              <Share2 className="w-3 h-3" />
+              OPx Pick
+            </Button>
           </div>
         </div>
       </div>
@@ -426,7 +439,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 // payout. Mirrors the visual hierarchy of BetCard (status banner →
 // title → stake/projection → footer) so the two card types feel like
 // part of one feed.
-function SlipCard({ slip }: { slip: Slip }) {
+function SlipCard({ slip, onSharePick }: { slip: Slip; onSharePick: (slipId: string) => void }) {
   const legs = slip.multiplier_legs || [];
   const isResolved = slip.status === 'won' || slip.status === 'lost' || slip.status === 'voided';
   const finalPayout = slip.final_payout_tngn ?? slip.payout_tngn;
@@ -543,6 +556,20 @@ function SlipCard({ slip }: { slip: Slip }) {
             </p>
           </div>
         </div>
+
+        {/* OPx Picks share button — same flow as singles, themed
+            preview, hotlinked landing. */}
+        <div className="pt-1 flex justify-end">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1 px-2 border-violet-500/40 text-violet-300"
+            onClick={() => onSharePick(slip.id)}
+          >
+            <Share2 className="w-3 h-3" />
+            Share as OPx Pick
+          </Button>
+        </div>
       </div>
     </motion.div>
   );
@@ -555,6 +582,10 @@ export default function BetsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // OPx Picks — modal target. Set when the user taps "Share OPx Pick"
+  // on any bet/slip card. Reset to null when the modal closes.
+  const [pickShare, setPickShare] = useState<{ type: 'bet' | 'slip'; id: string } | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -562,6 +593,18 @@ export default function BetsPage() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Pull the username once per session so the share modal can prefill
+  // the share-sheet text ("@cleo is calling it on Opinions.ng…").
+  useEffect(() => {
+    if (!session?.user?.id) { setUsername(null); return; }
+    let alive = true;
+    supabase.from('users').select('username, first_name').eq('id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        if (alive) setUsername((data?.username || data?.first_name || null) as string | null);
+      });
+    return () => { alive = false; };
+  }, [session?.user?.id]);
 
   const prevStatusRef = useRef<Map<string, Bet['status']>>(new Map());
 
@@ -783,13 +826,18 @@ export default function BetsPage() {
               <div className="space-y-3">
                 {t.items.map(it => (
                   it.kind === 'slip' ? (
-                    <SlipCard key={`slip-${it.item.id}`} slip={it.item} />
+                    <SlipCard
+                      key={`slip-${it.item.id}`}
+                      slip={it.item}
+                      onSharePick={(slipId) => setPickShare({ type: 'slip', id: slipId })}
+                    />
                   ) : (
                     <BetCard
                       key={`bet-${it.item.id}`}
                       bet={it.item}
                       onDownloadReceipt={handleDownloadReceipt}
                       onShareCard={handleShareCard}
+                      onSharePick={(betId) => setPickShare({ type: 'bet', id: betId })}
                     />
                   )
                 ))}
@@ -798,6 +846,19 @@ export default function BetsPage() {
           </TabsContent>
         ))}
       </Tabs>
+
+      {/* OPx Picks share modal — theme picker + live preview + native
+          share. Lifted to the page so a single instance handles every
+          card's share request. */}
+      {pickShare && (
+        <SharePickModal
+          open={pickShare !== null}
+          onClose={() => setPickShare(null)}
+          type={pickShare.type}
+          id={pickShare.id}
+          defaultUsername={username}
+        />
+      )}
     </div>
   );
 }
