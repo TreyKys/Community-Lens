@@ -54,13 +54,16 @@ interface CardState {
   // The slip leg count, for the chip
   slipLegCount: number;
   isSlip: boolean;
+  // Status pill — keeps the share honest about whether the pick is
+  // still in play or already resolved. 'live' = still active.
+  statusKind: 'live' | 'won' | 'lost' | 'refunded' | 'voided';
 }
 
 async function loadCard(type: string, id: string): Promise<CardState | null> {
   if (type === 'bet') {
     const { data: bet } = await supabaseAdmin
       .from('user_bets')
-      .select('user_id, market_id, outcome_index, stake_tngn, payout_tngn, locked_odds, markets:market_id (question, options)')
+      .select('user_id, market_id, outcome_index, stake_tngn, payout_tngn, locked_odds, status, markets:market_id (question, options)')
       .eq('id', id)
       .maybeSingle();
     if (!bet) return null;
@@ -84,6 +87,12 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
         ? Math.round(stake * lockedOdds)
         : stake;
 
+    const betStatus = String((bet as any).status || 'active');
+    const statusKind: CardState['statusKind'] =
+      betStatus === 'won'      ? 'won'      :
+      betStatus === 'lost'     ? 'lost'     :
+      betStatus === 'refunded' ? 'refunded' :
+                                 'live';
     return {
       handle: bestHandle(owner),
       betLabel: pickLabel,
@@ -94,6 +103,7 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
       headline: cleanQ || 'Opinions.ng prediction',
       slipLegCount: 0,
       isSlip: false,
+      statusKind,
     };
   }
 
@@ -102,7 +112,7 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
       .from('multiplier_slips')
       .select(`
         user_id, slip_stake_tngn, combined_odds, payout_tngn, final_payout_tngn,
-        legs_total,
+        legs_total, status,
         multiplier_legs (
           market_id, outcome_index, locked_odds,
           markets:market_id (question, options)
@@ -135,6 +145,12 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
       ? Number((slip as any).final_payout_tngn)
       : Number((slip as any).payout_tngn || 0);
 
+    const slipStatus = String((slip as any).status || 'active');
+    const statusKind: CardState['statusKind'] =
+      slipStatus === 'won'    ? 'won'      :
+      slipStatus === 'lost'   ? 'lost'     :
+      slipStatus === 'voided' ? 'voided'   :
+                                'live';
     return {
       handle: bestHandle(owner),
       betLabel: null,
@@ -145,6 +161,7 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
       headline: `${legs.length}-leg Multiplier`,
       slipLegCount: legs.length,
       isSlip: true,
+      statusKind,
     };
   }
 
@@ -176,6 +193,7 @@ export async function GET(
       headline: 'OPx Picks · Opinions.ng',
       slipLegCount: 0,
       isSlip: false,
+      statusKind: 'live',
     };
   }
 
@@ -208,20 +226,61 @@ export async function GET(
           }}
         />
 
-        {/* eyebrow */}
+        {/* eyebrow + state pill — the pill keeps the share honest about
+            whether the inviter's pick is still in play or already
+            settled. Active = LIVE (green dot pulse-style). */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 14,
+            justifyContent: 'space-between',
             color: theme.fg,
             fontSize: 26,
             fontWeight: 800,
             letterSpacing: 4,
           }}
         >
-          <span style={{ color: theme.accent, display: 'flex' }}>OPx</span>
-          <span style={{ display: 'flex' }}>PICKS</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span style={{ color: theme.accent, display: 'flex' }}>OPx</span>
+            <span style={{ display: 'flex' }}>PICKS</span>
+          </div>
+          {(() => {
+            const pillMap: Record<typeof state.statusKind, { label: string; bg: string; fg: string; dotBg: string }> = {
+              live:     { label: 'LIVE',     bg: 'rgba(52,211,153,0.18)',  fg: '#34d399', dotBg: '#34d399' },
+              won:      { label: 'WON',      bg: 'rgba(52,211,153,0.18)',  fg: '#34d399', dotBg: '#34d399' },
+              lost:     { label: 'MISSED',   bg: 'rgba(239,68,68,0.18)',   fg: '#fca5a5', dotBg: '#fca5a5' },
+              refunded: { label: 'REFUNDED', bg: 'rgba(251,191,36,0.18)',  fg: '#fbbf24', dotBg: '#fbbf24' },
+              voided:   { label: 'REFUNDED', bg: 'rgba(251,191,36,0.18)',  fg: '#fbbf24', dotBg: '#fbbf24' },
+            };
+            const pill = pillMap[state!.statusKind];
+            return (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '6px 14px',
+                  borderRadius: 9999,
+                  background: pill.bg,
+                  color: pill.fg,
+                  fontSize: 18,
+                  fontWeight: 800,
+                  letterSpacing: 2,
+                }}
+              >
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 9999,
+                    background: pill.dotBg,
+                    display: 'flex',
+                  }}
+                />
+                <span style={{ display: 'flex' }}>{pill.label}</span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* hero */}
