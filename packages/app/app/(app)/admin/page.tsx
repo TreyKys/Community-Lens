@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -1258,7 +1259,15 @@ function CreateMarketPanel() {
   const [vigOverride, setVigOverride] = useState<string>(''); // empty = use default per category
   const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
 
-  const numOutcomesNow = optionsText.split(',').map(o => o.trim()).filter(Boolean).length;
+  // Parse options: newline-separated takes priority (lets options contain
+  // commas like "Yes, And"); comma-separated still works for back-compat
+  // with old paste habits. Trim + drop blanks.
+  const parseOptions = (raw: string): string[] => {
+    const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (lines.length > 1) return lines;
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  };
+  const numOutcomesNow = parseOptions(optionsText).length;
 
   // Re-shape seedProbsMulti when the options count changes so the inputs
   // always match the actual outcomes — and regenerate cleanly when the
@@ -1323,7 +1332,7 @@ function CreateMarketPanel() {
       return;
     }
 
-    const options = optionsText.split(',').map(o => o.trim()).filter(Boolean);
+    const options = parseOptions(optionsText);
     if (options.length < 2) {
       toast({ title: 'At least 2 options required', variant: 'destructive' });
       return;
@@ -1417,17 +1426,30 @@ function CreateMarketPanel() {
 
         <div className="space-y-2">
           <Label>Question</Label>
-          <Input
+          <Textarea
             value={question}
             onChange={e => setQuestion(e.target.value)}
             placeholder="e.g. [PL] Arsenal vs Chelsea — Match Winner"
+            rows={3}
+            className="resize-y"
           />
-          <p className="text-xs text-muted-foreground">Use [PL], [CL], etc. tags for sports leagues</p>
+          <p className="text-xs text-muted-foreground">
+            Use [PL], [CL], etc. tags for sports leagues. Press Enter for a new line — the user-facing card preserves your line breaks.
+          </p>
         </div>
 
         <div className="space-y-2">
-          <Label>Options (comma-separated)</Label>
-          <Input value={optionsText} onChange={e => setOptionsText(e.target.value)} />
+          <Label>Options (one per line OR comma-separated)</Label>
+          <Textarea
+            value={optionsText}
+            onChange={e => setOptionsText(e.target.value)}
+            rows={3}
+            className="resize-y"
+            placeholder={'Home Win\nDraw\nAway Win'}
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Newlines preferred when an option contains commas. Either format works.
+          </p>
           <div className="flex flex-wrap gap-1">
             {PRESETS.map(p => (
               <button

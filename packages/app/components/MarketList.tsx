@@ -43,6 +43,8 @@ interface MarketCardProps {
   onBetPlaced: (marketId: number) => void;
   hideViewMore?: boolean;
   isStaked?: boolean;
+  /** 1-indexed rank when shown in the Trending tab; undefined elsewhere. */
+  trendingRank?: number;
 }
 
 // Color coding by option type — Polymarket style
@@ -555,7 +557,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStaked = false }: MarketCardProps) {
+function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStaked = false, trendingRank }: MarketCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
@@ -606,8 +608,25 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
 
       <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
         <div className="flex justify-between items-start gap-3">
-          <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug">
-            {displayQuestion}
+          <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug flex items-start gap-2 min-w-0">
+            {/* Trending rank — only shown on the Trending tab. #1 is the
+                hottest market by total_pool DESC, then #2, #3… No badge
+                outside trending so the title isn't cluttered. */}
+            {trendingRank !== undefined && (
+              <span
+                className={cn(
+                  'shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-extrabold tabular-nums',
+                  trendingRank === 1 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
+                  trendingRank === 2 ? 'bg-slate-400/20 text-slate-300 border border-slate-400/40' :
+                  trendingRank === 3 ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30' :
+                                       'bg-muted/50 text-muted-foreground border border-muted',
+                )}
+                aria-label={`Trending rank ${trendingRank}`}
+              >
+                {trendingRank}
+              </span>
+            )}
+            <span className="min-w-0 whitespace-pre-wrap break-words">{displayQuestion}</span>
           </CardTitle>
           <div className="shrink-0 flex items-center gap-1.5">
             {isStaked && (
@@ -633,7 +652,7 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
               <ChevronDown className={cn('w-3 h-3 transition-transform', showDescription && 'rotate-180')} />
             </button>
             {showDescription && (
-              <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed bg-muted/30 border border-border/40 rounded-md px-2.5 py-2 animate-in fade-in slide-in-from-top-1">
+              <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed bg-muted/30 border border-border/40 rounded-md px-2.5 py-2 animate-in fade-in slide-in-from-top-1 whitespace-pre-wrap break-words">
                 {market.description}
               </p>
             )}
@@ -1109,11 +1128,12 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   return (
     <div className="space-y-3">
-      {markets.map(market => (
+      {markets.map((market, idx) => (
         <MarketCard
           key={market.id}
           market={market}
           session={session}
+          trendingRank={category === 'trending' && !filterChildrenOfParentId && !filterExactMarketId ? idx + 1 : undefined}
           onBetPlaced={async (id) => {
             // Silent refetch (no skeleton) + re-anchor to the card the user
             // just bet on so they stay in context. Without the scrollIntoView

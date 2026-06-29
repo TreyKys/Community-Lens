@@ -222,8 +222,8 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
   };
 
   const addOption = () => {
-    if (options.length >= 10) {
-      toast({ title: 'Max 10 options', variant: 'destructive' });
+    if (options.length >= 50) {
+      toast({ title: 'Max 50 options per market', variant: 'destructive' });
       return;
     }
     setOptions(prev => [...prev, '']);
@@ -367,7 +367,6 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                 id="m-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                maxLength={200}
                 placeholder="e.g. World Cup Golden Boot"
               />
             </div>
@@ -378,9 +377,9 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                 id="m-question"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
-                maxLength={1000}
-                rows={3}
-                placeholder="Will Nigeria show up in 2027?"
+                rows={4}
+                className="resize-y"
+                placeholder={'Will Nigeria show up in 2027?\n\nPress Enter for a new line — line breaks are preserved on the market card.'}
               />
             </div>
 
@@ -390,9 +389,9 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                 id="m-desc"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                maxLength={1000}
-                rows={3}
-                placeholder="Context shown in the About-this-market drawer."
+                rows={4}
+                className="resize-y"
+                placeholder="Context shown in the About-this-market drawer. Line breaks are preserved."
               />
             </div>
 
@@ -425,7 +424,7 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                   size="sm"
                   variant="outline"
                   onClick={addOption}
-                  disabled={options.length >= 10}
+                  disabled={options.length >= 50}
                   className="h-7 text-xs gap-1"
                 >
                   <Plus className="w-3 h-3" /> Add
@@ -448,7 +447,6 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                       <Input
                         value={opt}
                         onChange={(e) => updateOption(idx, e.target.value)}
-                        maxLength={80}
                         placeholder={`Option ${idx + 1}`}
                         className="h-8 flex-1"
                       />

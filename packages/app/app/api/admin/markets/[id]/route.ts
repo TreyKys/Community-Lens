@@ -273,14 +273,20 @@ export async function PATCH(
     if (typeof v !== 'string') {
       return NextResponse.json({ error: `${f} must be a string` }, { status: 400 });
     }
-    const trimmed = v.trim();
+    // Newlines/tabs preserved — admins compose multi-line questions and
+    // descriptions on purpose, and the card renderer honours line breaks.
+    // We trim only the leading/trailing whitespace.
+    const trimmed = v.replace(/^\s+|\s+$/g, '');
     // Required-ish fields can't go empty — keeps the public list from
     // rendering blank-card-of-mystery rows.
     if ((f === 'title' || f === 'question' || f === 'category') && trimmed.length === 0) {
       return NextResponse.json({ error: `${f} cannot be empty` }, { status: 400 });
     }
-    if (trimmed.length > 1000) {
-      return NextResponse.json({ error: `${f} too long (1000 char max)` }, { status: 400 });
+    // Defensive upper bound — 10k chars is plenty for the longest
+    // realistic question/description. Cap exists only to prevent abuse,
+    // not to constrain editorial freedom.
+    if (trimmed.length > 10_000) {
+      return NextResponse.json({ error: `${f} too long (10k char max)` }, { status: 400 });
     }
     patch[f] = trimmed;
   }
@@ -307,11 +313,11 @@ export async function PATCH(
     if (newOpts.length < 2) {
       return NextResponse.json({ error: 'Need at least 2 options' }, { status: 400 });
     }
-    if (newOpts.length > 10) {
-      return NextResponse.json({ error: 'Maximum 10 options per market' }, { status: 400 });
+    if (newOpts.length > 50) {
+      return NextResponse.json({ error: 'Maximum 50 options per market' }, { status: 400 });
     }
-    if (newOpts.some((s: string) => s.length > 80)) {
-      return NextResponse.json({ error: 'Each option label must be 80 chars or fewer' }, { status: 400 });
+    if (newOpts.some((s: string) => s.length > 500)) {
+      return NextResponse.json({ error: 'Each option label must be 500 chars or fewer' }, { status: 400 });
     }
 
     const { data: current, error: curErr } = await supabaseAdmin

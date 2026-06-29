@@ -110,10 +110,28 @@ export async function GET(request: Request) {
       }
 
       const totalPool = optionTotals.reduce((s, v) => s + v, 0);
+
+      // For locked-odds markets, the seed pool defines the initial
+      // probabilities — a 60/40 seed should display 60%/40% immediately,
+      // not 0%/0%, even before any real bet lands. We compute the
+      // EFFECTIVE per-outcome pool (seed + real) and derive percentage
+      // from that; the user sees the same prior the odds engine uses.
+      // Parimutuel markets have no seed, so the effective pool equals
+      // the real pool and behaviour is unchanged.
+      const seedPoolMap = (market.seed_pool || {}) as Record<string, number>;
+      const effectivePerOption = options.map((_, i) => {
+        const seed = Number(seedPoolMap[String(i)] ?? 0);
+        const safeSeed = Number.isFinite(seed) && seed > 0 ? seed : 0;
+        return safeSeed + optionTotals[i];
+      });
+      const effectiveTotal = effectivePerOption.reduce((s, v) => s + v, 0);
+
       const distribution = options.map((opt, i) => ({
         option: opt,
         amount: optionTotals[i],
-        percentage: totalPool > 0 ? Math.round((optionTotals[i] / totalPool) * 100) : 0,
+        percentage: effectiveTotal > 0
+          ? Math.round((effectivePerOption[i] / effectiveTotal) * 100)
+          : 0,
       }));
 
       // Locked-odds preview inputs. Only attached for locked-odds
