@@ -16,6 +16,8 @@ import { calculatePotentialPayout } from '@/lib/payout';
 import { displayFloorPayout } from '@/lib/displayMultiplier';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
 import { useSlip } from '@/components/multiplier/SlipProvider';
+import { SharePickModal } from '@/components/SharePickModal';
+import { PickPreviewModal } from '@/components/PickPreviewModal';
 import { getDisplayPool } from '@/lib/displayPool';
 
 interface Market {
@@ -40,11 +42,18 @@ interface Market {
 interface MarketCardProps {
   market: Market;
   session: any;
-  onBetPlaced: (marketId: number) => void;
+  onBetPlaced: (marketId: number, betId?: string) => void;
   hideViewMore?: boolean;
   isStaked?: boolean;
   /** 1-indexed rank when shown in the Trending tab; undefined elsewhere. */
   trendingRank?: number;
+  /** OPx Picks prefill — set when an invitee landed here from /p/bet/[id]. */
+  prefillOutcomeIndex?: number;
+  prefillStakeTngn?: number;
+  /** When true the stake input opens blank (Make-It-Yours flow). */
+  prefillEditStake?: boolean;
+  /** Auto-open the bet drawer on mount. */
+  autoOpen?: boolean;
 }
 
 // Color coding by option type — Polymarket style
@@ -65,14 +74,39 @@ function BettingInterface({
   session,
   onSuccess,
   onCancel,
+  prefillOutcomeIndex,
+  prefillStakeTngn,
 }: {
   market: Market;
   session: any;
-  onSuccess: () => void;
+  onSuccess: (betId?: string) => void;
   onCancel?: () => void;
+  /** OPx Picks "Stake as is" / "Make It Yours" prefill */
+  prefillOutcomeIndex?: number;
+  prefillStakeTngn?: number;
 }) {
-  const [selectedOption, setSelectedOption] = useState('');
-  const [amount, setAmount] = useState('');
+  const [selectedOption, setSelectedOption] = useState(
+    prefillOutcomeIndex !== undefined ? String(prefillOutcomeIndex) : '',
+  );
+  const [amount, setAmount] = useState(
+    prefillStakeTngn !== undefined && prefillStakeTngn > 0
+      ? String(Math.round(prefillStakeTngn))
+      : '',
+  );
+  // OPx Picks preview — shown in a small modal when the user taps the
+  // "Preview your OPx Pick" button. State lives here so the parent
+  // doesn't have to know about it.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [userHandle, setUserHandle] = useState<string | null>(null);
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let alive = true;
+    supabase.from('users').select('username, first_name').eq('id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        if (alive) setUserHandle((data?.username || data?.first_name || null) as string | null);
+      });
+    return () => { alive = false; };
+  }, [session?.user?.id]);
   const [isLoading, setIsLoading] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
@@ -234,7 +268,10 @@ function BettingInterface({
         description: `₦${Number(amount).toLocaleString()} committed to ${market.options[parseInt(selectedOption)]}`,
       });
 
-      onSuccess();
+      // Pass the created bet id back so the parent can auto-open the
+      // OPx Picks share modal — the user just made a pick and the
+      // share prompt rides the dopamine of placing it.
+      onSuccess(data?.betId || data?.bet?.id || data?.id);
     } catch (err: any) {
       toast({ title: 'Prediction failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -450,6 +487,23 @@ function BettingInterface({
         </p>
       )}
 
+      {/* Preview your share card — pre-bet OPx Picks preview. Tappable
+          as soon as the user has picked an outcome AND typed a stake;
+          the preview modal uses the same OG renderer the real share
+          card uses, parameterised by the in-flight bet inputs. After
+          the bet locks, the real share modal auto-opens with the real
+          bet id (handled at MarketList level). */}
+      {selectedOption !== '' && stakeNum >= 100 && (
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          className="w-full text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center gap-1.5"
+        >
+          <Sparkles className="w-3 h-3 text-emerald-400" />
+          Preview your OPx Pick before locking
+        </button>
+      )}
+
       <div className="flex gap-2">
         {onCancel && (
           <Button variant="outline" onClick={onCancel} className="flex-1">
@@ -468,6 +522,25 @@ function BettingInterface({
           ) : 'Lock Prediction'}
         </Button>
       </div>
+
+      {previewOpen && (() => {
+        // Resolve the odds we should show in the preview: locked-odds
+        // floor if this is a locked market, parimutuel floor / projection
+        // otherwise, falling back to 1.0× so the card still renders.
+        const odds = lockedPreview?.lockedOdds
+          ?? (payoutPreview ? Math.max(payoutPreview.multiplier, displayFloorPayout(stakeNum).multiplier) : 1.0);
+        return (
+          <PickPreviewModal
+            open={previewOpen}
+            onClose={() => setPreviewOpen(false)}
+            marketId={market.id}
+            outcomeIndex={selectedOption === '' ? null : parseInt(selectedOption)}
+            stakeTngn={stakeNum}
+            odds={odds}
+            handle={userHandle}
+          />
+        );
+      })()}
 
       {/* Add to Multiplier — only on locked-odds markets (the engine
           rejects parimutuel legs). Soft violet so it reads as a distinct
@@ -557,9 +630,27 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStaked = false, trendingRank }: MarketCardProps) {
+function MarketCard({
+  market,
+  session,
+  onBetPlaced,
+  hideViewMore = false,
+  isStaked = false,
+  trendingRank,
+  prefillOutcomeIndex,
+  prefillStakeTngn,
+  prefillEditStake = false,
+  autoOpen = false,
+}: MarketCardProps) {
   const router = useRouter();
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(!!autoOpen);
+
+  // Sync with autoOpen prop changes — important when the invitee
+  // arrives after the card has already mounted (e.g. a re-render
+  // triggered by the stash being read post-auth).
+  useEffect(() => {
+    if (autoOpen) setIsExpanded(true);
+  }, [autoOpen]);
   const [showDescription, setShowDescription] = useState(false);
 
   const closesAt = new Date(market.closes_at);
@@ -713,11 +804,13 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
             <BettingInterface
               market={market}
               session={session}
-              onSuccess={() => {
+              onSuccess={(betId) => {
                 setIsExpanded(false);
-                onBetPlaced(market.id);
+                onBetPlaced(market.id, betId);
               }}
               onCancel={() => setIsExpanded(false)}
+              prefillOutcomeIndex={prefillOutcomeIndex}
+              prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
             />
           </div>
         )}
@@ -773,10 +866,12 @@ function MarketCard({ market, session, onBetPlaced, hideViewMore = false, isStak
                     <BettingInterface
                       market={market}
                       session={session}
-                      onSuccess={() => {
+                      onSuccess={(betId) => {
                         setIsExpanded(false);
-                        onBetPlaced(market.id);
+                        onBetPlaced(market.id, betId);
                       }}
+                      prefillOutcomeIndex={prefillOutcomeIndex}
+                      prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
                     />
                   </div>
                   <DrawerFooter className="shrink-0 pb-6">
@@ -940,6 +1035,87 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   const sortParam = searchParams.get('sort') || 'new';
   const statusParam = searchParams.get('status') || 'open';
   const searchQuery = (searchParams.get('q') || '').trim();
+
+  // OPx Picks — invitee landed here after tapping "Stake as is" /
+  // "Make It Yours" on a /p/bet/[id] page. The intent was stashed in
+  // localStorage; we read it once on mount, pre-open the matching
+  // market card with the inviter's outcome and stake pre-filled, and
+  // then clear the stash so a refresh doesn't replay it.
+  const [stakeIntent, setStakeIntent] = useState<{
+    type: 'bet';
+    marketId: number;
+    outcomeIndex: number;
+    stakeTngn: number;
+    editStake: boolean;
+    fromShareId: string;
+  } | null>(null);
+
+  const slip = useSlip();
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('opx_stake_intent');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      localStorage.removeItem('opx_stake_intent');
+
+      if (parsed?.type === 'bet' && parsed.marketId !== undefined) {
+        setStakeIntent({
+          type: 'bet',
+          marketId: Number(parsed.marketId),
+          outcomeIndex: Number(parsed.outcomeIndex),
+          stakeTngn: Number(parsed.stakeTngn || 0),
+          editStake: !!parsed.editStake,
+          fromShareId: String(parsed.fromShareId || ''),
+        });
+        return;
+      }
+
+      if (parsed?.type === 'slip' && Array.isArray(parsed.legs)) {
+        // Fetch the inviter's slip so we have market questions + option
+        // labels (the SlipLeg shape needs them so the drawer can render
+        // without a follow-up fetch per leg). The /api/picks/slip
+        // endpoint already returns this in the right shape.
+        (async () => {
+          try {
+            const res = await fetch(`/api/picks/slip/${encodeURIComponent(String(parsed.fromShareId || ''))}`);
+            if (!res.ok) return;
+            const body = await res.json();
+            const fetchedLegs = Array.isArray(body?.legs) ? body.legs : [];
+            const slipLegs = fetchedLegs.map((l: any) => ({
+              marketId: Number(l.marketId),
+              outcomeIndex: Number(l.outcomeIndex),
+              marketQuestion: String(l?.market?.question || ''),
+              optionLabel: String(l.pickLabel || ''),
+            })).filter((l: any) => Number.isFinite(l.marketId) && Number.isFinite(l.outcomeIndex));
+            if (slipLegs.length === 0) return;
+            slip.replaceLegs(slipLegs);
+            if (!parsed.editStake && Number(parsed.stakeTngn) > 0) {
+              slip.setPrefillStakeNgn(Number(parsed.stakeTngn));
+            }
+            slip.setOpen(true);
+          } catch { /* swallow — user can still build manually */ }
+        })();
+      }
+    } catch { /* no-op */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // OPx Picks — auto-share modal after a fresh bet placement. When
+  // onBetPlaced fires with a bet id, we capture it and pop the share
+  // modal so the user can post their pick at the dopamine peak. Null
+  // resets after the modal closes.
+  const [autoSharePick, setAutoSharePick] = useState<{ type: 'bet' | 'slip'; id: string } | null>(null);
+  const [shareUsername, setShareUsername] = useState<string | null>(null);
+  useEffect(() => {
+    if (!session?.user?.id) { setShareUsername(null); return; }
+    let alive = true;
+    supabase.from('users').select('username, first_name').eq('id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        if (alive) setShareUsername((data?.username || data?.first_name || null) as string | null);
+      });
+    return () => { alive = false; };
+  }, [session?.user?.id]);
 
   // Per-view scroll key. /markets uses category+subcategory+filters so each
   // tab remembers its own position; the sub-market and league hubs get
@@ -1128,28 +1304,51 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   return (
     <div className="space-y-3">
-      {markets.map((market, idx) => (
-        <MarketCard
-          key={market.id}
-          market={market}
-          session={session}
-          trendingRank={category === 'trending' && !filterChildrenOfParentId && !filterExactMarketId ? idx + 1 : undefined}
-          onBetPlaced={async (id) => {
-            // Silent refetch (no skeleton) + re-anchor to the card the user
-            // just bet on so they stay in context. Without the scrollIntoView
-            // the silent refetch reorders cards (pool changed) and users
-            // would be looking at a different market at the same scrollY.
-            await fetchMarkets({ silent: true });
-            if (session?.user?.id) fetchStakedMarkets(session.user.id);
-            requestAnimationFrame(() => {
-              const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-              card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            });
-          }}
-          hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
-          isStaked={stakedMarketIds.has(market.id)}
+      {markets.map((market, idx) => {
+        const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
+        return (
+          <MarketCard
+            key={market.id}
+            market={market}
+            session={session}
+            trendingRank={category === 'trending' && !filterChildrenOfParentId && !filterExactMarketId ? idx + 1 : undefined}
+            onBetPlaced={async (id, betId) => {
+              // Silent refetch (no skeleton) + re-anchor to the card the user
+              // just bet on so they stay in context. Without the scrollIntoView
+              // the silent refetch reorders cards (pool changed) and users
+              // would be looking at a different market at the same scrollY.
+              await fetchMarkets({ silent: true });
+              if (session?.user?.id) fetchStakedMarkets(session.user.id);
+              requestAnimationFrame(() => {
+                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              });
+              if (betId) {
+                setAutoSharePick({ type: 'bet', id: betId });
+              }
+            }}
+            hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
+            isStaked={stakedMarketIds.has(market.id)}
+            prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
+            prefillStakeTngn={isPickTarget ? stakeIntent!.stakeTngn : undefined}
+            prefillEditStake={isPickTarget ? stakeIntent!.editStake : undefined}
+            autoOpen={isPickTarget}
+          />
+        );
+      })}
+
+      {/* Auto-share prompt after a bet places successfully. The user
+          just made a pick — surface the OPx Picks share modal so they
+          can post it while the dopamine is fresh. */}
+      {autoSharePick && (
+        <SharePickModal
+          open={autoSharePick !== null}
+          onClose={() => setAutoSharePick(null)}
+          type={autoSharePick.type}
+          id={autoSharePick.id}
+          defaultUsername={shareUsername}
         />
-      ))}
+      )}
     </div>
   );
 }

@@ -20,12 +20,21 @@ interface SlipContextValue {
   addLeg: (leg: SlipLeg) => void;
   removeLeg: (marketId: number) => void;
   clear: () => void;
+  /** Replace the whole slip in one shot. Used by the OPx Picks "Stake
+   *  as is" / "Make It Yours" flow to drop the inviter's legs into a
+   *  fresh slip without mutating each in turn. */
+  replaceLegs: (legs: SlipLeg[]) => void;
   /** Is this exact (market, outcome) already in the slip? */
   hasLeg: (marketId: number, outcomeIndex: number) => boolean;
   /** Is this market in the slip on ANY outcome? */
   hasMarket: (marketId: number) => boolean;
   isOpen: boolean;
   setOpen: (v: boolean) => void;
+  /** Pre-fill stake the slip builder should consume on next mount. Set
+   *  by the OPx Picks clone flow; cleared after MultiplierSlip reads
+   *  it. ₦0 / null = nothing to prefill. */
+  prefillStakeNgn: number | null;
+  setPrefillStakeNgn: (v: number | null) => void;
 }
 
 const SlipContext = createContext<SlipContextValue | null>(null);
@@ -35,6 +44,7 @@ export function SlipProvider({ children }: { children: React.ReactNode }) {
   const [legs, setLegs] = useState<SlipLeg[]>([]);
   const [isOpen, setOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [prefillStakeNgn, setPrefillStakeNgn] = useState<number | null>(null);
 
   // Hydrate once from localStorage so the slip survives navigation /
   // reloads while the user shops for legs across markets.
@@ -67,6 +77,10 @@ export function SlipProvider({ children }: { children: React.ReactNode }) {
 
   const clear = useCallback(() => setLegs([]), []);
 
+  const replaceLegs = useCallback((next: SlipLeg[]) => {
+    setLegs(next);
+  }, []);
+
   const hasLeg = useCallback(
     (marketId: number, outcomeIndex: number) =>
       legs.some(l => l.marketId === marketId && l.outcomeIndex === outcomeIndex),
@@ -79,7 +93,7 @@ export function SlipProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <SlipContext.Provider value={{ legs, addLeg, removeLeg, clear, hasLeg, hasMarket, isOpen, setOpen }}>
+    <SlipContext.Provider value={{ legs, addLeg, removeLeg, clear, replaceLegs, hasLeg, hasMarket, isOpen, setOpen, prefillStakeNgn, setPrefillStakeNgn }}>
       {children}
     </SlipContext.Provider>
   );

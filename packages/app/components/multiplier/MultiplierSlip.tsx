@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Layers, X, Zap, Loader2, TrendingUp, Trash2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SharePickModal } from '@/components/SharePickModal';
 
 interface QuoteResponse {
   ok: boolean;
@@ -33,10 +34,25 @@ const REASON_COPY: Record<string, string> = {
 };
 
 export function MultiplierSlip() {
-  const { legs, removeLeg, clear, isOpen, setOpen } = useSlip();
+  const { legs, removeLeg, clear, isOpen, setOpen, prefillStakeNgn, setPrefillStakeNgn } = useSlip();
   const { toast } = useToast();
 
   const [stake, setStake] = useState('');
+  // OPx Picks — auto-share the freshly placed slip. Set in placeSlip
+  // when the API returns slipId; reset when the modal closes.
+  const [autoShareSlipId, setAutoShareSlipId] = useState<string | null>(null);
+  const [userHandle, setUserHandle] = useState<string | null>(null);
+
+  // OPx Picks clone — when the SlipProvider has a pending prefill
+  // stake (set by the /p/slip/[id] "Stake as is" CTA), drop it into
+  // the stake input and clear the channel. "Make It Yours" sets the
+  // prefill to null, which leaves the field empty on purpose.
+  useEffect(() => {
+    if (prefillStakeNgn !== null && prefillStakeNgn > 0) {
+      setStake(String(Math.round(prefillStakeNgn)));
+      setPrefillStakeNgn(null);
+    }
+  }, [prefillStakeNgn, setPrefillStakeNgn]);
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -52,6 +68,17 @@ export function MultiplierSlip() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Username for the share modal's prefill text.
+  useEffect(() => {
+    if (!session?.user?.id) { setUserHandle(null); return; }
+    let alive = true;
+    supabase.from('users').select('username, first_name').eq('id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        if (alive) setUserHandle((data?.username || data?.first_name || null) as string | null);
+      });
+    return () => { alive = false; };
+  }, [session?.user?.id]);
 
   // Pull the Boost balance whenever the drawer opens.
   useEffect(() => {
@@ -119,6 +146,10 @@ export function MultiplierSlip() {
       clear();
       setStake('');
       setOpen(false);
+      // Pop the OPx Picks share modal once the drawer's closed —
+      // mirrors the single-bet auto-share. The user just made a pick
+      // and the share prompt rides the dopamine of placing it.
+      if (data?.slipId) setAutoShareSlipId(String(data.slipId));
     } catch (e: any) {
       toast({ title: 'Multiplier failed', description: e.message, variant: 'destructive' });
     } finally {
@@ -315,6 +346,17 @@ export function MultiplierSlip() {
           </div>
         </DrawerContent>
       </Drawer>
+
+      {/* Auto-share after a successful slip placement. */}
+      {autoShareSlipId && (
+        <SharePickModal
+          open={autoShareSlipId !== null}
+          onClose={() => setAutoShareSlipId(null)}
+          type="slip"
+          id={autoShareSlipId}
+          defaultUsername={userHandle}
+        />
+      )}
     </>
   );
 }
