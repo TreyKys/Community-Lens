@@ -11,14 +11,24 @@ import {
 } from '@/lib/picksThemes';
 
 // Pre-bet OPx Pick preview. Renders the same OG card art as the
-// post-bet share modal, but reads /api/picks-card/preview/bet (no DB
-// row yet). Lets the user pick a theme + see exactly what their card
-// will look like before they tap Lock Prediction. After the bet
-// places, the real SharePickModal auto-opens with the actual bet id.
+// post-bet share modal, but reads /api/picks-card/preview/bet (single
+// bet) or /api/picks-card/preview/slip (multiplier) — no DB row yet.
+// Lets the user pick a theme + see exactly what their card will look
+// like before they tap Lock Prediction / Place Multiplier. After the
+// bet/slip places, the real SharePickModal auto-opens with the actual
+// id.
 
 const THEME_KEY = 'opx_picks_theme';
 
-interface Props {
+interface SlipLegInput {
+  marketId: number;
+  outcomeIndex: number;
+  /** Optional locked-odds hint baked into the preview chip. */
+  lockedOdds?: number;
+}
+
+interface BetProps {
+  mode?: 'bet';
   open: boolean;
   onClose: () => void;
   marketId: number | string | null;
@@ -30,10 +40,23 @@ interface Props {
   handle?: string | null;
 }
 
-export function PickPreviewModal({
-  open, onClose, marketId, outcomeIndex, stakeTngn, odds, handle,
-}: Props) {
+interface SlipProps {
+  mode: 'slip';
+  open: boolean;
+  onClose: () => void;
+  legs: SlipLegInput[];
+  stakeTngn: number;
+  /** Combined odds from the live quote. */
+  odds: number;
+  handle?: string | null;
+}
+
+type Props = BetProps | SlipProps;
+
+export function PickPreviewModal(props: Props) {
   const [theme, setTheme] = useState<PicksThemeId>(DEFAULT_PICKS_THEME);
+  const { open, onClose, stakeTngn, odds, handle } = props;
+  const isSlip = props.mode === 'slip';
 
   useEffect(() => {
     if (!open) return;
@@ -47,20 +70,39 @@ export function PickPreviewModal({
     try { localStorage.setItem(THEME_KEY, theme); } catch { /* no-op */ }
   }, [theme]);
 
-  const ready =
-    marketId !== null && marketId !== '' &&
-    outcomeIndex !== null && Number.isFinite(outcomeIndex) &&
-    stakeTngn > 0;
+  let ready = false;
+  let previewUrl = '';
 
-  const q = new URLSearchParams({
-    marketId: String(marketId ?? ''),
-    outcomeIndex: String(outcomeIndex ?? ''),
-    stakeTngn: String(Math.round(stakeTngn || 0)),
-    odds: String(odds || 0),
-    handle: String(handle || 'predictor'),
-    theme,
-  });
-  const previewUrl = `/api/picks-card/preview/bet?${q.toString()}`;
+  if (isSlip) {
+    const slip = props as SlipProps;
+    ready = slip.legs.length >= 2 && slip.stakeTngn > 0;
+    const legsParam = slip.legs
+      .map(l => `${l.marketId}:${l.outcomeIndex}${l.lockedOdds ? `:${l.lockedOdds.toFixed(2)}` : ''}`)
+      .join(',');
+    const q = new URLSearchParams({
+      legs: legsParam,
+      stakeTngn: String(Math.round(stakeTngn || 0)),
+      odds: String(odds || 0),
+      handle: String(handle || 'predictor'),
+      theme,
+    });
+    previewUrl = `/api/picks-card/preview/slip?${q.toString()}`;
+  } else {
+    const bet = props as BetProps;
+    ready =
+      bet.marketId !== null && bet.marketId !== '' &&
+      bet.outcomeIndex !== null && Number.isFinite(bet.outcomeIndex) &&
+      bet.stakeTngn > 0;
+    const q = new URLSearchParams({
+      marketId: String(bet.marketId ?? ''),
+      outcomeIndex: String(bet.outcomeIndex ?? ''),
+      stakeTngn: String(Math.round(stakeTngn || 0)),
+      odds: String(odds || 0),
+      handle: String(handle || 'predictor'),
+      theme,
+    });
+    previewUrl = `/api/picks-card/preview/bet?${q.toString()}`;
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -71,7 +113,9 @@ export function PickPreviewModal({
             Preview your OPx Pick
           </DialogTitle>
           <DialogDescription>
-            This is what your share card will look like the moment you lock the prediction.
+            {isSlip
+              ? 'This is what your share card will look like the moment you place this Multiplier.'
+              : 'This is what your share card will look like the moment you lock the prediction.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -112,13 +156,15 @@ export function PickPreviewModal({
           ) : (
             <div className="flex items-center justify-center py-10 text-sm text-muted-foreground gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              Pick an option and enter a stake to preview the card.
+              {isSlip
+                ? 'Add at least 2 picks and a stake to preview the card.'
+                : 'Pick an option and enter a stake to preview the card.'}
             </div>
           )}
         </div>
 
         <p className="text-[10px] text-center text-muted-foreground">
-          We&rsquo;ll open the real share sheet right after you lock this prediction.
+          We&rsquo;ll open the real share sheet right after you {isSlip ? 'place this Multiplier' : 'lock this prediction'}.
         </p>
       </DialogContent>
     </Dialog>

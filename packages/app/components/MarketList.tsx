@@ -45,8 +45,6 @@ interface MarketCardProps {
   onBetPlaced: (marketId: number, betId?: string) => void;
   hideViewMore?: boolean;
   isStaked?: boolean;
-  /** 1-indexed rank when shown in the Trending tab; undefined elsewhere. */
-  trendingRank?: number;
   /** OPx Picks prefill — set when an invitee landed here from /p/bet/[id]. */
   prefillOutcomeIndex?: number;
   prefillStakeTngn?: number;
@@ -636,7 +634,6 @@ function MarketCard({
   onBetPlaced,
   hideViewMore = false,
   isStaked = false,
-  trendingRank,
   prefillOutcomeIndex,
   prefillStakeTngn,
   prefillEditStake = false,
@@ -699,24 +696,7 @@ function MarketCard({
 
       <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
         <div className="flex justify-between items-start gap-3">
-          <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug flex items-start gap-2 min-w-0">
-            {/* Trending rank — only shown on the Trending tab. #1 is the
-                hottest market by total_pool DESC, then #2, #3… No badge
-                outside trending so the title isn't cluttered. */}
-            {trendingRank !== undefined && (
-              <span
-                className={cn(
-                  'shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-extrabold tabular-nums',
-                  trendingRank === 1 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
-                  trendingRank === 2 ? 'bg-slate-400/20 text-slate-300 border border-slate-400/40' :
-                  trendingRank === 3 ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30' :
-                                       'bg-muted/50 text-muted-foreground border border-muted',
-                )}
-                aria-label={`Trending rank ${trendingRank}`}
-              >
-                {trendingRank}
-              </span>
-            )}
+          <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug min-w-0">
             <span className="min-w-0 whitespace-pre-wrap break-words">{displayQuestion}</span>
           </CardTitle>
           <div className="shrink-0 flex items-center gap-1.5">
@@ -1304,14 +1284,13 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   return (
     <div className="space-y-3">
-      {markets.map((market, idx) => {
+      {markets.map((market) => {
         const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
         return (
           <MarketCard
             key={market.id}
             market={market}
             session={session}
-            trendingRank={category === 'trending' && !filterChildrenOfParentId && !filterExactMarketId ? idx + 1 : undefined}
             onBetPlaced={async (id, betId) => {
               // Silent refetch (no skeleton) + re-anchor to the card the user
               // just bet on so they stay in context. Without the scrollIntoView

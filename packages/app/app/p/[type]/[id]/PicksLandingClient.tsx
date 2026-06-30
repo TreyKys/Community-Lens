@@ -47,6 +47,7 @@ interface PickDetails {
     status: string;
     resolvedOutcome: number | null;
     pickLabel: string;
+    sentimentPct: number | null;
   };
   // For slip
   slip?: {
@@ -66,8 +67,26 @@ interface PickDetails {
     realizedOdds: number | null;
     status: string;
     pickLabel: string;
+    sentimentPct: number | null;
     market: { id: number | string; question: string; status: string };
   }>;
+}
+
+// Tiny status pill, themed against the surrounding card. Mirrors the
+// MarketCard badges users already see on the markets page so the
+// vocabulary stays consistent (OPEN / LOCKED / RESOLVED / VOIDED).
+function legStatusPill(status: string): { label: string; cls: string } {
+  const s = (status || '').toLowerCase();
+  if (s === 'resolved' || s === 'won' || s === 'lost') {
+    return { label: 'RESOLVED', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' };
+  }
+  if (s === 'voided' || s === 'refunded') {
+    return { label: 'REFUNDED', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+  }
+  if (s === 'locked') {
+    return { label: 'LOCKED', cls: 'bg-slate-500/15 text-slate-300 border-slate-500/30' };
+  }
+  return { label: 'OPEN', cls: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25' };
 }
 
 const STAKE_INTENT_KEY = 'opx_stake_intent';
@@ -248,30 +267,55 @@ export function PicksLandingClient({
             {isSlip ? <Layers className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
             <span>{isSlip ? `${details.legs?.length ?? 0}-leg Multiplier` : 'Single pick'}</span>
           </div>
-          {!isSlip && details.market && (
-            <>
-              <p className="text-sm font-semibold whitespace-pre-wrap break-words" style={{ color: theme.fg }}>
-                {details.market.question}
-              </p>
-              <p className="text-xs" style={{ color: theme.fgBody }}>
-                Pick: <span className="font-bold" style={{ color: theme.accent }}>{details.market.pickLabel}</span>
-                {details.bet?.lockedOdds ? ` · ${details.bet.lockedOdds.toFixed(2)}×` : ''}
-              </p>
-            </>
-          )}
-          {isSlip && details.legs && (
-            <div className="space-y-1.5">
-              {details.legs.map((l, i) => (
-                <div key={i} className="text-xs flex items-start gap-2">
-                  <span className="font-mono text-[10px] mt-0.5" style={{ color: theme.fgMuted }}>{i + 1}.</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate" style={{ color: theme.fg }}>{l.market.question}</p>
-                    <p className="text-[10px]" style={{ color: theme.fgBody }}>
-                      Pick: <span style={{ color: theme.accent }}>{l.pickLabel}</span> · {l.lockedOdds.toFixed(2)}×
-                    </p>
-                  </div>
+          {!isSlip && details.market && (() => {
+            const pill = legStatusPill(details.market.status);
+            return (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold whitespace-pre-wrap break-words flex-1 min-w-0" style={{ color: theme.fg }}>
+                    {details.market.question}
+                  </p>
+                  <span className={cn('shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded border tracking-wider', pill.cls)}>
+                    {pill.label}
+                  </span>
                 </div>
-              ))}
+                <p className="text-xs" style={{ color: theme.fgBody }}>
+                  Pick: <span className="font-bold" style={{ color: theme.accent }}>{details.market.pickLabel}</span>
+                </p>
+                {details.market.sentimentPct !== null && (
+                  <p className="text-[10px]" style={{ color: theme.fgMuted }}>
+                    {details.market.sentimentPct}% of predictors picked this
+                  </p>
+                )}
+              </>
+            );
+          })()}
+          {isSlip && details.legs && (
+            <div className="space-y-2">
+              {details.legs.map((l, i) => {
+                const pill = legStatusPill(l.market.status);
+                return (
+                  <div key={i} className="text-xs flex items-start gap-2">
+                    <span className="font-mono text-[10px] mt-0.5" style={{ color: theme.fgMuted }}>{i + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate flex-1 min-w-0" style={{ color: theme.fg }}>{l.market.question}</p>
+                        <span className={cn('shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded border tracking-wider', pill.cls)}>
+                          {pill.label}
+                        </span>
+                      </div>
+                      <p className="text-[10px]" style={{ color: theme.fgBody }}>
+                        Pick: <span style={{ color: theme.accent }}>{l.pickLabel}</span>
+                      </p>
+                      {l.sentimentPct !== null && (
+                        <p className="text-[10px]" style={{ color: theme.fgMuted }}>
+                          {l.sentimentPct}% picked this
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           <div className="flex items-center justify-between pt-2 mt-2 border-t" style={{ borderColor: `${theme.accent}22` }}>

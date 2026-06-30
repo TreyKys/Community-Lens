@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Layers, X, Zap, Loader2, TrendingUp, Trash2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SharePickModal } from '@/components/SharePickModal';
+import { PickPreviewModal } from '@/components/PickPreviewModal';
 
 interface QuoteResponse {
   ok: boolean;
@@ -42,6 +43,10 @@ export function MultiplierSlip() {
   // when the API returns slipId; reset when the modal closes.
   const [autoShareSlipId, setAutoShareSlipId] = useState<string | null>(null);
   const [userHandle, setUserHandle] = useState<string | null>(null);
+  // OPx Picks pre-bet preview — same renderer as the post-bet share
+  // card, fed by the in-flight quote. Lets the user theme + sanity
+  // check their card before tapping Place.
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // OPx Picks clone — when the SlipProvider has a pending prefill
   // stake (set by the /p/slip/[id] "Stake as is" CTA), drop it into
@@ -327,6 +332,25 @@ export function MultiplierSlip() {
               </div>
             </div>
 
+            {/* Preview OPx Pick — tappable as soon as the live quote
+                returns ok + stake is valid. Same OG renderer the real
+                share card uses; just parameterised on the in-flight
+                quote so the user sees the exact card they'll get after
+                placing. Sits above the Place CTA so it doesn't compete
+                with the primary action. */}
+            {validStake && quote?.ok && legs.length >= 2 && (
+              <div className="shrink-0 px-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(true)}
+                  className="w-full text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="w-3 h-3 text-violet-400" />
+                  Preview your OPx Pick before placing
+                </button>
+              </div>
+            )}
+
             {/* Place — pinned footer */}
             <div className="shrink-0 px-4 pt-3 pb-2">
               <Button
@@ -355,6 +379,25 @@ export function MultiplierSlip() {
           type="slip"
           id={autoShareSlipId}
           defaultUsername={userHandle}
+        />
+      )}
+
+      {/* Pre-bet preview. Reads the live quote's per-leg odds (so the
+          chip on each leg matches what'll lock when the slip places)
+          plus the combined odds for the hero number. */}
+      {previewOpen && quote?.ok && (
+        <PickPreviewModal
+          mode="slip"
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          legs={legs.map(l => ({
+            marketId: l.marketId,
+            outcomeIndex: l.outcomeIndex,
+            lockedOdds: legOddsById[l.marketId] || undefined,
+          }))}
+          stakeTngn={stakeNum}
+          odds={quote.combinedOdds || 0}
+          handle={userHandle}
         />
       )}
     </>

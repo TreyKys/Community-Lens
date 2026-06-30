@@ -33,6 +33,47 @@ function bestHandle(u: { username?: string | null; first_name?: string | null })
   return (u.username || u.first_name || 'predictor').replace(/\s+/g, '').slice(0, 18);
 }
 
+// Per-outcome sentiment as a percentage of the EFFECTIVE pool
+// (seed + active real bets). Mirrors the same formula the chart
+// endpoint uses so the landing page reads the same numbers the bet
+// modal does. Returns null on lookup failure — the landing page
+// then just omits the "X% picked this" line.
+async function getSentimentPct(
+  supa: any,
+  marketId: number | string,
+  outcomeIndex: number,
+  optionCount: number,
+  seedPoolMap: Record<string, number> | null | undefined,
+): Promise<number | null> {
+  try {
+    const { data: bets } = await supa
+      .from('user_bets')
+      .select('outcome_index, net_stake_tngn')
+      .eq('market_id', marketId)
+      .eq('status', 'active');
+
+    const totals: number[] = Array.from({ length: optionCount }, () => 0);
+    for (const b of bets || []) {
+      const i = Number((b as any).outcome_index);
+      if (i >= 0 && i < optionCount) {
+        totals[i] += Number((b as any).net_stake_tngn || 0);
+      }
+    }
+    const effective: number[] = totals.map((real, i) => {
+      const seed = Number((seedPoolMap || {})[String(i)] ?? 0);
+      const safeSeed = Number.isFinite(seed) && seed > 0 ? seed : 0;
+      return safeSeed + real;
+    });
+    const sum = effective.reduce((s, v) => s + v, 0);
+    if (sum <= 0) return null;
+    const idx = outcomeIndex;
+    if (idx < 0 || idx >= optionCount) return null;
+    return Math.round((effective[idx] / sum) * 100);
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   _req: Request,
   { params }: { params: { type: string; id: string } },
@@ -49,7 +90,7 @@ export async function GET(
     if (type === 'bet') {
       const { data: bet } = await supabaseAdmin
         .from('user_bets')
-        .select('id, user_id, market_id, outcome_index, stake_tngn, payout_tngn, status, locked_odds, placed_at, markets:market_id (id, title, question, options, status, resolved_outcome, total_pool, pool_by_outcome)')
+        .select('id, user_id, market_id, outcome_index, stake_tngn, payout_tngn, status, locked_odds, placed_at, markets:market_id (id, title, question, options, status, resolved_outcome, total_pool, pool_by_outcome, seed_pool)')
         .eq('id', id)
         .maybeSingle();
       if (!bet) return NextResponse.json({ error: 'pick not found' }, { status: 404 });
@@ -61,6 +102,14 @@ export async function GET(
         .maybeSingle();
 
       const m = (bet as any).markets as any;
+      const opts: string[] = Array.isArray(m?.options) ? m.options : [];
+      const sentimentPct = await getSentimentPct(
+        supabaseAdmin,
+        bet.market_id,
+        Number(bet.outcome_index),
+        opts.length,
+        (m?.seed_pool || {}) as Record<string, number>,
+      );
       const ownerOut: OwnerVanity = {
         userId: bet.user_id,
         handle: owner ? bestHandle(owner) : 'predictor',
@@ -82,10 +131,11 @@ export async function GET(
           id: m?.id,
           title: m?.title || null,
           question: m?.question || '',
-          options: Array.isArray(m?.options) ? m.options : [],
+          options: opts,
           status: m?.status || 'open',
           resolvedOutcome: m?.resolved_outcome ?? null,
-          pickLabel: Array.isArray(m?.options) ? (m.options[bet.outcome_index] ?? `option ${bet.outcome_index}`) : `option ${bet.outcome_index}`,
+          pickLabel: opts[bet.outcome_index] ?? `option ${bet.outcome_index}`,
+          sentimentPct,
         },
       });
     }
@@ -99,7 +149,7 @@ export async function GET(
         legs_total, legs_resolved, legs_won, status, created_at,
         multiplier_legs (
           id, market_id, outcome_index, locked_odds, realized_odds, status,
-          markets:market_id (id, title, question, options, status, resolved_outcome)
+          markets:market_id (id, title, question, options, status, resolved_outcome, seed_pool)
         )
       `)
       .eq('id', id)
@@ -113,9 +163,16 @@ export async function GET(
       .maybeSingle();
 
     const legsRaw = Array.isArray((slip as any).multiplier_legs) ? (slip as any).multiplier_legs : [];
-    const legs = legsRaw.map((l: any) => {
+    const legs = await Promise.all(legsRaw.map(async (l: any) => {
       const m = l.markets || {};
       const opts = Array.isArray(m.options) ? m.options : [];
+      const sentimentPct = await getSentimentPct(
+        supabaseAdmin,
+        l.market_id,
+        Number(l.outcome_index),
+        opts.length,
+        (m.seed_pool || {}) as Record<string, number>,
+      );
       return {
         marketId: l.market_id,
         outcomeIndex: l.outcome_index,
@@ -123,6 +180,7 @@ export async function GET(
         realizedOdds: l.realized_odds == null ? null : Number(l.realized_odds),
         status: l.status,
         pickLabel: opts[l.outcome_index] ?? `option ${l.outcome_index}`,
+        sentimentPct,
         market: {
           id: m.id,
           title: m.title || null,
@@ -132,7 +190,7 @@ export async function GET(
           resolvedOutcome: m.resolved_outcome ?? null,
         },
       };
-    });
+    }));
 
     const ownerOut: OwnerVanity = {
       userId: (slip as any).user_id,
