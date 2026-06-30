@@ -12,9 +12,9 @@ import { resolveTheme } from '@/lib/picksThemes';
 // share card will look like before they tap Place Multiplier.
 //
 // `legs` format: "marketId:outcomeIndex:lockedOdds" entries joined by
-// commas. lockedOdds is optional — when omitted (slip still pricing)
-// the per-leg odds chip on the card just shows "—" so the layout
-// stays stable.
+// commas. lockedOdds is parsed but unused on the card itself — the
+// only odds shown anywhere is the combined multiplier up top; each
+// leg row shows its market status instead.
 
 export const runtime = 'nodejs';
 
@@ -29,12 +29,22 @@ function ngn(n: number): string {
   return '₦' + Math.round(Number(n) || 0).toLocaleString('en-NG');
 }
 
+function legStatusPill(status: string): { label: string; fg: string; bg: string } {
+  const s = (status || '').toLowerCase();
+  if (s === 'locked') return { label: 'LOCKED', fg: '#94a3b8', bg: 'rgba(148,163,184,0.18)' };
+  if (s === 'resolved') return { label: 'RESOLVED', fg: '#34d399', bg: 'rgba(52,211,153,0.18)' };
+  if (s === 'voided') return { label: 'VOIDED', fg: '#fbbf24', bg: 'rgba(251,191,36,0.18)' };
+  return { label: 'OPEN', fg: '#34d399', bg: 'rgba(52,211,153,0.12)' };
+}
+
 interface ParsedLeg {
   marketId: number;
   outcomeIndex: number;
-  oddsHint: number; // 0 = unknown
 }
 
+// The locked-odds segment in each "mid:oi:odds" entry is accepted but
+// ignored — kept so existing callers (PickPreviewModal) don't need a
+// URL-format change even though the card no longer shows per-leg odds.
 function parseLegs(raw: string | null): ParsedLeg[] {
   if (!raw) return [];
   return raw
@@ -42,15 +52,13 @@ function parseLegs(raw: string | null): ParsedLeg[] {
     .map(chunk => chunk.trim())
     .filter(Boolean)
     .map(chunk => {
-      const [m, o, odds] = chunk.split(':');
+      const [m, o] = chunk.split(':');
       const mid = Number(m);
       const oi = Number(o);
-      const od = Number(odds);
       if (!Number.isFinite(mid) || !Number.isFinite(oi)) return null;
       return {
         marketId: mid,
         outcomeIndex: oi,
-        oddsHint: Number.isFinite(od) && od > 0 ? od : 0,
       };
     })
     .filter((x): x is ParsedLeg => x !== null)
@@ -69,13 +77,13 @@ export async function GET(req: Request) {
 
   // Hydrate market metadata server-side so we control the question /
   // option label rather than trusting raw query strings.
-  let hydratedLegs: Array<{ market: string; pick: string; odds: number }> = [];
+  let hydratedLegs: Array<{ market: string; pick: string; status: string }> = [];
   if (legs.length > 0) {
     try {
       const marketIds = Array.from(new Set(legs.map(l => l.marketId)));
       const { data: markets } = await supabaseAdmin
         .from('markets')
-        .select('id, question, options')
+        .select('id, question, options, status')
         .in('id', marketIds);
       const byId = new Map<number, any>();
       for (const m of markets || []) byId.set(Number((m as any).id), m);
@@ -87,7 +95,7 @@ export async function GET(req: Request) {
         return {
           market: cleanQ.length > 48 ? cleanQ.slice(0, 47) + '…' : cleanQ,
           pick,
-          odds: l.oddsHint,
+          status: String(m.status || 'open'),
         };
       });
     } catch {
@@ -95,7 +103,7 @@ export async function GET(req: Request) {
       hydratedLegs = legs.map(l => ({
         market: `Market ${l.marketId}`,
         pick: `Option ${l.outcomeIndex}`,
-        odds: l.oddsHint,
+        status: 'open',
       }));
     }
   }
@@ -187,38 +195,53 @@ export async function GET(req: Request) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: 44, gap: 14 }}>
-          {hydratedLegs.slice(0, 5).map((leg, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                padding: '14px 20px',
-                border: `2px solid ${theme.accent}`,
-                borderRadius: 16,
-                background: 'rgba(255,255,255,0.04)',
-              }}
-            >
-              <div style={{ display: 'flex', color: theme.fgMuted, fontSize: 20, fontWeight: 600 }}>
-                {leg.market}
-              </div>
+          {hydratedLegs.slice(0, 5).map((leg, i) => {
+            const pill = legStatusPill(leg.status);
+            return (
               <div
+                key={i}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginTop: 4,
+                  flexDirection: 'column',
+                  padding: '14px 20px',
+                  border: `2px solid ${theme.accent}`,
+                  borderRadius: 16,
+                  background: 'rgba(255,255,255,0.04)',
                 }}
               >
-                <span style={{ color: theme.fg, fontSize: 28, fontWeight: 800, display: 'flex' }}>
-                  {leg.pick}
-                </span>
-                <span style={{ color: theme.accent, fontSize: 26, fontWeight: 900, display: 'flex' }}>
-                  {leg.odds > 0 ? `${leg.odds.toFixed(2)}×` : '—'}
-                </span>
+                <div style={{ display: 'flex', color: theme.fgMuted, fontSize: 20, fontWeight: 600 }}>
+                  {leg.market}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: 4,
+                  }}
+                >
+                  <span style={{ color: theme.fg, fontSize: 28, fontWeight: 800, display: 'flex' }}>
+                    {leg.pick}
+                  </span>
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '4px 12px',
+                      borderRadius: 9999,
+                      background: pill.bg,
+                      color: pill.fg,
+                      fontSize: 16,
+                      fontWeight: 800,
+                      letterSpacing: 1,
+                    }}
+                  >
+                    {pill.label}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div style={{ display: 'flex', flex: 1 }} />
