@@ -36,6 +36,7 @@ interface Market {
   description: string | null;
   resolved_at: string | null;
   is_trending: boolean;
+  trending_rank: number | null;
   is_locked_odds?: boolean;
 }
 
@@ -1136,16 +1137,21 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, is_locked_odds')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, trending_rank, is_locked_odds')
         .not('status', 'eq', 'voided')
         .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
 
-      // Sort. Default is biggest pool first (puts hot markets at the top of
-      // the feed); 'closing' = soonest closing; 'new' = newest by id.
-      // Secondary ordering by id keeps pre-launch markets (all pool=0) in a
+      // Sort. The Trending tab is admin-curated order (manual rank — not
+      // pool size, so a market doesn't jump around as money moves);
+      // everything else defaults to biggest pool first. 'closing' =
+      // soonest closing; 'new' = newest by id. Secondary ordering by id
+      // keeps ties (all-null rank, or pool=0 pre-launch markets) in a
       // stable order rather than reshuffling them on every refetch.
       if (sortParam === 'closing') query = query.order('closes_at', { ascending: true });
       else if (sortParam === 'new') query = query.order('id', { ascending: false });
+      else if (category === 'trending') query = query
+        .order('trending_rank', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: false });
       else query = query
         .order('total_pool', { ascending: false })
         .order('id', { ascending: false });

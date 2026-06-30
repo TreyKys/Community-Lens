@@ -187,7 +187,9 @@ export async function GET(
 // PATCH /api/admin/markets/[id]
 //
 // Mutable admin fields on a single market. Supported:
-//   - is_trending (boolean)           → Trending tab curation
+//   - is_trending   (boolean)          → Trending tab curation
+//   - trending_rank (number|null)      → manual order within Trending
+//                                         (lower shows first; null sorts last)
 //   - title       (string)            → short label
 //   - question    (string)            → full question text
 //   - description (string|null)       → about-this-market blurb
@@ -265,6 +267,18 @@ export async function PATCH(
   const patch: Record<string, unknown> = {};
 
   if (typeof body?.is_trending === 'boolean') patch.is_trending = body.is_trending;
+
+  if (body.trending_rank !== undefined) {
+    if (body.trending_rank === null) {
+      patch.trending_rank = null;
+    } else {
+      const r = Number(body.trending_rank);
+      if (!Number.isFinite(r) || !Number.isInteger(r)) {
+        return NextResponse.json({ error: 'trending_rank must be an integer or null' }, { status: 400 });
+      }
+      patch.trending_rank = r;
+    }
+  }
 
   for (const f of ALLOWED_TEXT_FIELDS) {
     if (body[f] === undefined) continue;
@@ -489,7 +503,7 @@ export async function PATCH(
     .from('markets')
     .update(patch)
     .eq('id', marketId)
-    .select('id, is_trending, title, question, description, category, closes_at, options, pool_by_outcome, is_locked_odds, seed_pool, vig_pct')
+    .select('id, is_trending, trending_rank, title, question, description, category, closes_at, options, pool_by_outcome, is_locked_odds, seed_pool, vig_pct')
     .maybeSingle();
 
   if (error) {

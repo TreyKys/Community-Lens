@@ -3578,6 +3578,7 @@ type MarketRow = {
   closes_at: string | null;
   child_count: number;
   is_trending: boolean;
+  trending_rank: number | null;
 };
 
 function DeleteSpecificMarketsPanel() {
@@ -3604,7 +3605,7 @@ function DeleteSpecificMarketsPanel() {
     try {
       let q = supabase
         .from('markets')
-        .select('id, question, category, status, total_pool, parent_market_id, closes_at, is_trending')
+        .select('id, question, category, status, total_pool, parent_market_id, closes_at, is_trending, trending_rank')
         .order('id', { ascending: false })
         .limit(50);
       if (statusFilter !== 'all') q = q.eq('status', statusFilter);
@@ -3640,6 +3641,7 @@ function DeleteSpecificMarketsPanel() {
           closes_at: m.closes_at,
           child_count: childCounts[m.id] || 0,
           is_trending: !!m.is_trending,
+          trending_rank: m.trending_rank === null || m.trending_rank === undefined ? null : Number(m.trending_rank),
         })),
       );
     } catch (e: any) {
@@ -3687,6 +3689,27 @@ function DeleteSpecificMarketsPanel() {
     } catch (e: any) {
       setRows(prev => prev.map(r => r.id === marketId ? { ...r, is_trending: current } : r));
       toast({ title: 'Toggle failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  // Manual ordering within the Trending tab — lower rank shows first,
+  // null sorts last. Same optimistic-flip-then-rollback pattern as
+  // toggleTrending.
+  const setTrendingRank = async (marketId: number, previous: number | null, next: number | null) => {
+    setRows(prev => prev.map(r => r.id === marketId ? { ...r, trending_rank: next } : r));
+    try {
+      const res = await fetch(`/api/admin/markets/${marketId}`, {
+        method: 'PATCH',
+        headers: adminHeaders(),
+        body: JSON.stringify({ trending_rank: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to update');
+      }
+    } catch (e: any) {
+      setRows(prev => prev.map(r => r.id === marketId ? { ...r, trending_rank: previous } : r));
+      toast({ title: 'Rank update failed', description: e.message, variant: 'destructive' });
     }
   };
 
@@ -3837,6 +3860,25 @@ function DeleteSpecificMarketsPanel() {
                   >
                     <Flame className="w-3 h-3" /> {m.is_trending ? 'Trending' : 'Trend'}
                   </Button>
+                  {m.is_trending && (
+                    <Input
+                      type="number"
+                      defaultValue={m.trending_rank ?? ''}
+                      placeholder="Rank"
+                      key={`rank-${m.id}-${m.trending_rank ?? 'null'}`}
+                      className="h-7 text-xs px-2 w-16"
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={(e) => {
+                        const raw = e.target.value.trim();
+                        const next = raw === '' ? null : Math.trunc(Number(raw));
+                        if (next !== null && !Number.isFinite(next)) return;
+                        if (next === m.trending_rank) return;
+                        setTrendingRank(m.id, m.trending_rank, next);
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                      title="Manual position in the Trending tab — lower shows first, blank sorts last"
+                    />
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
