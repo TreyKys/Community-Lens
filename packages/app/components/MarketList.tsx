@@ -1141,20 +1141,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
         .not('status', 'eq', 'voided')
         .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
 
-      // Sort. The Trending tab is admin-curated order (manual rank — not
-      // pool size, so a market doesn't jump around as money moves);
-      // everything else defaults to biggest pool first. 'closing' =
-      // soonest closing; 'new' = newest by id. Secondary ordering by id
-      // keeps ties (all-null rank, or pool=0 pre-launch markets) in a
-      // stable order rather than reshuffling them on every refetch.
+      // Sort. Explicit picks ('closing' / 'pool' from the toolbar) win on
+      // every tab, Trending included — sorting the curated set by closing
+      // time or pool size is still a useful override. Absent an explicit
+      // pick, sortParam defaults to 'new' — but on the Trending tab "new"
+      // doesn't mean recency, it means the admin-curated manual order, so
+      // that default is special-cased to trending_rank instead of id.
+      // Secondary ordering by id keeps ties (all-null rank, or pool=0
+      // pre-launch markets) stable rather than reshuffling on every refetch.
       if (sortParam === 'closing') query = query.order('closes_at', { ascending: true });
-      else if (sortParam === 'new') query = query.order('id', { ascending: false });
+      else if (sortParam === 'pool') query = query
+        .order('total_pool', { ascending: false })
+        .order('id', { ascending: false });
       else if (category === 'trending') query = query
         .order('trending_rank', { ascending: true, nullsFirst: false })
         .order('id', { ascending: false });
-      else query = query
-        .order('total_pool', { ascending: false })
-        .order('id', { ascending: false });
+      else query = query.order('id', { ascending: false });
 
       if (filterExactMarketId !== undefined) {
         query = query.eq('id', filterExactMarketId);
