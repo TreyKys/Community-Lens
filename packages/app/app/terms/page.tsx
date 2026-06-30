@@ -12,7 +12,7 @@ export default function TermsPage() {
     <article className="max-w-3xl mx-auto px-4 py-10 md:py-16 prose-invert prose">
       <header className="mb-10 border-b border-emerald-500/15 pb-6">
         <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-emerald-400 font-semibold mb-2">
-          <Shield className="w-3 h-3" /> Legal · Effective 2026-06-24
+          <Shield className="w-3 h-3" /> Legal · Effective 2026-06-30
         </div>
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Terms of Service</h1>
         <p className="text-muted-foreground text-sm mt-2">
@@ -76,6 +76,31 @@ export default function TermsPage() {
           <p>
             We reserve the right to delay withdrawals exceeding ₦500,000 by up to 24 hours for
             security review, and to require additional KYC for unusually large flows.
+          </p>
+          <p>
+            <strong>Bonus credits expire 7 days</strong> after being added to your bonus balance.
+            Unused bonus credit remaining at expiry is forfeited. Placing a prediction funded in
+            whole or in part by bonus balance does not extend or reset this expiry.
+          </p>
+          <p>
+            <strong>Winnings on predictions funded with bonus balance</strong> are split between
+            your actual and bonus balances based on what share of the stake came from bonus
+            credit, calculated per prediction at the time it is placed:
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>Stake <strong>90–100% bonus-funded</strong> — 10% of winnings withdrawable, 90%
+              returned to bonus balance.</li>
+            <li>Stake <strong>80–89% bonus-funded</strong> — 20% of winnings withdrawable, 80%
+              returned to bonus balance.</li>
+            <li>Stake <strong>70–79% bonus-funded</strong> — 30% of winnings withdrawable, 70%
+              returned to bonus balance.</li>
+            <li>Stake <strong>under 70% bonus-funded</strong> — winnings are fully withdrawable.</li>
+          </ul>
+          <p>
+            This split applies to the full winnings amount, not just the profit portion, and is
+            calculated independently for each prediction (and, for a Multiplier, at the ticket
+            level — see Section 5). It does not apply to a stake refunded on a voided prediction,
+            which is returned in the same proportion of actual/bonus balance it was placed with.
           </p>
         </Section>
 
@@ -182,9 +207,11 @@ export default function TermsPage() {
 
         <Section title="12. Changes to These Terms">
           <p>
-            We may update these Terms from time to time. Material changes will be notified via
-            email or in-app banner, and you will be prompted to re-accept the updated Terms on
-            your next sign-in.
+            We may update these Terms from time to time, at our discretion and without prior
+            notice. Where practical, material changes will be notified via email or in-app
+            banner, and you will be prompted to re-accept the updated Terms on your next
+            sign-in; continued use of the platform after an update takes effect constitutes
+            acceptance of the revised Terms whether or not notice was given.
           </p>
         </Section>
 

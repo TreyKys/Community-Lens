@@ -21,6 +21,26 @@ const supabaseAdmin = createClient(
 const POOL_RAKE_PCT = 0.10;
 const BET_INSURANCE_CAP = 2000;
 
+// Bonus-credits winnings split. A bet funded mostly by bonus balance
+// pays its winnings back mostly into bonus balance — only a sliver is
+// withdrawable. bonusProportion is the fraction of the ORIGINAL STAKE
+// that came from bonus_balance (0 = all cash, 1 = all bonus), recorded
+// on the bet row at placement time by place_bet/place_bet_locked.
+//   >= 90% bonus → 10% cash / 90% bonus
+//   >= 80% bonus → 20% cash / 80% bonus
+//   >= 70% bonus → 30% cash / 70% bonus
+//   <  70% bonus → 100% cash (no split)
+// bonus = payout - tngn (not independently rounded) so the two always
+// sum to exactly `payout`.
+function applyBonusSplit(payout: number, bonusProportion: number): { tngn: number; bonus: number } {
+  const cashFrac = bonusProportion >= 0.90 ? 0.10
+    : bonusProportion >= 0.80 ? 0.20
+    : bonusProportion >= 0.70 ? 0.30
+    : 1.0;
+  const tngn = Math.round(payout * cashFrac * 10000) / 10000;
+  return { tngn, bonus: payout - tngn };
+}
+
 // Random Bet Insurance — formerly "First Bet Insurance".
 //
 // Triggers:
@@ -147,7 +167,7 @@ async function resolveLockedOddsMarket(args: {
   // settlement library and the bet rows we'll mark won/lost/refunded.
   const { data: rawBets } = await supabaseAdmin
     .from('user_bets')
-    .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn, locked_odds, vig_at_stake_pct, tier')
+    .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn, locked_odds, vig_at_stake_pct, tier, bonus_proportion')
     .eq('market_id', marketId)
     .eq('status', 'active');
 
@@ -191,6 +211,14 @@ async function resolveLockedOddsMarket(args: {
   }
 
   const wellFormed = rawBets;
+
+  // bonus_proportion isn't part of the LockedBet type (it doesn't affect
+  // settlement math, only how the payout gets credited), so look it up
+  // by bet id at credit time instead of threading it through.
+  const bonusPropByBetId: Record<string, number> = {};
+  for (const b of wellFormed) {
+    bonusPropByBetId[b.id] = Number((b as any).bonus_proportion) || 0;
+  }
 
   // Preload VIP referral info — same shape as the parimutuel branch.
   const losingUserIds = Array.from(new Set(
@@ -330,10 +358,11 @@ async function resolveLockedOddsMarket(args: {
   for (const p of summary.perBet) {
     if (!p.won) continue;
     const lb = lockedBets.find(x => x.id === p.betId)!;
+    const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(p.payoutTngn, bonusPropByBetId[lb.id] ?? 0);
     await supabaseAdmin.rpc('credit_user', {
       p_user_id: lb.userId,
-      p_tngn_delta: p.payoutTngn,
-      p_bonus_delta: 0,
+      p_tngn_delta: winTngn,
+      p_bonus_delta: winBonus,
     });
     await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: p.payoutTngn }).eq('id', lb.id);
 
@@ -345,15 +374,18 @@ async function resolveLockedOddsMarket(args: {
         p_reason: 'bet_win',
         p_points: winPoints,
         p_bet_id: lb.id,
-        p_metadata: { payout: p.payoutTngn, profit, locked_odds: lb.lockedOdds, floor_bound: p.floorBound, upside_bound: p.upsideBound },
+        p_metadata: { payout: p.payoutTngn, profit, locked_odds: lb.lockedOdds, floor_bound: p.floorBound, upside_bound: p.upsideBound, winTngn, winBonus },
       });
     }
 
     try {
+      const message = winBonus > 0
+        ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
+        : `You won! ₦${p.payoutTngn.toLocaleString()} has been credited to your account. 🎉`;
       await supabaseAdmin.from('notifications').insert({
         user_id: lb.userId,
         type: 'bet_won',
-        message: `You won! ₦${p.payoutTngn.toLocaleString()} has been credited to your account. 🎉`,
+        message,
         amount: p.payoutTngn,
       });
     } catch { /* non-critical */ }
@@ -552,7 +584,7 @@ export async function POST(request: Request) {
 
     const { data: bets } = await supabaseAdmin
       .from('user_bets')
-      .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn')
+      .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn, bonus_proportion')
       .eq('market_id', marketId)
       .eq('status', 'active');
 
@@ -625,10 +657,11 @@ export async function POST(request: Request) {
       for (const bet of winningBets) {
         const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
         const payout = Math.max(Number(bet.net_stake_tngn) || 0, floorPayout);
+        const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(payout, Number((bet as any).bonus_proportion) || 0);
         await supabaseAdmin.rpc('credit_user', {
           p_user_id: bet.user_id,
-          p_tngn_delta: payout,
-          p_bonus_delta: 0,
+          p_tngn_delta: winTngn,
+          p_bonus_delta: winBonus,
         });
         await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
 
@@ -640,15 +673,18 @@ export async function POST(request: Request) {
             p_reason: 'bet_win',
             p_points: winPoints,
             p_bet_id: bet.id,
-            p_metadata: { payout, profit, all_winners: true },
+            p_metadata: { payout, profit, all_winners: true, winTngn, winBonus },
           });
         }
 
         try {
+          const message = winBonus > 0
+            ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
+            : `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`;
           await supabaseAdmin.from('notifications').insert({
             user_id: bet.user_id,
             type: 'bet_won',
-            message: `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`,
+            message,
             amount: payout,
           });
         } catch { /* non-critical */ }
@@ -727,11 +763,12 @@ export async function POST(request: Request) {
       const parimutuelPayout = share * payoutPool;
       const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
       const payout = Math.max(parimutuelPayout, floorPayout);
+      const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(payout, Number((bet as any).bonus_proportion) || 0);
 
       await supabaseAdmin.rpc('credit_user', {
         p_user_id: bet.user_id,
-        p_tngn_delta: payout,
-        p_bonus_delta: 0,
+        p_tngn_delta: winTngn,
+        p_bonus_delta: winBonus,
       });
       await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
 
@@ -744,15 +781,18 @@ export async function POST(request: Request) {
           p_reason: 'bet_win',
           p_points: winPoints,
           p_bet_id: bet.id,
-          p_metadata: { payout, profit, parimutuel: parimutuelPayout, floor: floorPayout },
+          p_metadata: { payout, profit, parimutuel: parimutuelPayout, floor: floorPayout, winTngn, winBonus },
         });
       }
 
       try {
+        const message = winBonus > 0
+          ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
+          : `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`;
         await supabaseAdmin.from('notifications').insert({
           user_id: bet.user_id,
           type: 'bet_won',
-          message: `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`,
+          message,
           amount: payout,
         });
       } catch (err) {
