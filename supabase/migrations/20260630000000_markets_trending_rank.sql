@@ -10,3 +10,8 @@ ALTER TABLE public.markets
 CREATE INDEX IF NOT EXISTS idx_markets_trending_rank
   ON public.markets (trending_rank)
   WHERE is_trending = true;
+
+-- PostgREST caches the table schema; without this a new column 404s
+-- ("column not found in schema cache") on every select/order against it
+-- until the API restarts on its own. Force an immediate reload.
+NOTIFY pgrst, 'reload schema';
