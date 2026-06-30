@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus } from 'lucide-react';
+import { Loader2, Shield, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
@@ -1798,9 +1798,12 @@ function LockedOddsConfigBlock(props: {
 function ManualOverridePanel() {
   const { toast } = useToast();
   const [lockMarketId, setLockMarketId] = useState('');
+  const [unlockMarketId, setUnlockMarketId] = useState('');
+  const [unlockClosesAtLocal, setUnlockClosesAtLocal] = useState('');
   const [resolveMarketId, setResolveMarketId] = useState('');
   const [winningOutcome, setWinningOutcome] = useState('');
   const [isLocking, setIsLocking] = useState(false);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const [isFiringHeartbeat, setIsFiringHeartbeat] = useState(false);
   const [markets, setMarkets] = useState<any[]>([]);
@@ -1843,6 +1846,35 @@ function ManualOverridePanel() {
     } catch (err: any) {
       toast({ title: 'Lock failed', description: err.message, variant: 'destructive' });
     } finally { setIsLocking(false); }
+  };
+
+  const forceUnlock = async () => {
+    if (!unlockMarketId || !unlockClosesAtLocal) return;
+    const newClosesAt = new Date(unlockClosesAtLocal);
+    if (Number.isNaN(newClosesAt.getTime())) {
+      toast({ title: 'Unlock failed', description: 'Invalid close time', variant: 'destructive' });
+      return;
+    }
+    setIsUnlocking(true);
+    try {
+      const res = await fetch(`/api/admin/markets/${unlockMarketId}/unlock`, {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ closesAt: newClosesAt.toISOString() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
+        throw new Error(data.error);
+      }
+      toast({ title: `Market ${unlockMarketId} unlocked!`, description: `Reopened for betting, closes ${newClosesAt.toLocaleString()}.` });
+      setUnlockMarketId('');
+      setUnlockClosesAtLocal('');
+      setMarkets(prev => prev.map(m => m.id === data.market.id ? { ...m, status: 'open', closes_at: data.market.closes_at } : m));
+    } catch (err: any) {
+      toast({ title: 'Unlock failed', description: err.message, variant: 'destructive' });
+    } finally { setIsUnlocking(false); }
   };
 
   const forceResolve = async () => {
@@ -1920,6 +1952,50 @@ function ManualOverridePanel() {
               {isLocking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Unlock Market */}
+      <Card className="border-cyan-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Unlock className="w-4 h-4 text-cyan-400" />
+            Unlock Market
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Use when a market locked too early (stale closes_at, accidental force-lock). Reopens it for betting and
+            requires a new close time so it doesn&rsquo;t immediately look overdue again. Clears the on-chain seal —
+            locking it again later commits a fresh Merkle root.
+          </p>
+          <Select value={unlockMarketId} onValueChange={setUnlockMarketId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select locked market..." />
+            </SelectTrigger>
+            <SelectContent>
+              {markets.filter(m => m.status === 'locked').map(m => (
+                <SelectItem key={m.id} value={m.id.toString()}>
+                  {m.id}: {m.question.slice(0, 50)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="space-y-1">
+            <Label className="text-xs">New close time</Label>
+            <Input
+              type="datetime-local"
+              value={unlockClosesAtLocal}
+              onChange={(e) => setUnlockClosesAtLocal(e.target.value)}
+            />
+          </div>
+          <Button
+            onClick={forceUnlock}
+            disabled={!unlockMarketId || !unlockClosesAtLocal || isUnlocking}
+            className="w-full bg-cyan-600 hover:bg-cyan-500"
+          >
+            {isUnlocking ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Unlocking...</> : 'Unlock & Reschedule'}
+          </Button>
         </CardContent>
       </Card>
 
