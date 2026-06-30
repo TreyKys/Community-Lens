@@ -1,6 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
 import { resolveTheme } from '@/lib/picksThemes';
+import { getSentimentPct } from '@/lib/sentiment';
 
 // GET /api/picks-card/preview/slip?legs=mid:oi:odds,mid:oi:odds&stakeTngn=…&odds=…&handle=…&theme=…
 //
@@ -27,14 +28,6 @@ const supabaseAdmin = createClient(
 
 function ngn(n: number): string {
   return '₦' + Math.round(Number(n) || 0).toLocaleString('en-NG');
-}
-
-function legStatusPill(status: string): { label: string; fg: string; bg: string } {
-  const s = (status || '').toLowerCase();
-  if (s === 'locked') return { label: 'LOCKED', fg: '#94a3b8', bg: 'rgba(148,163,184,0.18)' };
-  if (s === 'resolved') return { label: 'RESOLVED', fg: '#34d399', bg: 'rgba(52,211,153,0.18)' };
-  if (s === 'voided') return { label: 'VOIDED', fg: '#fbbf24', bg: 'rgba(251,191,36,0.18)' };
-  return { label: 'OPEN', fg: '#34d399', bg: 'rgba(52,211,153,0.12)' };
 }
 
 interface ParsedLeg {
@@ -77,33 +70,40 @@ export async function GET(req: Request) {
 
   // Hydrate market metadata server-side so we control the question /
   // option label rather than trusting raw query strings.
-  let hydratedLegs: Array<{ market: string; pick: string; status: string }> = [];
+  let hydratedLegs: Array<{ market: string; pick: string; sentimentPct: number | null }> = [];
   if (legs.length > 0) {
     try {
       const marketIds = Array.from(new Set(legs.map(l => l.marketId)));
       const { data: markets } = await supabaseAdmin
         .from('markets')
-        .select('id, question, options, status')
+        .select('id, question, options, seed_pool')
         .in('id', marketIds);
       const byId = new Map<number, any>();
       for (const m of markets || []) byId.set(Number((m as any).id), m);
-      hydratedLegs = legs.map(l => {
+      hydratedLegs = await Promise.all(legs.map(async l => {
         const m = byId.get(l.marketId) || {};
         const opts: string[] = Array.isArray(m.options) ? m.options : [];
         const cleanQ = String(m.question || '').replace(/\[.*?\]\s*/g, '').trim() || `Market ${l.marketId}`;
         const pick = opts[l.outcomeIndex] ?? `Option ${l.outcomeIndex}`;
+        const sentimentPct = await getSentimentPct(
+          supabaseAdmin,
+          l.marketId,
+          l.outcomeIndex,
+          opts.length,
+          (m.seed_pool || {}) as Record<string, number>,
+        );
         return {
           market: cleanQ.length > 48 ? cleanQ.slice(0, 47) + '…' : cleanQ,
           pick,
-          status: String(m.status || 'open'),
+          sentimentPct,
         };
-      });
+      }));
     } catch {
       // Fallback to label-only legs if the markets lookup blows up.
       hydratedLegs = legs.map(l => ({
         market: `Market ${l.marketId}`,
         pick: `Option ${l.outcomeIndex}`,
-        status: 'open',
+        sentimentPct: null,
       }));
     }
   }
@@ -195,53 +195,38 @@ export async function GET(req: Request) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: 44, gap: 14 }}>
-          {hydratedLegs.slice(0, 5).map((leg, i) => {
-            const pill = legStatusPill(leg.status);
-            return (
+          {hydratedLegs.slice(0, 5).map((leg, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '14px 20px',
+                border: `2px solid ${theme.accent}`,
+                borderRadius: 16,
+                background: 'rgba(255,255,255,0.04)',
+              }}
+            >
+              <div style={{ display: 'flex', color: theme.fgMuted, fontSize: 20, fontWeight: 600 }}>
+                {leg.market}
+              </div>
               <div
-                key={i}
                 style={{
                   display: 'flex',
-                  flexDirection: 'column',
-                  padding: '14px 20px',
-                  border: `2px solid ${theme.accent}`,
-                  borderRadius: 16,
-                  background: 'rgba(255,255,255,0.04)',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginTop: 4,
                 }}
               >
-                <div style={{ display: 'flex', color: theme.fgMuted, fontSize: 20, fontWeight: 600 }}>
-                  {leg.market}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginTop: 4,
-                  }}
-                >
-                  <span style={{ color: theme.fg, fontSize: 28, fontWeight: 800, display: 'flex' }}>
-                    {leg.pick}
-                  </span>
-                  <span
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '4px 12px',
-                      borderRadius: 9999,
-                      background: pill.bg,
-                      color: pill.fg,
-                      fontSize: 16,
-                      fontWeight: 800,
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {pill.label}
-                  </span>
-                </div>
+                <span style={{ color: theme.fg, fontSize: 28, fontWeight: 800, display: 'flex' }}>
+                  {leg.pick}
+                </span>
+                <span style={{ color: theme.accent, fontSize: 20, fontWeight: 800, display: 'flex' }}>
+                  {leg.sentimentPct !== null ? `${leg.sentimentPct}% picked this` : '—'}
+                </span>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
 
         <div style={{ display: 'flex', flex: 1 }} />

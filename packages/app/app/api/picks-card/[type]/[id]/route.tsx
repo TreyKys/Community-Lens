@@ -1,6 +1,7 @@
 import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
 import { resolveTheme } from '@/lib/picksThemes';
+import { getSentimentPct } from '@/lib/sentiment';
 
 // GET /api/picks-card/[type]/[id]?theme=violet
 //
@@ -37,23 +38,14 @@ function bestHandle(u: { username?: string | null; first_name?: string | null } 
   return (u.username || u.first_name || 'predictor').replace(/\s+/g, '').slice(0, 18);
 }
 
-// Per-leg status pill — mirrors the landing page's legStatusPill so the
-// share image and the page text never disagree. Never per-leg odds:
-// the only odds shown on this card is the combined multiplier up top.
-function legStatusPill(status: string): { label: string; fg: string; bg: string } {
-  const s = (status || '').toLowerCase();
-  if (s === 'won') return { label: 'WON', fg: '#34d399', bg: 'rgba(52,211,153,0.18)' };
-  if (s === 'lost') return { label: 'LOST', fg: '#fca5a5', bg: 'rgba(239,68,68,0.18)' };
-  if (s === 'void' || s === 'voided' || s === 'refunded') return { label: 'REFUNDED', fg: '#fbbf24', bg: 'rgba(251,191,36,0.18)' };
-  return { label: 'OPEN', fg: '#34d399', bg: 'rgba(52,211,153,0.12)' };
-}
-
 interface CardState {
   handle: string;
   // null for slip; the single bet's label for type=bet
   betLabel: string | null;
-  // null for bet; multi-line legs for type=slip
-  slipLegs: Array<{ market: string; pick: string; odds: number; status: string }>;
+  // null for bet; multi-line legs for type=slip. Never per-leg odds —
+  // the only odds shown on this card is the combined multiplier up
+  // top. Each leg shows the live "% of predictors picked this" instead.
+  slipLegs: Array<{ market: string; pick: string; sentimentPct: number | null }>;
   stakeTngn: number;
   // For a single bet: the projected/floor payout
   // For a slip: payout = stake × combined
@@ -125,8 +117,8 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
         user_id, slip_stake_tngn, combined_odds, payout_tngn, final_payout_tngn,
         legs_total, status,
         multiplier_legs (
-          market_id, outcome_index, locked_odds, status,
-          markets:market_id (question, options)
+          market_id, outcome_index, locked_odds,
+          markets:market_id (question, options, seed_pool)
         )
       `)
       .eq('id', id)
@@ -140,17 +132,23 @@ async function loadCard(type: string, id: string): Promise<CardState | null> {
       .maybeSingle();
 
     const legsRaw = Array.isArray((slip as any).multiplier_legs) ? (slip as any).multiplier_legs : [];
-    const legs = legsRaw.map((l: any) => {
+    const legs = await Promise.all(legsRaw.map(async (l: any) => {
       const m = l.markets || {};
       const opts: string[] = Array.isArray(m.options) ? m.options : [];
       const cleanQ = String(m.question || '').replace(/\[.*?\]\s*/g, '').trim();
+      const sentimentPct = await getSentimentPct(
+        supabaseAdmin,
+        l.market_id,
+        Number(l.outcome_index),
+        opts.length,
+        (m.seed_pool || {}) as Record<string, number>,
+      );
       return {
         market: cleanQ.length > 48 ? cleanQ.slice(0, 47) + '…' : cleanQ,
         pick: opts[l.outcome_index] ?? `Option ${l.outcome_index}`,
-        odds: Number(l.locked_odds || 0),
-        status: String(l.status || 'active'),
+        sentimentPct,
       };
-    });
+    }));
 
     const stake = Number((slip as any).slip_stake_tngn || 0);
     const payout = (slip as any).final_payout_tngn != null
@@ -374,60 +372,45 @@ export async function GET(
         <div style={{ display: 'flex', flexDirection: 'column', marginTop: 44 }}>
           {state.isSlip ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {state.slipLegs.slice(0, 5).map((leg, i) => {
-                const pill = legStatusPill(leg.status);
-                return (
+              {state.slipLegs.slice(0, 5).map((leg, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: '14px 20px',
+                    border: `2px solid ${theme.accent}`,
+                    borderRadius: 16,
+                    background: 'rgba(255,255,255,0.04)',
+                  }}
+                >
                   <div
-                    key={i}
                     style={{
                       display: 'flex',
-                      flexDirection: 'column',
-                      padding: '14px 20px',
-                      border: `2px solid ${theme.accent}`,
-                      borderRadius: 16,
-                      background: 'rgba(255,255,255,0.04)',
+                      color: theme.fgMuted,
+                      fontSize: 20,
+                      fontWeight: 600,
                     }}
                   >
-                    <div
-                      style={{
-                        display: 'flex',
-                        color: theme.fgMuted,
-                        fontSize: 20,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {leg.market}
-                    </div>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        marginTop: 4,
-                      }}
-                    >
-                      <span style={{ color: theme.fg, fontSize: 28, fontWeight: 800, display: 'flex' }}>
-                        {leg.pick}
-                      </span>
-                      <span
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '4px 12px',
-                          borderRadius: 9999,
-                          background: pill.bg,
-                          color: pill.fg,
-                          fontSize: 16,
-                          fontWeight: 800,
-                          letterSpacing: 1,
-                        }}
-                      >
-                        {pill.label}
-                      </span>
-                    </div>
+                    {leg.market}
                   </div>
-                );
-              })}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginTop: 4,
+                    }}
+                  >
+                    <span style={{ color: theme.fg, fontSize: 28, fontWeight: 800, display: 'flex' }}>
+                      {leg.pick}
+                    </span>
+                    <span style={{ color: theme.accent, fontSize: 20, fontWeight: 800, display: 'flex' }}>
+                      {leg.sentimentPct !== null ? `${leg.sentimentPct}% picked this` : '—'}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>

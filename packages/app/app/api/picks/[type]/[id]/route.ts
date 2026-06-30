@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getSentimentPct } from '@/lib/sentiment';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,47 +32,6 @@ interface OwnerVanity {
 
 function bestHandle(u: { username?: string | null; first_name?: string | null }): string {
   return (u.username || u.first_name || 'predictor').replace(/\s+/g, '').slice(0, 18);
-}
-
-// Per-outcome sentiment as a percentage of the EFFECTIVE pool
-// (seed + active real bets). Mirrors the same formula the chart
-// endpoint uses so the landing page reads the same numbers the bet
-// modal does. Returns null on lookup failure — the landing page
-// then just omits the "X% picked this" line.
-async function getSentimentPct(
-  supa: any,
-  marketId: number | string,
-  outcomeIndex: number,
-  optionCount: number,
-  seedPoolMap: Record<string, number> | null | undefined,
-): Promise<number | null> {
-  try {
-    const { data: bets } = await supa
-      .from('user_bets')
-      .select('outcome_index, net_stake_tngn')
-      .eq('market_id', marketId)
-      .eq('status', 'active');
-
-    const totals: number[] = Array.from({ length: optionCount }, () => 0);
-    for (const b of bets || []) {
-      const i = Number((b as any).outcome_index);
-      if (i >= 0 && i < optionCount) {
-        totals[i] += Number((b as any).net_stake_tngn || 0);
-      }
-    }
-    const effective: number[] = totals.map((real, i) => {
-      const seed = Number((seedPoolMap || {})[String(i)] ?? 0);
-      const safeSeed = Number.isFinite(seed) && seed > 0 ? seed : 0;
-      return safeSeed + real;
-    });
-    const sum = effective.reduce((s, v) => s + v, 0);
-    if (sum <= 0) return null;
-    const idx = outcomeIndex;
-    if (idx < 0 || idx >= optionCount) return null;
-    return Math.round((effective[idx] / sum) * 100);
-  } catch {
-    return null;
-  }
 }
 
 export async function GET(
