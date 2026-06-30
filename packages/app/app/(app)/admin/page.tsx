@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil } from 'lucide-react';
+import { Loader2, Shield, Lock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
@@ -1240,7 +1240,7 @@ function CreateMarketPanel() {
   const { toast } = useToast();
   const [question, setQuestion] = useState('');
   const [category, setCategory] = useState('sports');
-  const [optionsText, setOptionsText] = useState('Home Win, Draw, Away Win');
+  const [options, setOptions] = useState<string[]>(['Home Win', 'Draw', 'Away Win']);
   const [closesAt, setClosesAt] = useState('');
   const [fixtureId, setFixtureId] = useState('');
   const [parentMarketId, setParentMarketId] = useState<string>('');
@@ -1259,15 +1259,20 @@ function CreateMarketPanel() {
   const [vigOverride, setVigOverride] = useState<string>(''); // empty = use default per category
   const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
 
-  // Parse options: newline-separated takes priority (lets options contain
-  // commas like "Yes, And"); comma-separated still works for back-compat
-  // with old paste habits. Trim + drop blanks.
-  const parseOptions = (raw: string): string[] => {
-    const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    if (lines.length > 1) return lines;
-    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  const updateOption = (idx: number, value: string) => {
+    setOptions(prev => prev.map((o, i) => (i === idx ? value : o)));
   };
-  const numOutcomesNow = parseOptions(optionsText).length;
+  const removeOption = (idx: number) => {
+    setOptions(prev => prev.filter((_, i) => i !== idx));
+  };
+  const addOption = () => {
+    if (options.length >= 50) {
+      toast({ title: 'Max 50 options per market', variant: 'destructive' });
+      return;
+    }
+    setOptions(prev => [...prev, '']);
+  };
+  const numOutcomesNow = options.map(o => o.trim()).filter(Boolean).length;
 
   // Re-shape seedProbsMulti when the options count changes so the inputs
   // always match the actual outcomes — and regenerate cleanly when the
@@ -1306,11 +1311,11 @@ function CreateMarketPanel() {
   }, [isLockedOdds]);
 
   const PRESETS = [
-    { label: '1X2 (Football)', options: 'Home Win, Draw, Away Win' },
-    { label: 'Yes/No', options: 'Yes, No' },
-    { label: 'Over/Under 2.5', options: 'Over 2.5, Under 2.5' },
-    { label: 'BTTS', options: 'Yes - Both Score, No - Both Score' },
-    { label: 'Win/Lose', options: 'Win, Lose' },
+    { label: '1X2 (Football)', options: ['Home Win', 'Draw', 'Away Win'] },
+    { label: 'Yes/No', options: ['Yes', 'No'] },
+    { label: 'Over/Under 2.5', options: ['Over 2.5', 'Under 2.5'] },
+    { label: 'BTTS', options: ['Yes - Both Score', 'No - Both Score'] },
+    { label: 'Win/Lose', options: ['Win', 'Lose'] },
   ];
 
   // Top-level parent markets in open/locked status — the only valid sub-market
@@ -1332,8 +1337,8 @@ function CreateMarketPanel() {
       return;
     }
 
-    const options = parseOptions(optionsText);
-    if (options.length < 2) {
+    const cleanedOptions = options.map(o => o.trim()).filter(Boolean);
+    if (cleanedOptions.length < 2) {
       toast({ title: 'At least 2 options required', variant: 'destructive' });
       return;
     }
@@ -1345,8 +1350,8 @@ function CreateMarketPanel() {
       // split the admin previewed. For binary markets we still pass
       // seedProbability and let the API derive the split.
       let multiSeedPool: number[] | null = null;
-      if (isLockedOdds && options.length >= 3) {
-        const probs = seedProbsMulti.slice(0, options.length).map(s => Number(s));
+      if (isLockedOdds && cleanedOptions.length >= 3) {
+        const probs = seedProbsMulti.slice(0, cleanedOptions.length).map(s => Number(s));
         const probSum = probs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
         if (!probs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98) || Math.abs(probSum - 1) > 0.005) {
           toast({
@@ -1368,7 +1373,7 @@ function CreateMarketPanel() {
       const lockedPayload = isLockedOdds ? {
         isLockedOdds: true,
         seedSizeTngn: Number(seedSize),
-        seedProbability: options.length === 2 ? Number(seedProbability) : null,
+        seedProbability: cleanedOptions.length === 2 ? Number(seedProbability) : null,
         seedPool: multiSeedPool,
         vigPct: vigOverride.trim() === '' ? null : Number(vigOverride),
       } : { isLockedOdds: false };
@@ -1379,7 +1384,7 @@ function CreateMarketPanel() {
         body: JSON.stringify({
           question,
           category,
-          options,
+          options: cleanedOptions,
           closesAt: new Date(closesAt).toISOString(),
           fixtureId: fixtureId ? parseInt(fixtureId) : null,
           parentMarketId: parentMarketId ? parseInt(parentMarketId) : null,
@@ -1439,23 +1444,45 @@ function CreateMarketPanel() {
         </div>
 
         <div className="space-y-2">
-          <Label>Options (one per line OR comma-separated)</Label>
-          <Textarea
-            value={optionsText}
-            onChange={e => setOptionsText(e.target.value)}
-            rows={3}
-            className="resize-y"
-            placeholder={'Home Win\nDraw\nAway Win'}
-          />
-          <p className="text-[10px] text-muted-foreground">
-            Newlines preferred when an option contains commas. Either format works.
-          </p>
+          <div className="flex items-center justify-between">
+            <Label>Options</Label>
+            <Button type="button" size="sm" variant="outline" onClick={addOption} disabled={options.length >= 50} className="h-7 text-xs gap-1">
+              <Plus className="w-3 h-3" /> Add option
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {options.map((opt, idx) => (
+              <div key={idx} className="space-y-1 rounded-md border border-border/60 px-2 py-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-medium text-muted-foreground">Option {idx + 1}</span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => removeOption(idx)}
+                    disabled={options.length <= 2}
+                    title={options.length <= 2 ? 'Need at least 2 options' : 'Remove option'}
+                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+                <Textarea
+                  value={opt}
+                  onChange={e => updateOption(idx, e.target.value)}
+                  rows={2}
+                  className="resize-y"
+                  placeholder={`Option ${idx + 1}`}
+                />
+              </div>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1">
             {PRESETS.map(p => (
               <button
                 key={p.label}
                 type="button"
-                onClick={() => setOptionsText(p.options)}
+                onClick={() => setOptions(p.options)}
                 className="text-xs px-2 py-1 bg-muted/50 rounded-md hover:bg-muted transition-colors"
               >
                 {p.label}

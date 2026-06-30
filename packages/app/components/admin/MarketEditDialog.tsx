@@ -439,31 +439,36 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
                     <div
                       key={idx}
                       className={cn(
-                        'flex items-center gap-2 rounded-md border px-2 py-1.5',
+                        'space-y-1 rounded-md border px-2 py-1.5',
                         locked ? 'border-amber-500/30 bg-amber-500/[0.04]' : 'border-border/60',
                       )}
                     >
-                      <span className="text-[10px] tabular-nums text-muted-foreground w-6 text-right">#{idx}</span>
-                      <Input
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-medium text-muted-foreground">Option {idx + 1}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap">
+                            {bets} bet{bets === 1 ? '' : 's'} · ₦{pool.toLocaleString()}
+                          </span>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => removeOption(idx)}
+                            disabled={locked || options.length <= 2}
+                            title={locked ? 'Has stakes — rename only' : (options.length <= 2 ? 'Need at least 2 options' : 'Remove option')}
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-30"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <Textarea
                         value={opt}
                         onChange={(e) => updateOption(idx, e.target.value)}
                         placeholder={`Option ${idx + 1}`}
-                        className="h-8 flex-1"
+                        rows={2}
+                        className="resize-y"
                       />
-                      <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap min-w-[88px] text-right">
-                        {bets} bet{bets === 1 ? '' : 's'} · ₦{pool.toLocaleString()}
-                      </span>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => removeOption(idx)}
-                        disabled={locked || options.length <= 2}
-                        title={locked ? 'Has stakes — rename only' : (options.length <= 2 ? 'Need at least 2 options' : 'Remove option')}
-                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-30"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
                     </div>
                   );
                 })}
