@@ -1807,7 +1807,14 @@ function ManualOverridePanel() {
   const [isResolving, setIsResolving] = useState(false);
   const [isFiringHeartbeat, setIsFiringHeartbeat] = useState(false);
   const [markets, setMarkets] = useState<any[]>([]);
+  const [marketsLoadError, setMarketsLoadError] = useState<string | null>(null);
   const [selectedMarket, setSelectedMarket] = useState<any>(null);
+  // Manual fallback — Force Lock is an escape hatch for exactly the case
+  // where automation has already broken down, so it can't be entirely
+  // dependent on this dropdown being populated. If the fetch below fails
+  // silently (RLS edge case, network hiccup) or there simply are zero
+  // 'open' markets to show, the admin can still type an ID directly.
+  const [manualLockMarketId, setManualLockMarketId] = useState('');
 
   useEffect(() => {
     supabase
@@ -1816,7 +1823,15 @@ function ManualOverridePanel() {
       .in('status', ['open', 'locked'])
       .order('closes_at', { ascending: true })
       .limit(30)
-      .then(({ data }) => setMarkets(data || []));
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('ManualOverridePanel: failed to load markets:', error);
+          setMarketsLoadError(error.message);
+          return;
+        }
+        setMarketsLoadError(null);
+        setMarkets(data || []);
+      });
   }, []);
 
   useEffect(() => {
@@ -1827,22 +1842,26 @@ function ManualOverridePanel() {
   }, [resolveMarketId, markets]);
 
   const forceLock = async () => {
-    if (!lockMarketId) return;
+    // Manual ID input wins if filled in — it's the fallback for when the
+    // dropdown has nothing to select (see manualLockMarketId above).
+    const targetId = manualLockMarketId.trim() || lockMarketId;
+    if (!targetId) return;
     setIsLocking(true);
     try {
       const res = await fetch('/api/markets/lock', {
         method: 'POST',
         headers: adminHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ marketId: parseInt(lockMarketId) }),
+        body: JSON.stringify({ marketId: parseInt(targetId) }),
       });
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
         throw new Error(data.error);
       }
-      toast({ title: `Market ${lockMarketId} locked! ${data.betCount} bets committed.` });
+      toast({ title: `Market ${targetId} locked! ${data.betCount} bets committed.` });
       setLockMarketId('');
+      setManualLockMarketId('');
     } catch (err: any) {
       toast({ title: 'Lock failed', description: err.message, variant: 'destructive' });
     } finally { setIsLocking(false); }
@@ -1943,10 +1962,15 @@ function ManualOverridePanel() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">Use when the cron job missed the kickoff. Computes Merkle root and seals the prediction ledger.</p>
+          {marketsLoadError && (
+            <p className="text-xs text-red-400">
+              Couldn't load the market list ({marketsLoadError}) — use the market ID field below instead.
+            </p>
+          )}
           <div className="flex gap-2">
-            <Select value={lockMarketId} onValueChange={setLockMarketId}>
+            <Select value={lockMarketId} onValueChange={(v) => { setLockMarketId(v); setManualLockMarketId(''); }}>
               <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Select market..." />
+                <SelectValue placeholder={markets.filter(m => m.status === 'open').length === 0 ? 'No open markets found' : 'Select market...'} />
               </SelectTrigger>
               <SelectContent>
                 {markets.filter(m => m.status === 'open').map(m => (
@@ -1956,9 +1980,19 @@ function ManualOverridePanel() {
                 ))}
               </SelectContent>
             </Select>
-            <Button onClick={forceLock} disabled={!lockMarketId || isLocking} variant="outline" className="border-amber-500/30">
+            <Button onClick={forceLock} disabled={(!lockMarketId && !manualLockMarketId.trim()) || isLocking} variant="outline" className="border-amber-500/30">
               {isLocking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
             </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">or by ID</span>
+            <Input
+              type="number"
+              placeholder="Market ID (works even if the dropdown is empty)"
+              value={manualLockMarketId}
+              onChange={(e) => { setManualLockMarketId(e.target.value); if (e.target.value) setLockMarketId(''); }}
+              className="h-8 text-xs"
+            />
           </div>
         </CardContent>
       </Card>
