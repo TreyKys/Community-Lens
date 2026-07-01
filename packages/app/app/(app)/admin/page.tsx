@@ -1964,7 +1964,7 @@ function ManualOverridePanel() {
           <p className="text-xs text-muted-foreground">Use when the cron job missed the kickoff. Computes Merkle root and seals the prediction ledger.</p>
           {marketsLoadError && (
             <p className="text-xs text-red-400">
-              Couldn't load the market list ({marketsLoadError}) — use the market ID field below instead.
+              Couldn&apos;t load the market list ({marketsLoadError}) — use the market ID field below instead.
             </p>
           )}
           <div className="flex gap-2">
