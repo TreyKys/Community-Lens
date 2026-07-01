@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus } from 'lucide-react';
+import { Loader2, Shield, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus, Ban, Search, AlertTriangle, XCircle } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
@@ -2145,6 +2145,355 @@ type TreasuryData = {
   }>;
 };
 
+// ── Void Panel — pending void queue + manual force-void by search ─────
+//
+// Two workflows in one tab. Top card shows every market resolve tried
+// to void because it looked empty (no user_bets found) — with
+// corroborating checks (treasury/tier-routing rows written in the SAME
+// tx as a bet, duplicate market-question rows) so we DON'T approve a
+// void on a market whose bets were placed somewhere else.
+//
+// Bottom card is a live search — pick any market by ID/question and
+// force-void it explicitly. This refunds every active single bet on
+// the market proportional to how it was funded (cash back to cash,
+// bonus back to bonus), voids every active multiplier leg on it so
+// parent slips advance, and is logged to treasury_log as
+// admin_force_void.
+function VoidPanel() {
+  const { toast } = useToast();
+  const [pending, setPending] = useState<any[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(true);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  // Search state — text input, list of matches, selected market.
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [selectedMarket, setSelectedMarket] = useState<any>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [confirmForceVoid, setConfirmForceVoid] = useState(false);
+  const [isVoiding, setIsVoiding] = useState(false);
+
+  const loadPending = useCallback(async () => {
+    setPendingLoading(true);
+    try {
+      const res = await fetch(`/api/admin/void-queue?_=${Date.now()}`, {
+        headers: adminHeaders(),
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setPending(data.entries || []);
+    } catch (err: any) {
+      toast({ title: 'Failed to load void queue', description: err.message, variant: 'destructive' });
+    } finally {
+      setPendingLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { loadPending(); }, [loadPending]);
+
+  const decide = async (marketId: number, action: 'approve' | 'reject') => {
+    setBusyId(marketId);
+    try {
+      const res = await fetch('/api/admin/void-queue', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ marketId, action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast({
+        title: action === 'approve' ? `Market ${marketId} voided` : `Market ${marketId} sent back to locked`,
+        description: action === 'reject' ? 'Investigate before re-resolving.' : undefined,
+      });
+      loadPending();
+    } catch (err: any) {
+      toast({ title: 'Void queue action failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // ── Manual search ──────────────────────────────────────────────────
+  const runSearch = useCallback(async (term: string) => {
+    const t = term.trim();
+    if (!t) { setSearchResults([]); return; }
+    setSearching(true);
+    try {
+      // Numeric term → id lookup; otherwise ilike search on question.
+      const asId = Number(t);
+      let q = supabase.from('markets')
+        .select('id, question, status, closes_at, options, resolved_outcome, is_locked_odds')
+        .order('closes_at', { ascending: false })
+        .limit(20);
+      q = Number.isInteger(asId) && asId > 0
+        ? q.eq('id', asId)
+        : q.ilike('question', `%${t}%`);
+      const { data, error } = await q;
+      if (error) throw error;
+      setSearchResults(data || []);
+    } catch (err: any) {
+      toast({ title: 'Search failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setSearching(false);
+    }
+  }, [toast]);
+
+  // Debounced search on every keystroke.
+  useEffect(() => {
+    const h = setTimeout(() => runSearch(searchTerm), 250);
+    return () => clearTimeout(h);
+  }, [searchTerm, runSearch]);
+
+  const doForceVoid = async () => {
+    if (!selectedMarket) return;
+    setIsVoiding(true);
+    try {
+      const res = await fetch('/api/admin/void-queue', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          marketId: selectedMarket.id,
+          action: 'force_void',
+          reason: voidReason.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      toast({
+        title: `Market ${selectedMarket.id} force-voided`,
+        description: `${data.betsRefunded ?? 0} bet(s) refunded (₦${Math.round(data.totalRefundTngn || 0).toLocaleString()}).`,
+      });
+      setSelectedMarket(null);
+      setSearchTerm('');
+      setSearchResults([]);
+      setVoidReason('');
+      setConfirmForceVoid(false);
+      loadPending();
+    } catch (err: any) {
+      toast({ title: 'Force-void failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsVoiding(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Pending queue */}
+      <Card className="border-amber-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              Pending Void Queue ({pending.length})
+            </span>
+            <Button size="sm" variant="ghost" onClick={loadPending} disabled={pendingLoading}>
+              {pendingLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Refresh'}
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground mb-3">
+            Markets resolve wanted to auto-void because they looked empty. Each entry shows
+            corroborating checks so you can catch a wrongful void before approving. Red flags
+            below mean bets probably existed — <strong>investigate before approving.</strong>
+          </p>
+
+          {pendingLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : pending.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-6">Queue is empty.</p>
+          ) : (
+            <div className="space-y-2 max-h-[520px] overflow-y-auto">
+              {pending.map((e) => (
+                <div key={e.marketId} className={cn(
+                  'border rounded-lg p-3 space-y-2',
+                  e.suspicious ? 'border-red-500/30 bg-red-500/5' : 'border-muted',
+                )}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-mono text-muted-foreground">#{e.marketId}</span>
+                        <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">{e.isLockedOdds ? 'Locked' : 'Parimutuel'}</Badge>
+                        {e.suspicious && (
+                          <Badge className="bg-red-500/20 text-red-300 border-red-500/30 text-[9px] uppercase px-1 py-0">Suspicious</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs font-medium leading-snug line-clamp-2">{e.question}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1 text-[10px]">
+                    <Stat label="Bets" value={e.totalBetRows} />
+                    <Stat label="Legs" value={e.activeLegs} />
+                    <Stat label="Rake rows" value={e.corroboratingTreasuryRows} highlight={e.corroboratingTreasuryRows > 0} />
+                    <Stat label="Dupes" value={(e.duplicateMarketIds || []).length} highlight={(e.duplicateMarketIds || []).length > 0} />
+                  </div>
+
+                  <p className={cn(
+                    'text-[10px] italic',
+                    e.suspicious ? 'text-red-300' : 'text-muted-foreground',
+                  )}>
+                    {e.recommendation}
+                  </p>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-red-500/30 text-red-300 hover:bg-red-500/10"
+                      disabled={busyId === e.marketId}
+                      onClick={() => decide(e.marketId, 'approve')}
+                    >
+                      {busyId === e.marketId ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Ban className="w-3 h-3 mr-1" />Approve void</>}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={busyId === e.marketId}
+                      onClick={() => decide(e.marketId, 'reject')}
+                    >
+                      <Unlock className="w-3 h-3 mr-1" />Back to locked
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Manual force-void */}
+      <Card className="border-red-500/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Search className="w-4 h-4 text-red-400" />
+            Search &amp; Force-Void
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Find any market by ID or question, then explicitly void it. Refunds every active
+            single bet on it proportional to its funding (cash back to cash, bonus back to bonus),
+            voids every active multiplier leg so parent slips can advance. Won&#39;t touch
+            already-settled bets — for those, use <code className="bg-muted/40 px-1 py-0.5 rounded text-[10px]">/api/admin/re-resolve-voided-market</code>.
+          </p>
+
+          <div className="space-y-2">
+            <Label>Search (market ID or text)</Label>
+            <Input
+              placeholder="e.g. 1856 or “Erling Haaland”"
+              value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setSelectedMarket(null); }}
+            />
+          </div>
+
+          {searching ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : searchResults.length > 0 && !selectedMarket ? (
+            <div className="space-y-1 max-h-64 overflow-y-auto border border-muted rounded-lg p-1">
+              {searchResults.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setSelectedMarket(m)}
+                  className="w-full text-left px-2 py-2 rounded hover:bg-muted/40 flex items-center gap-2"
+                >
+                  <span className="text-[10px] font-mono text-muted-foreground w-12 shrink-0">#{m.id}</span>
+                  <Badge variant="outline" className="text-[9px] uppercase px-1 py-0 shrink-0">{m.status}</Badge>
+                  <span className="text-xs truncate flex-1">{m.question}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedMarket && (
+            <div className="border border-red-500/30 rounded-lg p-3 space-y-3 bg-red-500/5">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Selected</p>
+                <p className="text-xs font-medium">#{selectedMarket.id} — {selectedMarket.question}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Status: <strong>{selectedMarket.status}</strong> · Closes {new Date(selectedMarket.closes_at).toLocaleString()}
+                </p>
+              </div>
+
+              {(selectedMarket.status === 'voided' || selectedMarket.status === 'resolved') && (
+                <p className="text-xs text-amber-300 flex items-center gap-2">
+                  <AlertTriangle className="w-3 h-3" />
+                  Already {selectedMarket.status} — force-void is only for pre-settlement voiding.
+                </p>
+              )}
+
+              <div className="space-y-2">
+                <Label>Reason (optional, stored on treasury_log)</Label>
+                <Input
+                  placeholder="Fixture cancelled, corrupted data, etc."
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                />
+              </div>
+
+              <label className="flex items-start gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={confirmForceVoid}
+                  onChange={(e) => setConfirmForceVoid(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  I confirm this will refund every active bet and void every active leg on market
+                  #{selectedMarket.id}. This is irreversible without a manual re-resolve.
+                </span>
+              </label>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => { setSelectedMarket(null); setConfirmForceVoid(false); setVoidReason(''); }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 bg-red-600 hover:bg-red-500 gap-2"
+                  disabled={!confirmForceVoid || isVoiding || selectedMarket.status === 'voided' || selectedMarket.status === 'resolved'}
+                  onClick={doForceVoid}
+                >
+                  {isVoiding ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                  Force void
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function Stat({ label, value, highlight }: { label: string; value: number | string; highlight?: boolean }) {
+  return (
+    <div className={cn(
+      'bg-muted/20 rounded p-1.5 text-center',
+      highlight && 'bg-red-500/10',
+    )}>
+      <p className="text-[9px] uppercase text-muted-foreground">{label}</p>
+      <p className={cn('text-xs font-semibold tabular-nums', highlight && 'text-red-300')}>{value}</p>
+    </div>
+  );
+}
+
 function WithdrawalPanel() {
   const { toast } = useToast();
   const [data, setData] = useState<TreasuryData | null>(null);
@@ -4156,7 +4505,7 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-4 md:grid-cols-9">
+        <TabsList className="grid w-full grid-cols-4 md:grid-cols-10">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
@@ -4164,6 +4513,7 @@ export default function AdminPage() {
           <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
           <TabsTrigger value="override">Override</TabsTrigger>
+          <TabsTrigger value="void">Void</TabsTrigger>
           <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
           <TabsTrigger value="credits">Credits</TabsTrigger>
           <TabsTrigger value="reset">Reset</TabsTrigger>
@@ -4181,6 +4531,7 @@ export default function AdminPage() {
           </div>
         </TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
+        <TabsContent value="void" className="pt-4"><VoidPanel /></TabsContent>
         <TabsContent value="withdrawals" className="pt-4"><WithdrawalPanel /></TabsContent>
         <TabsContent value="credits" className="pt-4"><CreditsPanel /></TabsContent>
         <TabsContent value="reset" className="pt-4"><ResetPanel /></TabsContent>
