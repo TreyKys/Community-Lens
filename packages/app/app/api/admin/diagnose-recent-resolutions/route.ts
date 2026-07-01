@@ -30,6 +30,13 @@ const supabaseAdmin = createClient(
 //   voided_with_outcome — status='voided' AND resolved_outcome is not
 //                     null — the historical wrongful-refund fingerprint
 //                     (what recoup-refunds targets).
+//   voided_empty_duplicate — status='voided' with no bets recorded
+//                     (the old auto-void-on-empty fingerprint, from
+//                     before that path required admin approval) AND
+//                     another market row exists with the exact same
+//                     question. If real bets landed on that OTHER row,
+//                     this one was voided wrongly — check the duplicate
+//                     before assuming the void was correct.
 //
 // This is diagnostic only — it changes nothing. Once a market shows up
 // here with a flag, use the matching repair tool (or recoup-refunds)
@@ -74,24 +81,34 @@ export async function GET(request: Request) {
   }
 
   const flagged: any[] = [];
-  const summary = { orphaned_bets: 0, orphaned_legs: 0, stuck_claimed: 0, never_resolved: 0, voided_with_outcome: 0 };
+  const summary = { orphaned_bets: 0, orphaned_legs: 0, stuck_claimed: 0, never_resolved: 0, voided_with_outcome: 0, voided_empty_duplicate: 0 };
 
   for (const m of markets) {
-    const [{ count: activeBets }, { count: activeLegs }, { count: wonBets }, { count: lostBets }] = await Promise.all([
+    const [{ count: activeBets }, { count: activeLegs }, { count: wonBets }, { count: lostBets }, { count: totalBets }] = await Promise.all([
       supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
       supabaseAdmin.from('multiplier_legs').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
       supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'won'),
       supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'lost'),
+      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id),
     ]);
 
     const flags: string[] = [];
     const isFinished = m.status === 'resolved' || m.status === 'voided';
+    let duplicateMarketIds: { id: number; status: string }[] = [];
 
     if (isFinished && (activeBets ?? 0) > 0) flags.push('orphaned_bets');
     if (isFinished && (activeLegs ?? 0) > 0) flags.push('orphaned_legs');
     if (m.status === 'locked' && m.resolved_outcome !== null && m.resolved_outcome !== undefined) flags.push('stuck_claimed');
     if (m.status === 'locked' && (m.resolved_outcome === null || m.resolved_outcome === undefined)) flags.push('never_resolved');
     if (m.status === 'voided' && m.resolved_outcome !== null && m.resolved_outcome !== undefined) flags.push('voided_with_outcome');
+
+    if (m.status === 'voided' && (m.resolved_outcome === null || m.resolved_outcome === undefined) && (totalBets ?? 0) === 0) {
+      const { data: dupes } = await supabaseAdmin.from('markets').select('id, status').eq('question', m.question).neq('id', m.id);
+      if (dupes && dupes.length > 0) {
+        duplicateMarketIds = dupes;
+        flags.push('voided_empty_duplicate');
+      }
+    }
 
     if (flags.length === 0) continue;
 
@@ -110,6 +127,7 @@ export async function GET(request: Request) {
       activeLegs: activeLegs ?? 0,
       wonBets: wonBets ?? 0,
       lostBets: lostBets ?? 0,
+      duplicateMarketIds,
       flags,
     });
   }
@@ -120,6 +138,6 @@ export async function GET(request: Request) {
     flaggedCount: flagged.length,
     summary,
     flagged,
-    note: 'Diagnostic only — nothing changed. orphaned_bets/orphaned_legs need a targeted resolve/repair on that marketId; stuck_claimed → repair-stuck-resolutions; never_resolved → check /api/admin/diagnose-result?marketId=X for why the oracle lookup never resolved it; voided_with_outcome → recoup-refunds.',
+    note: 'Diagnostic only — nothing changed. orphaned_bets/orphaned_legs need a targeted resolve/repair on that marketId; stuck_claimed → repair-stuck-resolutions; never_resolved → check /api/admin/diagnose-result?marketId=X for why the oracle lookup never resolved it; voided_with_outcome → recoup-refunds; voided_empty_duplicate → check duplicateMarketIds, real bets may be sitting on the other row.',
   });
 }

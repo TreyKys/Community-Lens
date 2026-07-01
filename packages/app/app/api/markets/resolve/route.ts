@@ -59,6 +59,21 @@ function sameOutcomeSet(a: number[] | null | undefined, b: number[]): boolean {
   return as.every((v, i) => v === bs[i]);
 }
 
+// A market with zero recorded active bets used to be voided immediately.
+// That's exactly the wrong failure mode if the real bug is bets silently
+// failing to record — an empty-looking market gets permanently voided
+// with no human ever seeing that real stakes existed. Instead: mark it
+// pending_void and alert admins. Nothing is finalized (no refund, no
+// resolved_outcome) until /api/admin/void-queue approves or rejects it.
+async function queueVoidForApproval(marketId: number | bigint | string, reason: string) {
+  await supabaseAdmin.from('markets').update({
+    status: 'pending_void',
+    void_reason: reason,
+    void_requested_at: new Date().toISOString(),
+  }).eq('id', marketId);
+  await alertAdmins(`⏸️ Market ${marketId} has zero recorded bets and would previously have auto-voided (reason: ${reason}). Queued for approval — check /api/admin/void-queue before approving, since a silent bet-recording failure would also look like this.`);
+}
+
 // Random Bet Insurance — formerly "First Bet Insurance".
 //
 // Triggers:
@@ -218,10 +233,15 @@ async function resolveLockedOddsMarket(args: {
         resolved_at: new Date().toISOString(),
       }).eq('id', marketId);
       await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
-    } else {
-      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null, resolved_outcomes: null }).eq('id', marketId);
+      return NextResponse.json({ status: 'resolved', reason: 'Resumed — no bets remained active', winnersCount: 0, losersCount: 0 });
     }
-    return NextResponse.json({ status: resuming ? 'resolved' : 'voided', reason: resuming ? 'Resumed — no bets remained active' : 'No bets placed', winnersCount: 0, losersCount: 0 });
+    // Don't void automatically. A market with zero recorded bets could
+    // genuinely be empty — or it could mean placement silently failed
+    // to record real bets, which would make an auto-void permanently
+    // and silently destroy real stakes. Queue it for a human to approve
+    // instead of finalizing anything.
+    await queueVoidForApproval(marketId, 'no_bets_placed_locked_odds');
+    return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
   }
 
   // Integrity gate: a locked-odds market should never have a bet
@@ -794,10 +814,11 @@ export async function POST(request: Request) {
           resolved_outcomes: winningOutcomeIndices,
           resolved_at: new Date().toISOString(),
         }).eq('id', marketId);
-      } else {
-        await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null, resolved_outcomes: null }).eq('id', marketId);
+        return NextResponse.json({ status: 'resolved', reason: 'Resumed — no bets remained active', winnersCount: 0, losersCount: 0 });
       }
-      return NextResponse.json({ status: resuming ? 'resolved' : 'voided', reason: resuming ? 'Resumed — no bets remained active' : 'No bets placed', winnersCount: 0, losersCount: 0 });
+      // Don't void automatically — see queueVoidForApproval.
+      await queueVoidForApproval(marketId, 'no_bets_placed_parimutuel');
+      return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
     }
 
     const winningSet = new Set(winningOutcomeIndices);
