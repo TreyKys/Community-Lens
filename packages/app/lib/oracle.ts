@@ -384,10 +384,20 @@ export async function lookupMarketResult(
 
   try {
     if (sport === 'football') {
-      // Try football-data.org first (it has the matching fixture_id)
-      let result = await lookupFootballResultFDA(market.fixture_id!);
+      // Try football-data.org first when we actually have its fixture_id.
+      // Markets created without one (e.g. the AI bulk generator always
+      // sets fixture_id: null) skip straight to the team-name lookup
+      // instead of wasting a call on a fixture id we know is missing.
+      let result: { found: boolean; outcomeIndex: number | null; reason: string };
+      if (market.fixture_id) {
+        result = await lookupFootballResultFDA(market.fixture_id);
+        if (!result.found) {
+          console.warn(`[lookup] FDA failed for market ${market.id} (${result.reason}), trying StatsAPI by team names`);
+        }
+      } else {
+        result = { found: false, outcomeIndex: null, reason: 'no_fixture_id' };
+      }
       if (!result.found) {
-        console.warn(`[lookup] FDA failed for market ${market.id} (${result.reason}), trying StatsAPI by team names`);
         // StatsAPI doesn't share fixture IDs with FDA — search by team names + date.
         result = await lookupFootballResultStatsAPI({
           homeTeam: market.home_team || null,
