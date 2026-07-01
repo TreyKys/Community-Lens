@@ -612,35 +612,23 @@ export default function BetsPage() {
     if (!session?.user?.id) return;
     setIsLoading(true);
     try {
-      // Pull singles and slips in parallel — slips were previously
-      // invisible on this page, so users who placed a Multiplier
-      // couldn't find it anywhere after placement.
-      const [betsRes, slipsRes] = await Promise.all([
-        supabase
-          .from('user_bets')
-          .select('*, markets(id, title, question, options, status, closes_at, merkle_root, total_pool, pool_by_outcome)')
-          .eq('user_id', session.user.id)
-          .order('placed_at', { ascending: false }),
-        supabase
-          .from('multiplier_slips')
-          .select(`
-            id, slip_stake_tngn, net_slip_stake_tngn, combined_odds,
-            effective_combined_odds, payout_tngn, final_payout_tngn,
-            legs_total, legs_resolved, legs_won, status, created_at, settled_at,
-            multiplier_legs (
-              id, market_id, outcome_index, locked_odds, realized_odds, status,
-              markets:market_id (id, title, question, options, status, closes_at, resolved_outcome)
-            )
-          `)
-          .eq('user_id', session.user.id)
-          .order('created_at', { ascending: false }),
-      ]);
+      // Fetch through our own server-side /api/user/picks endpoint
+      // instead of supabase-js directly. Reason: the client-side query
+      // was silently returning stale slip data after resolution — most
+      // plausibly because of Netlify edge / PostgREST caching layers we
+      // don't fully control from the client. The server endpoint uses
+      // service_role, sets force-no-store, and appends a cache-buster
+      // query string so nothing between us and the DB can serve a
+      // cached copy of a resolved slip's old 'active' status.
+      const res = await fetch(`/api/user/picks?_=${Date.now()}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error(`picks fetch failed: ${res.status}`);
+      const payload = await res.json();
 
-      if (betsRes.error) throw betsRes.error;
-      if (slipsRes.error) throw slipsRes.error;
-
-      const nextBets = (betsRes.data || []) as Bet[];
-      const nextSlips = (slipsRes.data || []) as unknown as Slip[];
+      const nextBets = (payload.bets || []) as Bet[];
+      const nextSlips = (payload.slips || []) as unknown as Slip[];
 
       // Detect active → won transitions across BOTH singles and slips.
       // Slips share the same prevStatusRef map keyed by id — bet ids

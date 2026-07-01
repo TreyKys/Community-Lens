@@ -26,7 +26,13 @@ export function UserDetailDrawer({ userId, onClose }: Props) {
     let alive = true;
     const load = async () => {
       try {
-        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, { credentials: 'include' });
+        // Cache-bust query param + cache:'no-store' — the drawer must
+        // reflect the DB right now, especially after ops fixes a slip
+        // via direct SQL and immediately reopens to confirm.
+        const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}?_=${Date.now()}`, {
+          credentials: 'include',
+          cache: 'no-store',
+        });
         if (!r.ok) return;
         const d = await r.json();
         if (alive) setData(d);

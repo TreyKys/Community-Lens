@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
 
+// Admin forensic view — never serve a cached response. When ops fixes a
+// slip via direct SQL and immediately reopens the drawer to confirm,
+// they must see the actual DB state, not a copy from 30 seconds ago.
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -354,6 +361,12 @@ export async function GET(
       },
       notifications: notifications.data || [],
       treasuryActivity: treasuryActivity.data || [],
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Surrogate-Control': 'no-store',
+      },
     });
   } catch (e: any) {
     console.error('admin user-detail error', e);

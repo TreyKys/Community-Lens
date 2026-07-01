@@ -221,11 +221,6 @@ async function resolveLockedOddsMarket(args: {
 
   if (!rawBets || rawBets.length === 0) {
     if (resuming) {
-      // A prior pass already settled every bet on this market before
-      // dying on a LATER step (house P&L, treasury log, market-status
-      // write). Nothing left to settle — finalize the market now so it
-      // doesn't sit at status='locked' forever (which would make it
-      // "stuck" again despite every bet already being paid).
       await supabaseAdmin.from('markets').update({
         status: 'resolved',
         resolved_outcome: winningOutcomeIndex,
@@ -235,11 +230,34 @@ async function resolveLockedOddsMarket(args: {
       await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
       return NextResponse.json({ status: 'resolved', reason: 'Resumed — no bets remained active', winnersCount: 0, losersCount: 0 });
     }
-    // Don't void automatically. A market with zero recorded bets could
-    // genuinely be empty — or it could mean placement silently failed
-    // to record real bets, which would make an auto-void permanently
-    // and silently destroy real stakes. Queue it for a human to approve
-    // instead of finalizing anything.
+    // Root cause of the whole "wrongful void" incident: this branch
+    // ONLY checked user_bets. Multiplier slip legs live on their own
+    // table (multiplier_legs); a market with only slip legs on it —
+    // no singles — looked empty here and got auto-voided, which then
+    // stalled every parent slip that had a leg on it. Now: any active
+    // leg means the market is NOT empty. We resolve those legs against
+    // the real outcome via settle_multiplier_for_market (already called
+    // just above this branch in the POST handler), mark the market
+    // resolved, and never queue a void.
+    const { count: activeLegCount } = await supabaseAdmin
+      .from('multiplier_legs')
+      .select('id', { count: 'exact', head: true })
+      .eq('market_id', marketId)
+      .eq('status', 'active');
+    if ((activeLegCount ?? 0) > 0) {
+      await supabaseAdmin.from('markets').update({
+        status: 'resolved',
+        resolved_outcome: winningOutcomeIndex,
+        resolved_outcomes: winningOutcomeIndices,
+        resolved_at: new Date().toISOString(),
+      }).eq('id', marketId);
+      await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+      return NextResponse.json({
+        status: 'resolved',
+        reason: `No single bets on this market, but ${activeLegCount} multiplier leg(s) settled against the real outcome.`,
+        winnersCount: 0, losersCount: 0, multiplierLegsSettled: activeLegCount,
+      });
+    }
     await queueVoidForApproval(marketId, 'no_bets_placed_locked_odds');
     return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
   }
@@ -805,9 +823,6 @@ export async function POST(request: Request) {
 
     if (!bets || bets.length === 0) {
       if (resuming) {
-        // A prior pass already settled every bet on this market before
-        // dying on a later step. Finalize now instead of leaving the
-        // market at status='locked' forever.
         await supabaseAdmin.from('markets').update({
           status: 'resolved',
           resolved_outcome: winningOutcomeIndex,
@@ -816,7 +831,28 @@ export async function POST(request: Request) {
         }).eq('id', marketId);
         return NextResponse.json({ status: 'resolved', reason: 'Resumed — no bets remained active', winnersCount: 0, losersCount: 0 });
       }
-      // Don't void automatically — see queueVoidForApproval.
+      // Same fix as the locked-odds branch: a market with only
+      // multiplier legs on it is NOT empty. See the locked-odds
+      // no-bets branch above for the full write-up — this is the same
+      // root cause.
+      const { count: activeLegCount } = await supabaseAdmin
+        .from('multiplier_legs')
+        .select('id', { count: 'exact', head: true })
+        .eq('market_id', marketId)
+        .eq('status', 'active');
+      if ((activeLegCount ?? 0) > 0) {
+        await supabaseAdmin.from('markets').update({
+          status: 'resolved',
+          resolved_outcome: winningOutcomeIndex,
+          resolved_outcomes: winningOutcomeIndices,
+          resolved_at: new Date().toISOString(),
+        }).eq('id', marketId);
+        return NextResponse.json({
+          status: 'resolved',
+          reason: `No single bets on this market, but ${activeLegCount} multiplier leg(s) settled against the real outcome.`,
+          winnersCount: 0, losersCount: 0, multiplierLegsSettled: activeLegCount,
+        });
+      }
       await queueVoidForApproval(marketId, 'no_bets_placed_parimutuel');
       return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
     }
