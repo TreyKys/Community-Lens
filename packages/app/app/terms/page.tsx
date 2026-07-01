@@ -12,7 +12,7 @@ export default function TermsPage() {
     <article className="max-w-3xl mx-auto px-4 py-10 md:py-16 prose-invert prose">
       <header className="mb-10 border-b border-emerald-500/15 pb-6">
         <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-emerald-400 font-semibold mb-2">
-          <Shield className="w-3 h-3" /> Legal · Effective 2026-06-30
+          <Shield className="w-3 h-3" /> Legal · Effective 2026-06-29
         </div>
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">Terms of Service</h1>
         <p className="text-muted-foreground text-sm mt-2">

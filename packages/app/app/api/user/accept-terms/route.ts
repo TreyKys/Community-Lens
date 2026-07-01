@@ -13,9 +13,9 @@ const supabaseAdmin = createClient(
 // 2026-06-24: added locked-odds markets, Multipliers & Boosts, and the
 // rewards/leaderboard clause. Material change → users re-accept on next
 // sign-in.
-// 2026-06-30: added the bonus-winnings split rule, 7-day bonus expiry,
+// 2026-06-29: added the bonus-winnings split rule, 7-day bonus expiry,
 // and the without-notice changes clause. Material change → re-accept.
-const CURRENT_TOS_VERSION = '2026-06-30';
+const CURRENT_TOS_VERSION = '2026-06-29';
 
 export async function POST(request: Request) {
   try {
