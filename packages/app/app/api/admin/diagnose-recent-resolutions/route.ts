@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
 
+// Long-running admin scan — has to fit in one serverless invocation.
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -42,12 +46,17 @@ const supabaseAdmin = createClient(
 // here with a flag, use the matching repair tool (or recoup-refunds)
 // on that specific marketId.
 export async function GET(request: Request) {
+  try {
   if (!isAdminRequest(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const url = new URL(request.url);
   const sinceHours = Number(url.searchParams.get('sinceHours')) || 48;
+  // Optional cap so a very wide window doesn't time out the serverless
+  // invocation. Default 100; pass ?limit=250 (or higher) if you need
+  // more.
+  const perStatusLimit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 100));
   const sinceIso = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
 
   // Candidate markets: anything resolved/voided recently, OR anything
@@ -62,14 +71,14 @@ export async function GET(request: Request) {
       .in('status', ['resolved', 'voided'])
       .gte('resolved_at', sinceIso)
       .order('resolved_at', { ascending: false })
-      .limit(300),
+      .limit(perStatusLimit),
     supabaseAdmin
       .from('markets')
       .select('id, question, status, resolved_outcome, resolved_outcomes, resolved_at, closes_at, is_locked_odds')
       .eq('status', 'locked')
       .lt('closes_at', twoHoursAgo)
       .order('closes_at', { ascending: false })
-      .limit(300),
+      .limit(perStatusLimit),
   ]);
 
   if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
@@ -81,55 +90,73 @@ export async function GET(request: Request) {
   }
 
   const flagged: any[] = [];
+  const perMarketErrors: any[] = [];
   const summary = { orphaned_bets: 0, orphaned_legs: 0, stuck_claimed: 0, never_resolved: 0, voided_with_outcome: 0, voided_empty_duplicate: 0 };
 
   for (const m of markets) {
-    const [{ count: activeBets }, { count: activeLegs }, { count: wonBets }, { count: lostBets }, { count: totalBets }] = await Promise.all([
-      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
-      supabaseAdmin.from('multiplier_legs').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
-      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'won'),
-      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'lost'),
-      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id),
-    ]);
+    try {
+      const [betsRes, legsRes, wonRes, lostRes, totalRes] = await Promise.all([
+        supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
+        supabaseAdmin.from('multiplier_legs').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
+        supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'won'),
+        supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'lost'),
+        supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id),
+      ]);
+      // Surface any per-query error explicitly instead of letting a
+      // .count of undefined silently mask a permission or connection
+      // failure.
+      const firstErr = [betsRes, legsRes, wonRes, lostRes, totalRes].find(r => r.error);
+      if (firstErr?.error) throw new Error(firstErr.error.message);
 
-    const flags: string[] = [];
-    const isFinished = m.status === 'resolved' || m.status === 'voided';
-    let duplicateMarketIds: { id: number; status: string }[] = [];
+      const activeBets = betsRes.count ?? 0;
+      const activeLegs = legsRes.count ?? 0;
+      const wonBets = wonRes.count ?? 0;
+      const lostBets = lostRes.count ?? 0;
+      const totalBets = totalRes.count ?? 0;
 
-    if (isFinished && (activeBets ?? 0) > 0) flags.push('orphaned_bets');
-    if (isFinished && (activeLegs ?? 0) > 0) flags.push('orphaned_legs');
-    if (m.status === 'locked' && m.resolved_outcome !== null && m.resolved_outcome !== undefined) flags.push('stuck_claimed');
-    if (m.status === 'locked' && (m.resolved_outcome === null || m.resolved_outcome === undefined)) flags.push('never_resolved');
-    if (m.status === 'voided' && m.resolved_outcome !== null && m.resolved_outcome !== undefined) flags.push('voided_with_outcome');
+      const flags: string[] = [];
+      const isFinished = m.status === 'resolved' || m.status === 'voided';
+      let duplicateMarketIds: { id: number; status: string }[] = [];
 
-    if (m.status === 'voided' && (m.resolved_outcome === null || m.resolved_outcome === undefined) && (totalBets ?? 0) === 0) {
-      const { data: dupes } = await supabaseAdmin.from('markets').select('id, status').eq('question', m.question).neq('id', m.id);
-      if (dupes && dupes.length > 0) {
-        duplicateMarketIds = dupes;
-        flags.push('voided_empty_duplicate');
+      if (isFinished && activeBets > 0) flags.push('orphaned_bets');
+      if (isFinished && activeLegs > 0) flags.push('orphaned_legs');
+      if (m.status === 'locked' && m.resolved_outcome !== null && m.resolved_outcome !== undefined) flags.push('stuck_claimed');
+      if (m.status === 'locked' && (m.resolved_outcome === null || m.resolved_outcome === undefined)) flags.push('never_resolved');
+      if (m.status === 'voided' && m.resolved_outcome !== null && m.resolved_outcome !== undefined) flags.push('voided_with_outcome');
+
+      if (m.status === 'voided' && (m.resolved_outcome === null || m.resolved_outcome === undefined) && totalBets === 0 && m.question) {
+        const { data: dupes, error: dupeErr } = await supabaseAdmin.from('markets').select('id, status').eq('question', m.question).neq('id', m.id);
+        if (dupeErr) throw new Error(`duplicate check: ${dupeErr.message}`);
+        if (dupes && dupes.length > 0) {
+          duplicateMarketIds = dupes as any;
+          flags.push('voided_empty_duplicate');
+        }
       }
+
+      if (flags.length === 0) continue;
+
+      flags.forEach(f => { (summary as any)[f] = ((summary as any)[f] || 0) + 1; });
+
+      flagged.push({
+        marketId: m.id,
+        question: m.question,
+        status: m.status,
+        isLockedOdds: m.is_locked_odds,
+        resolvedOutcome: m.resolved_outcome,
+        resolvedOutcomes: m.resolved_outcomes,
+        resolvedAt: m.resolved_at,
+        closesAt: m.closes_at,
+        activeBets,
+        activeLegs,
+        wonBets,
+        lostBets,
+        totalBets,
+        duplicateMarketIds,
+        flags,
+      });
+    } catch (e: any) {
+      perMarketErrors.push({ marketId: m.id, error: e?.message || String(e) });
     }
-
-    if (flags.length === 0) continue;
-
-    flags.forEach(f => { (summary as any)[f] = ((summary as any)[f] || 0) + 1; });
-
-    flagged.push({
-      marketId: m.id,
-      question: m.question,
-      status: m.status,
-      isLockedOdds: m.is_locked_odds,
-      resolvedOutcome: m.resolved_outcome,
-      resolvedOutcomes: m.resolved_outcomes,
-      resolvedAt: m.resolved_at,
-      closesAt: m.closes_at,
-      activeBets: activeBets ?? 0,
-      activeLegs: activeLegs ?? 0,
-      wonBets: wonBets ?? 0,
-      lostBets: lostBets ?? 0,
-      duplicateMarketIds,
-      flags,
-    });
   }
 
   return NextResponse.json({
@@ -138,6 +165,11 @@ export async function GET(request: Request) {
     flaggedCount: flagged.length,
     summary,
     flagged,
+    perMarketErrors,
     note: 'Diagnostic only — nothing changed. orphaned_bets/orphaned_legs need a targeted resolve/repair on that marketId; stuck_claimed → repair-stuck-resolutions; never_resolved → check /api/admin/diagnose-result?marketId=X for why the oracle lookup never resolved it; voided_with_outcome → recoup-refunds; voided_empty_duplicate → check duplicateMarketIds, real bets may be sitting on the other row.',
   });
+  } catch (e: any) {
+    console.error('diagnose-recent-resolutions crashed:', e);
+    return NextResponse.json({ error: `Diagnostic failed: ${e?.message || String(e)}`, stack: (e?.stack || '').slice(0, 400) }, { status: 500 });
+  }
 }
