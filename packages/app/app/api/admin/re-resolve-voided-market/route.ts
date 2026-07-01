@@ -98,31 +98,51 @@ export async function POST(request: Request) {
       .eq('status', 'refunded');
     if (rbErr) throw new Error(`refunded bets read: ${rbErr.message}`);
 
-    // Voided multiplier legs on this market — they were settled with
-    // realized_odds=1.0 by the wrongful void and now sit at status='void'.
+    // Multiplier legs on this market that still need to be settled.
+    // Two shapes to handle:
+    //   'void'   — legs were settled to 1.0x by the wrongful void path
+    //              (needs reset back to 'active' before re-resolve)
+    //   'active' — the more common shape: the wrongful void code path
+    //              never called settle_multiplier_for_market at all,
+    //              so the legs are still 'active'. Nothing to reset;
+    //              the /api/markets/resolve pass will settle them.
     const { data: voidedLegs, error: vlErr } = await supabaseAdmin
       .from('multiplier_legs')
       .select('id, slip_id, outcome_index, locked_odds')
       .eq('market_id', marketId)
       .eq('status', 'void');
     if (vlErr) throw new Error(`voided legs read: ${vlErr.message}`);
+    const { data: activeLegs, error: alErr } = await supabaseAdmin
+      .from('multiplier_legs')
+      .select('id, slip_id, outcome_index, locked_odds')
+      .eq('market_id', marketId)
+      .eq('status', 'active');
+    if (alErr) throw new Error(`active legs read: ${alErr.message}`);
 
-    // Voided slips that will need to have their state rolled back if
-    // resetting a leg reopens the slip.
-    const affectedSlipIds = Array.from(new Set((voidedLegs || []).map(l => l.slip_id)));
-    let affectedSlips: any[] = [];
-    if (affectedSlipIds.length > 0) {
+    // Slips that will need their state rolled back — only slips with a
+    // VOIDED leg here need rollback (a leg that's already 'active' has
+    // never been counted against the slip's legs_resolved, so there's
+    // nothing to undo for it; settle_multiplier_for_market will pick it
+    // up naturally once resolve() runs). We still fetch slips touching
+    // activeLegs too, purely for the dry-run report.
+    const voidedLegSlipIds = Array.from(new Set((voidedLegs || []).map(l => l.slip_id)));
+    const activeLegSlipIds = Array.from(new Set((activeLegs || []).map(l => l.slip_id)));
+    const allSlipIds = Array.from(new Set([...voidedLegSlipIds, ...activeLegSlipIds]));
+    let allTouchedSlips: any[] = [];
+    if (allSlipIds.length > 0) {
       const { data: slips, error: sErr } = await supabaseAdmin
         .from('multiplier_slips')
-        .select('id, status, legs_resolved, legs_won, final_payout_tngn, net_slip_stake_tngn, user_id, bonus_proportion')
-        .in('id', affectedSlipIds);
+        .select('id, status, legs_resolved, legs_won, legs_total, final_payout_tngn, net_slip_stake_tngn, user_id, bonus_proportion')
+        .in('id', allSlipIds);
       if (sErr) throw new Error(`slips read: ${sErr.message}`);
-      affectedSlips = slips || [];
+      allTouchedSlips = slips || [];
     }
+    // Only the voided-leg subset actually gets rolled back below.
+    const affectedSlips = allTouchedSlips.filter(s => voidedLegSlipIds.includes(s.id));
 
-    if ((refundedBets?.length ?? 0) === 0 && (voidedLegs?.length ?? 0) === 0) {
+    if ((refundedBets?.length ?? 0) === 0 && (voidedLegs?.length ?? 0) === 0 && (activeLegs?.length ?? 0) === 0) {
       return NextResponse.json({
-        error: `Market ${marketId} has no refunded singles and no voided multiplier legs to re-settle. Investigate the market state before re-resolving.`,
+        error: `Market ${marketId} has no refunded singles and no multiplier legs (active or voided) to re-settle. Investigate the market state before re-resolving.`,
       }, { status: 400 });
     }
 
