@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   //    the orphans — their legs should have settled at resolution time.
   const { data: markets, error: mErr } = await supabaseAdmin
     .from('markets')
-    .select('id, question, status, resolved_outcome')
+    .select('id, question, status, resolved_outcome, resolved_outcomes')
     .in('id', marketIds)
     .in('status', ['resolved', 'voided']);
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
@@ -68,15 +68,20 @@ export async function POST(request: Request) {
     const legCount = count ?? 0;
     // A market is treated as voided for leg purposes when its status is
     // 'voided' OR it has no determinable winning outcome. Otherwise the
-    // resolved_outcome is the winning index.
-    const isVoided = m.status === 'voided' || m.resolved_outcome === null || m.resolved_outcome === undefined;
+    // resolved_outcome(s) are the winning set — resolved_outcomes holds
+    // the full set for multi-outcome (tie) resolutions; older single-
+    // outcome rows only have resolved_outcome.
+    const winningOutcomes: number[] | null = Array.isArray(m.resolved_outcomes) && m.resolved_outcomes.length > 0
+      ? m.resolved_outcomes
+      : (m.resolved_outcome !== null && m.resolved_outcome !== undefined ? [m.resolved_outcome] : null);
+    const isVoided = m.status === 'voided' || !winningOutcomes;
 
     const entry = {
       marketId: m.id,
       question: m.question,
       status: m.status,
-      resolvedOutcome: m.resolved_outcome,
-      settledAs: isVoided ? 'voided' : `outcome ${m.resolved_outcome}`,
+      resolvedOutcomes: winningOutcomes,
+      settledAs: isVoided ? 'voided' : `outcome(s) ${winningOutcomes!.join(', ')}`,
       activeLegs: legCount,
     };
 
@@ -84,7 +89,7 @@ export async function POST(request: Request) {
       try {
         const { data: processed } = await supabaseAdmin.rpc('settle_multiplier_for_market', {
           p_market_id: m.id,
-          p_winning_outcome: isVoided ? null : m.resolved_outcome,
+          p_winning_outcomes: isVoided ? null : winningOutcomes,
           p_voided: isVoided,
         });
         (entry as any).legsProcessed = Number(processed ?? 0);

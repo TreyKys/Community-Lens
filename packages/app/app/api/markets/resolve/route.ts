@@ -41,6 +41,24 @@ function applyBonusSplit(payout: number, bonusProportion: number): { tngn: numbe
   return { tngn, bonus: payout - tngn };
 }
 
+// Fires an admin_alert notification (user_id null — the admin inbox
+// convention already used by resolve-due's max-attempts alert) so a
+// settlement hiccup surfaces somewhere a human will actually see it,
+// instead of living only in server logs where it's invisible until a
+// user complains that their bet is "stuck".
+async function alertAdmins(message: string) {
+  try {
+    await supabaseAdmin.from('notifications').insert({ user_id: null, type: 'admin_alert', message });
+  } catch { /* best-effort */ }
+}
+
+function sameOutcomeSet(a: number[] | null | undefined, b: number[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  const as = [...a].sort((x, y) => x - y);
+  const bs = [...b].sort((x, y) => x - y);
+  return as.every((v, i) => v === bs[i]);
+}
+
 // Random Bet Insurance — formerly "First Bet Insurance".
 //
 // Triggers:
@@ -151,12 +169,25 @@ async function applyFirstBetInsurance(userId: string, bet: any, marketId: number
 // slice of the pool rake, the VIP gets a slice of the bet's
 // contribution to house margin (net_stake × vig_at_stake × share%).
 // See lib/lockedSettlement.calculateLockedVipCut.
+//
+// FAULT ISOLATION: every per-bet action (credit_user, status flip,
+// points) is individually try/caught. One bad row can no longer abort
+// the whole request and strand every other bet on this market — a
+// failure is logged, the bet stays 'active', and it's collected into
+// failedBetIds. The market is only advanced past 'locked' when the
+// WHOLE pass has zero failures; a resolve call is safe to re-POST
+// (resume=true, see the caller) because bets already settled are
+// excluded by the status='active' filter, so nothing double-pays.
 async function resolveLockedOddsMarket(args: {
   marketId: number | bigint | string;
-  winningOutcomeIndex: number;
+  winningOutcomeIndices: number[];
   market: any;
+  resuming: boolean;
 }) {
-  const { marketId, winningOutcomeIndex, market } = args;
+  const { marketId, winningOutcomeIndices, market, resuming } = args;
+  const winningSet = new Set(winningOutcomeIndices);
+  const winningOutcomeIndex = winningOutcomeIndices[0];
+  const failedBetIds: string[] = [];
 
   // Multiplier legs on this market are settled by the POST handler
   // before it branches here — for both engines — so nothing to do for
@@ -165,6 +196,8 @@ async function resolveLockedOddsMarket(args: {
   // Pull every active bet on this market, including the locked-odds
   // fields. The same row-shape supplies the LockedBet input to the
   // settlement library and the bet rows we'll mark won/lost/refunded.
+  // On a resume, bets already flipped won/lost in a prior partial pass
+  // are no longer status='active' and are naturally excluded here.
   const { data: rawBets } = await supabaseAdmin
     .from('user_bets')
     .select('id, user_id, outcome_index, net_stake_tngn, stake_tngn, locked_odds, vig_at_stake_pct, tier, bonus_proportion')
@@ -172,9 +205,23 @@ async function resolveLockedOddsMarket(args: {
     .eq('status', 'active');
 
   if (!rawBets || rawBets.length === 0) {
-    await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null }).eq('id', marketId);
-    await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
-    return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
+    if (resuming) {
+      // A prior pass already settled every bet on this market before
+      // dying on a LATER step (house P&L, treasury log, market-status
+      // write). Nothing left to settle — finalize the market now so it
+      // doesn't sit at status='locked' forever (which would make it
+      // "stuck" again despite every bet already being paid).
+      await supabaseAdmin.from('markets').update({
+        status: 'resolved',
+        resolved_outcome: winningOutcomeIndex,
+        resolved_outcomes: winningOutcomeIndices,
+        resolved_at: new Date().toISOString(),
+      }).eq('id', marketId);
+      await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+    } else {
+      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null, resolved_outcomes: null }).eq('id', marketId);
+    }
+    return NextResponse.json({ status: resuming ? 'resolved' : 'voided', reason: resuming ? 'Resumed — no bets remained active' : 'No bets placed', winnersCount: 0, losersCount: 0 });
   }
 
   // Integrity gate: a locked-odds market should never have a bet
@@ -194,11 +241,7 @@ async function resolveLockedOddsMarket(args: {
     console.error(`Locked-odds resolve aborted: ${malformed.length} bet(s) missing locked_odds/vig on market ${marketId}`, {
       malformedBetIds: malformed.map(b => b.id),
     });
-    // Release the resolve-race claim so the market doesn't get stuck.
-    await supabaseAdmin
-      .from('markets')
-      .update({ resolved_outcome: null })
-      .eq('id', marketId);
+    await alertAdmins(`⚠️ Market ${marketId} resolve halted: ${malformed.length} malformed bet(s) missing locked_odds/vig. Investigate before retrying.`);
     return NextResponse.json(
       {
         error: 'Resolution halted: malformed bets detected on a locked-odds market. Investigate before retrying.',
@@ -222,7 +265,7 @@ async function resolveLockedOddsMarket(args: {
 
   // Preload VIP referral info — same shape as the parimutuel branch.
   const losingUserIds = Array.from(new Set(
-    wellFormed.filter(b => b.outcome_index !== winningOutcomeIndex).map(b => b.user_id),
+    wellFormed.filter(b => !winningSet.has(b.outcome_index)).map(b => b.user_id),
   ));
   const referrerByUser: Record<string, { vipId: string; sharePct: number }> = {};
   if (losingUserIds.length > 0) {
@@ -270,6 +313,7 @@ async function resolveLockedOddsMarket(args: {
     seedPool: toArray(market.seed_pool),
     realPool: toArray(market.pool_by_outcome),
     winningOutcomeIndex,
+    winningOutcomeIndices,
   };
 
   // Build the LockedBet input array. VIP context joined in here so
@@ -298,20 +342,57 @@ async function resolveLockedOddsMarket(args: {
   // the same void block — that now falls through to the normal payment
   // path below, where each winner gets their locked-odds floor payout
   // and apply_house_pnl absorbs the negative gap.
-  const winnerCount = lockedBets.filter(b => b.outcomeIndex === winningOutcomeIndex).length;
+  const winnerCount = lockedBets.filter(b => winningSet.has(b.outcomeIndex)).length;
   if (winnerCount === 0) {
     let totalHouseGain = 0;
     for (const lb of lockedBets) {
-      await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', lb.id);
-      await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
       try {
-        await supabaseAdmin.from('notifications').insert({
-          user_id: lb.userId,
-          type: 'bet_lost',
-          message: `Your prediction didn't land this time — better luck on the next call.`,
+        // Atomic + idempotent: row-locks the bet, no-ops if it's no
+        // longer 'active' (already settled by a prior/concurrent pass),
+        // otherwise flips it to 'lost'. See settle_bet_outcome — this
+        // is what makes a resumed or overlapping resolve call safe.
+        const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+          p_bet_id: lb.id,
+          p_user_id: lb.userId,
+          p_new_status: 'lost',
+          p_payout_tngn: 0,
+          p_tngn_delta: 0,
+          p_bonus_delta: 0,
         });
-      } catch { /* non-critical */ }
-      totalHouseGain += lb.netStakeTngn;
+        if (!applied) {
+          console.warn(`Bet ${lb.id} was already settled by another pass — skipping.`);
+          continue;
+        }
+        try {
+          await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
+        } catch (e) {
+          console.error(`Bet insurance failed for bet ${lb.id} (non-critical):`, e);
+        }
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: lb.userId,
+            type: 'bet_lost',
+            message: `Your prediction didn't land this time — better luck on the next call.`,
+          });
+        } catch { /* non-critical */ }
+        totalHouseGain += lb.netStakeTngn;
+      } catch (e) {
+        console.error(`Failed to settle losing bet ${lb.id} on market ${marketId}:`, e);
+        failedBetIds.push(lb.id);
+      }
+    }
+
+    if (failedBetIds.length > 0) {
+      await alertAdmins(`⚠️ Market ${marketId} resolve partially failed: ${failedBetIds.length} bet(s) could not be settled and remain active. Re-POST /api/markets/resolve with the same outcome to resume.`);
+      return NextResponse.json({
+        success: false,
+        partial: true,
+        status: 'locked',
+        winnersCount: 0,
+        losersCount: lockedBets.length - failedBetIds.length,
+        failedBetIds,
+        note: 'Some bets failed to settle and remain active. Re-submit the same resolve request to resume — already-settled bets will not be re-processed.',
+      }, { status: 207 });
     }
 
     const { data: reserveAfter, error: reserveErr } = await supabaseAdmin
@@ -341,6 +422,7 @@ async function resolveLockedOddsMarket(args: {
     await supabaseAdmin.from('markets').update({
       status: 'resolved',
       resolved_outcome: winningOutcomeIndex,
+      resolved_outcomes: winningOutcomeIndices,
       resolved_at: new Date().toISOString(),
     }).eq('id', marketId);
     await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
@@ -358,37 +440,53 @@ async function resolveLockedOddsMarket(args: {
   for (const p of summary.perBet) {
     if (!p.won) continue;
     const lb = lockedBets.find(x => x.id === p.betId)!;
-    const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(p.payoutTngn, bonusPropByBetId[lb.id] ?? 0);
-    await supabaseAdmin.rpc('credit_user', {
-      p_user_id: lb.userId,
-      p_tngn_delta: winTngn,
-      p_bonus_delta: winBonus,
-    });
-    await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: p.payoutTngn }).eq('id', lb.id);
-
-    const profit = Math.max(0, p.payoutTngn - lb.stakeTngn);
-    const winPoints = Math.max(0, Math.floor(profit / 100));
-    if (winPoints > 0) {
-      await supabaseAdmin.rpc('award_points', {
-        p_user_id: lb.userId,
-        p_reason: 'bet_win',
-        p_points: winPoints,
-        p_bet_id: lb.id,
-        p_metadata: { payout: p.payoutTngn, profit, locked_odds: lb.lockedOdds, floor_bound: p.floorBound, upside_bound: p.upsideBound, winTngn, winBonus },
-      });
-    }
-
     try {
-      const message = winBonus > 0
-        ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
-        : `You won! ₦${p.payoutTngn.toLocaleString()} has been credited to your account. 🎉`;
-      await supabaseAdmin.from('notifications').insert({
-        user_id: lb.userId,
-        type: 'bet_won',
-        message,
-        amount: p.payoutTngn,
+      const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(p.payoutTngn, bonusPropByBetId[lb.id] ?? 0);
+      // Atomic + idempotent: credits the user AND flips the bet to
+      // 'won' as one row-locked operation, no-op if the bet is no
+      // longer 'active'. Replaces the old two-call (credit_user, then
+      // a separate status update) pattern — if the status flip alone
+      // had thrown, a resumed pass would have credited this bet AGAIN.
+      const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+        p_bet_id: lb.id,
+        p_user_id: lb.userId,
+        p_new_status: 'won',
+        p_payout_tngn: p.payoutTngn,
+        p_tngn_delta: winTngn,
+        p_bonus_delta: winBonus,
       });
-    } catch { /* non-critical */ }
+      if (!applied) {
+        console.warn(`Bet ${lb.id} was already settled by another pass — skipping.`);
+        continue;
+      }
+
+      const profit = Math.max(0, p.payoutTngn - lb.stakeTngn);
+      const winPoints = Math.max(0, Math.floor(profit / 100));
+      if (winPoints > 0) {
+        await supabaseAdmin.rpc('award_points', {
+          p_user_id: lb.userId,
+          p_reason: 'bet_win',
+          p_points: winPoints,
+          p_bet_id: lb.id,
+          p_metadata: { payout: p.payoutTngn, profit, locked_odds: lb.lockedOdds, floor_bound: p.floorBound, upside_bound: p.upsideBound, winTngn, winBonus },
+        });
+      }
+
+      try {
+        const message = winBonus > 0
+          ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
+          : `You won! ₦${p.payoutTngn.toLocaleString()} has been credited to your account. 🎉`;
+        await supabaseAdmin.from('notifications').insert({
+          user_id: lb.userId,
+          type: 'bet_won',
+          message,
+          amount: p.payoutTngn,
+        });
+      } catch { /* non-critical */ }
+    } catch (e) {
+      console.error(`Failed to settle winning bet ${lb.id} on market ${marketId}:`, e);
+      failedBetIds.push(lb.id);
+    }
   }
 
   // Mark losers + insurance + loss notification.
@@ -399,44 +497,85 @@ async function resolveLockedOddsMarket(args: {
   for (const p of summary.perBet) {
     if (p.won) continue;
     const lb = lockedBets.find(x => x.id === p.betId)!;
-    await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', lb.id);
-    await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
     try {
-      await supabaseAdmin.from('notifications').insert({
-        user_id: lb.userId,
-        type: 'bet_lost',
-        message: `Your prediction didn't land this time — better luck on the next call.`,
+      const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+        p_bet_id: lb.id,
+        p_user_id: lb.userId,
+        p_new_status: 'lost',
+        p_payout_tngn: 0,
+        p_tngn_delta: 0,
+        p_bonus_delta: 0,
       });
-    } catch { /* non-critical */ }
+      if (!applied) {
+        console.warn(`Bet ${lb.id} was already settled by another pass — skipping.`);
+        continue;
+      }
+      try {
+        await applyFirstBetInsurance(lb.userId, { id: lb.id, stake_tngn: lb.stakeTngn }, marketId);
+      } catch (e) {
+        console.error(`Bet insurance failed for bet ${lb.id} (non-critical):`, e);
+      }
+      try {
+        await supabaseAdmin.from('notifications').insert({
+          user_id: lb.userId,
+          type: 'bet_lost',
+          message: `Your prediction didn't land this time — better luck on the next call.`,
+        });
+      } catch { /* non-critical */ }
+    } catch (e) {
+      console.error(`Failed to settle losing bet ${lb.id} on market ${marketId}:`, e);
+      failedBetIds.push(lb.id);
+    }
   }
 
   // VIP cuts — routed in one pass from the summary so we don't
-  // recompute the math.
+  // recompute the math. Best-effort: a referral-commission hiccup
+  // shouldn't block the market from resolving.
   for (const cut of summary.vipCuts) {
-    await supabaseAdmin.rpc('credit_user', {
-      p_user_id: cut.vipReferrerId,
-      p_tngn_delta: 0,
-      p_bonus_delta: cut.amountTngn,
-    });
-    await supabaseAdmin.from('vip_referral_earnings').insert({
-      vip_user_id: cut.vipReferrerId,
-      referred_user_id: lockedBets.find(b => b.id === cut.betId)!.userId,
-      bet_id: cut.betId,
-      market_id: marketId,
-      rake_share_pct: lockedBets.find(b => b.id === cut.betId)!.vipRakeSharePct,
-      rake_share_amount: cut.amountTngn,
-      metadata: { basis: cut.basis },
-    });
-    // Tell the VIP they earned — silent credits feel like nothing's
-    // happening, and VIPs are the cohort we most want to keep engaged.
     try {
-      await supabaseAdmin.from('notifications').insert({
-        user_id: cut.vipReferrerId,
-        type: 'referral_earnings',
-        message: `You earned ₦${Math.round(cut.amountTngn).toLocaleString()} in referral commission from a referee's bet. 💸`,
-        amount: cut.amountTngn,
+      await supabaseAdmin.rpc('credit_user', {
+        p_user_id: cut.vipReferrerId,
+        p_tngn_delta: 0,
+        p_bonus_delta: cut.amountTngn,
       });
-    } catch { /* notification non-critical */ }
+      await supabaseAdmin.from('vip_referral_earnings').insert({
+        vip_user_id: cut.vipReferrerId,
+        referred_user_id: lockedBets.find(b => b.id === cut.betId)!.userId,
+        bet_id: cut.betId,
+        market_id: marketId,
+        rake_share_pct: lockedBets.find(b => b.id === cut.betId)!.vipRakeSharePct,
+        rake_share_amount: cut.amountTngn,
+        metadata: { basis: cut.basis },
+      });
+      // Tell the VIP they earned — silent credits feel like nothing's
+      // happening, and VIPs are the cohort we most want to keep engaged.
+      try {
+        await supabaseAdmin.from('notifications').insert({
+          user_id: cut.vipReferrerId,
+          type: 'referral_earnings',
+          message: `You earned ₦${Math.round(cut.amountTngn).toLocaleString()} in referral commission from a referee's bet. 💸`,
+          amount: cut.amountTngn,
+        });
+      } catch { /* notification non-critical */ }
+    } catch (e) {
+      console.error(`VIP cut failed for bet ${cut.betId} on market ${marketId} (non-critical):`, e);
+    }
+  }
+
+  if (failedBetIds.length > 0) {
+    await alertAdmins(`⚠️ Market ${marketId} resolve partially failed: ${failedBetIds.length} bet(s) could not be settled and remain active. Re-POST /api/markets/resolve with the same outcome to resume.`);
+    const failedSet = new Set(failedBetIds);
+    return NextResponse.json({
+      success: false,
+      partial: true,
+      status: 'locked',
+      engine: 'locked_odds',
+      marketId,
+      winnersCount: summary.perBet.filter(p => p.won && !failedSet.has(p.betId)).length,
+      losersCount: summary.perBet.filter(p => !p.won && !failedSet.has(p.betId)).length,
+      failedBetIds,
+      note: 'Some bets failed to settle and remain active. Re-submit the same resolve request to resume — already-settled bets will not be re-processed.',
+    }, { status: 207 });
   }
 
   // House P&L → reserve. Single atomic RPC.
@@ -479,6 +618,7 @@ async function resolveLockedOddsMarket(args: {
   await supabaseAdmin.from('markets').update({
     status: 'resolved',
     resolved_outcome: winningOutcomeIndex,
+    resolved_outcomes: winningOutcomeIndices,
     total_pool: totalPool,
     resolved_at: new Date().toISOString(),
   }).eq('id', marketId);
@@ -490,6 +630,7 @@ async function resolveLockedOddsMarket(args: {
     engine: 'locked_odds',
     marketId,
     winningOutcomeIndex,
+    winningOutcomeIndices,
     totalPool,
     winnersCount: summary.perBet.filter(p => p.won).length,
     losersCount: summary.perBet.filter(p => !p.won).length,
@@ -509,9 +650,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { marketId, winningOutcomeIndex } = await request.json();
-    if (!marketId || winningOutcomeIndex === undefined) {
-      return NextResponse.json({ error: 'Missing marketId or winningOutcomeIndex' }, { status: 400 });
+    const body = await request.json();
+    const marketId = body?.marketId;
+
+    // Accept either a single winningOutcomeIndex (back-compat) or an
+    // array winningOutcomeIndices for markets that resolve with more
+    // than one correct outcome (ties / "either counts" rulings). Admin
+    // multi-select posts the array; every existing caller (cron,
+    // legacy admin UI) keeps working unchanged.
+    const rawIndices: number[] = Array.isArray(body?.winningOutcomeIndices)
+      ? body.winningOutcomeIndices.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n))
+      : (body?.winningOutcomeIndex !== undefined && body?.winningOutcomeIndex !== null && Number.isInteger(Number(body.winningOutcomeIndex)))
+        ? [Number(body.winningOutcomeIndex)]
+        : [];
+    const winningOutcomeIndices = Array.from(new Set(rawIndices)).sort((a, b) => a - b);
+    const winningOutcomeIndex = winningOutcomeIndices[0];
+
+    if (!marketId || winningOutcomeIndices.length === 0) {
+      return NextResponse.json({ error: 'Missing marketId or winningOutcomeIndex(es)' }, { status: 400 });
     }
 
     const { data: market, error: marketError } = await supabaseAdmin
@@ -520,16 +676,31 @@ export async function POST(request: Request) {
     if (marketError || !market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
     if (market.status !== 'locked') return NextResponse.json({ error: 'Market must be locked before resolving' }, { status: 400 });
 
+    const optionsLen = Array.isArray(market.options) ? market.options.length : 0;
+    if (winningOutcomeIndices.some(i => i < 0 || i >= optionsLen)) {
+      return NextResponse.json({ error: `winningOutcomeIndex out of range for this market's ${optionsLen} option(s)` }, { status: 400 });
+    }
+
     // Race lock — concurrent resolve calls (admin double-click, retried
     // cron) would both pass the status check above and double-pay every
     // winner. Atomically claim the resolve by flipping resolved_outcome
     // from NULL to the winning index; whoever gets the row back owns it.
-    // If we lose the race, bail with 409 — the other call will finish
-    // the payouts.
+    //
+    // RESUME, don't just reject: a market can be "claimed" (resolved_
+    // outcome set) by a call that then crashed mid-settlement — e.g. a
+    // single credit_user/award_points RPC throwing (missing migration,
+    // transient DB error). Before this fix, that permanently stuck the
+    // market: status stayed 'locked' forever and every retry hit this
+    // same 409, so the still-active bets/legs on it could never be
+    // paid or marked. Now: if the market is already claimed with the
+    // SAME outcome set and never finished (status still 'locked'), we
+    // resume instead of bailing — every downstream query only touches
+    // status='active' rows, so re-running is safe and idempotent.
     const { data: claim } = await supabaseAdmin
       .from('markets')
       .update({
         resolved_outcome: winningOutcomeIndex,
+        resolved_outcomes: winningOutcomeIndices,
         resolved_at: new Date().toISOString(),
       })
       .eq('id', marketId)
@@ -538,11 +709,30 @@ export async function POST(request: Request) {
       .select('id')
       .maybeSingle();
 
+    let resuming = false;
     if (!claim) {
-      return NextResponse.json(
-        { error: 'Resolution already in progress or completed for this market' },
-        { status: 409 },
-      );
+      const priorOutcomes: number[] | null = Array.isArray((market as any).resolved_outcomes) && (market as any).resolved_outcomes.length > 0
+        ? (market as any).resolved_outcomes
+        : (market.resolved_outcome !== null && market.resolved_outcome !== undefined ? [Number(market.resolved_outcome)] : null);
+
+      if (priorOutcomes) {
+        if (!sameOutcomeSet(priorOutcomes, winningOutcomeIndices)) {
+          return NextResponse.json(
+            {
+              error: `Market ${marketId} was already claimed with a different outcome set (${priorOutcomes.join(', ')}) by a prior, incomplete resolve attempt. Re-submit with that same outcome set to resume it, or investigate before overriding.`,
+              priorOutcomes,
+            },
+            { status: 409 },
+          );
+        }
+        resuming = true;
+        console.warn(`Resuming stuck resolution for market ${marketId} — claimed earlier but never completed.`);
+      } else {
+        return NextResponse.json(
+          { error: 'Resolution already in progress or completed for this market' },
+          { status: 409 },
+        );
+      }
     }
 
     // Settle any Multiplier legs riding on THIS market — for BOTH
@@ -554,16 +744,20 @@ export async function POST(request: Request) {
     // slip never advanced and the user never saw a result. Running it
     // here, before the engine branch, settles legs on every
     // resolution. Idempotent: the RPC only touches status='active'
-    // legs, so a re-resolve or double-call is safe. p_voided=false —
-    // the resolve route always carries a real winning outcome.
+    // legs, so a re-resolve or resume is safe. p_voided=false — the
+    // resolve route always carries a real winning outcome. A failure
+    // here now raises an admin_alert (not just a server log) — a
+    // silently-swallowed exception here is exactly how Multiplier legs
+    // went stuck on 'active' forever undetected.
     try {
       await supabaseAdmin.rpc('settle_multiplier_for_market', {
         p_market_id: marketId,
-        p_winning_outcome: winningOutcomeIndex,
+        p_winning_outcomes: winningOutcomeIndices,
         p_voided: false,
       });
     } catch (e) {
       console.error(`settle_multiplier_for_market failed for market ${marketId}:`, e);
+      await alertAdmins(`⚠️ Multiplier settlement failed for market ${marketId}: ${(e as any)?.message || e}. Legs remain active — re-POST resolve or use /api/admin/repair-multiplier-legs once the cause is fixed.`);
       // Don't abort single-bet settlement on a multiplier hiccup —
       // surface for ops and continue. Active legs retry-settle if the
       // market is re-resolved or via the admin repair endpoint.
@@ -577,8 +771,9 @@ export async function POST(request: Request) {
     if (market.is_locked_odds) {
       return await resolveLockedOddsMarket({
         marketId,
-        winningOutcomeIndex,
+        winningOutcomeIndices,
         market,
+        resuming,
       });
     }
 
@@ -589,15 +784,30 @@ export async function POST(request: Request) {
       .eq('status', 'active');
 
     if (!bets || bets.length === 0) {
-      await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null }).eq('id', marketId);
-      return NextResponse.json({ status: 'voided', reason: 'No bets placed' });
+      if (resuming) {
+        // A prior pass already settled every bet on this market before
+        // dying on a later step. Finalize now instead of leaving the
+        // market at status='locked' forever.
+        await supabaseAdmin.from('markets').update({
+          status: 'resolved',
+          resolved_outcome: winningOutcomeIndex,
+          resolved_outcomes: winningOutcomeIndices,
+          resolved_at: new Date().toISOString(),
+        }).eq('id', marketId);
+      } else {
+        await supabaseAdmin.from('markets').update({ status: 'voided', resolved_outcome: null, resolved_outcomes: null }).eq('id', marketId);
+      }
+      return NextResponse.json({ status: resuming ? 'resolved' : 'voided', reason: resuming ? 'Resumed — no bets remained active' : 'No bets placed', winnersCount: 0, losersCount: 0 });
     }
 
-    const winningBets = bets.filter(b => b.outcome_index === winningOutcomeIndex);
-    const losingBets = bets.filter(b => b.outcome_index !== winningOutcomeIndex);
+    const winningSet = new Set(winningOutcomeIndices);
+    const winningBets = bets.filter(b => winningSet.has(b.outcome_index));
+    const losingBets = bets.filter(b => !winningSet.has(b.outcome_index));
     const winningPool = winningBets.reduce((s, b) => s + b.net_stake_tngn, 0);
     const losingPool = losingBets.reduce((s, b) => s + b.net_stake_tngn, 0);
     const totalPool = winningPool + losingPool;
+
+    const failedBetIds: string[] = [];
 
     // The platform doesn't have a void state anymore — both empty-pool
     // edge cases resolve normally:
@@ -618,15 +828,48 @@ export async function POST(request: Request) {
     // (we already route the entire pool to the house).
     if (winningPool === 0) {
       for (const bet of bets) {
-        await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', bet.id);
-        await applyFirstBetInsurance(bet.user_id, bet, marketId);
         try {
-          await supabaseAdmin.from('notifications').insert({
-            user_id: bet.user_id,
-            type: 'bet_lost',
-            message: `Your prediction didn't land this time — better luck on the next call.`,
+          const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+            p_bet_id: bet.id,
+            p_user_id: bet.user_id,
+            p_new_status: 'lost',
+            p_payout_tngn: 0,
+            p_tngn_delta: 0,
+            p_bonus_delta: 0,
           });
-        } catch { /* non-critical */ }
+          if (!applied) {
+            console.warn(`Bet ${bet.id} was already settled by another pass — skipping.`);
+            continue;
+          }
+          try {
+            await applyFirstBetInsurance(bet.user_id, bet, marketId);
+          } catch (e) {
+            console.error(`Bet insurance failed for bet ${bet.id} (non-critical):`, e);
+          }
+          try {
+            await supabaseAdmin.from('notifications').insert({
+              user_id: bet.user_id,
+              type: 'bet_lost',
+              message: `Your prediction didn't land this time — better luck on the next call.`,
+            });
+          } catch { /* non-critical */ }
+        } catch (e) {
+          console.error(`Failed to settle losing bet ${bet.id} on market ${marketId}:`, e);
+          failedBetIds.push(bet.id);
+        }
+      }
+
+      if (failedBetIds.length > 0) {
+        await alertAdmins(`⚠️ Market ${marketId} resolve partially failed: ${failedBetIds.length} bet(s) could not be settled and remain active. Re-POST /api/markets/resolve with the same outcome to resume.`);
+        return NextResponse.json({
+          success: false,
+          partial: true,
+          status: 'locked',
+          winnersCount: 0,
+          losersCount: bets.length - failedBetIds.length,
+          failedBetIds,
+          note: 'Some bets failed to settle and remain active. Re-submit the same resolve request to resume.',
+        }, { status: 207 });
       }
 
       await supabaseAdmin.from('treasury_log').insert({
@@ -640,6 +883,7 @@ export async function POST(request: Request) {
       await supabaseAdmin.from('markets').update({
         status: 'resolved',
         resolved_outcome: winningOutcomeIndex,
+        resolved_outcomes: winningOutcomeIndices,
         total_pool: totalPool,
         resolved_at: new Date().toISOString(),
       }).eq('id', marketId);
@@ -655,44 +899,69 @@ export async function POST(request: Request) {
 
     if (losingPool === 0) {
       for (const bet of winningBets) {
-        const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
-        const payout = Math.max(Number(bet.net_stake_tngn) || 0, floorPayout);
-        const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(payout, Number((bet as any).bonus_proportion) || 0);
-        await supabaseAdmin.rpc('credit_user', {
-          p_user_id: bet.user_id,
-          p_tngn_delta: winTngn,
-          p_bonus_delta: winBonus,
-        });
-        await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
-
-        const profit = Math.max(0, payout - Number(bet.stake_tngn));
-        const winPoints = Math.max(0, Math.floor(profit / 100));
-        if (winPoints > 0) {
-          await supabaseAdmin.rpc('award_points', {
-            p_user_id: bet.user_id,
-            p_reason: 'bet_win',
-            p_points: winPoints,
-            p_bet_id: bet.id,
-            p_metadata: { payout, profit, all_winners: true, winTngn, winBonus },
-          });
-        }
-
         try {
-          const message = winBonus > 0
-            ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
-            : `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`;
-          await supabaseAdmin.from('notifications').insert({
-            user_id: bet.user_id,
-            type: 'bet_won',
-            message,
-            amount: payout,
+          const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
+          const payout = Math.max(Number(bet.net_stake_tngn) || 0, floorPayout);
+          const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(payout, Number((bet as any).bonus_proportion) || 0);
+          const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+            p_bet_id: bet.id,
+            p_user_id: bet.user_id,
+            p_new_status: 'won',
+            p_payout_tngn: payout,
+            p_tngn_delta: winTngn,
+            p_bonus_delta: winBonus,
           });
-        } catch { /* non-critical */ }
+          if (!applied) {
+            console.warn(`Bet ${bet.id} was already settled by another pass — skipping.`);
+            continue;
+          }
+
+          const profit = Math.max(0, payout - Number(bet.stake_tngn));
+          const winPoints = Math.max(0, Math.floor(profit / 100));
+          if (winPoints > 0) {
+            await supabaseAdmin.rpc('award_points', {
+              p_user_id: bet.user_id,
+              p_reason: 'bet_win',
+              p_points: winPoints,
+              p_bet_id: bet.id,
+              p_metadata: { payout, profit, all_winners: true, winTngn, winBonus },
+            });
+          }
+
+          try {
+            const message = winBonus > 0
+              ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
+              : `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`;
+            await supabaseAdmin.from('notifications').insert({
+              user_id: bet.user_id,
+              type: 'bet_won',
+              message,
+              amount: payout,
+            });
+          } catch { /* non-critical */ }
+        } catch (e) {
+          console.error(`Failed to settle winning bet ${bet.id} on market ${marketId}:`, e);
+          failedBetIds.push(bet.id);
+        }
+      }
+
+      if (failedBetIds.length > 0) {
+        await alertAdmins(`⚠️ Market ${marketId} resolve partially failed: ${failedBetIds.length} bet(s) could not be settled and remain active. Re-POST /api/markets/resolve with the same outcome to resume.`);
+        return NextResponse.json({
+          success: false,
+          partial: true,
+          status: 'locked',
+          winnersCount: winningBets.length - failedBetIds.length,
+          losersCount: 0,
+          failedBetIds,
+          note: 'Some bets failed to settle and remain active. Re-submit the same resolve request to resume.',
+        }, { status: 207 });
       }
 
       await supabaseAdmin.from('markets').update({
         status: 'resolved',
         resolved_outcome: winningOutcomeIndex,
+        resolved_outcomes: winningOutcomeIndices,
         total_pool: totalPool,
         resolved_at: new Date().toISOString(),
       }).eq('id', marketId);
@@ -759,44 +1028,55 @@ export async function POST(request: Request) {
     // ₦X-if-correct number. House tops up the small delta when the
     // floor exceeds the pro-rata share.
     for (const bet of winningBets) {
-      const share = bet.net_stake_tngn / winningPool;
-      const parimutuelPayout = share * payoutPool;
-      const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
-      const payout = Math.max(parimutuelPayout, floorPayout);
-      const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(payout, Number((bet as any).bonus_proportion) || 0);
-
-      await supabaseAdmin.rpc('credit_user', {
-        p_user_id: bet.user_id,
-        p_tngn_delta: winTngn,
-        p_bonus_delta: winBonus,
-      });
-      await supabaseAdmin.from('user_bets').update({ status: 'won', payout_tngn: payout }).eq('id', bet.id);
-
-      // Win points: 1 pt per ₦100 of profit (payout above stake)
-      const profit = Math.max(0, payout - bet.stake_tngn);
-      const winPoints = Math.max(0, Math.floor(profit / 100));
-      if (winPoints > 0) {
-        await supabaseAdmin.rpc('award_points', {
-          p_user_id: bet.user_id,
-          p_reason: 'bet_win',
-          p_points: winPoints,
-          p_bet_id: bet.id,
-          p_metadata: { payout, profit, parimutuel: parimutuelPayout, floor: floorPayout, winTngn, winBonus },
-        });
-      }
-
       try {
-        const message = winBonus > 0
-          ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
-          : `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`;
-        await supabaseAdmin.from('notifications').insert({
-          user_id: bet.user_id,
-          type: 'bet_won',
-          message,
-          amount: payout,
+        const share = bet.net_stake_tngn / winningPool;
+        const parimutuelPayout = share * payoutPool;
+        const floorPayout = displayFloorPayout(Number(bet.stake_tngn) || 0).payout;
+        const payout = Math.max(parimutuelPayout, floorPayout);
+        const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(payout, Number((bet as any).bonus_proportion) || 0);
+
+        const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+          p_bet_id: bet.id,
+          p_user_id: bet.user_id,
+          p_new_status: 'won',
+          p_payout_tngn: payout,
+          p_tngn_delta: winTngn,
+          p_bonus_delta: winBonus,
         });
-      } catch (err) {
-        // non-critical
+        if (!applied) {
+          console.warn(`Bet ${bet.id} was already settled by another pass — skipping.`);
+          continue;
+        }
+
+        // Win points: 1 pt per ₦100 of profit (payout above stake)
+        const profit = Math.max(0, payout - bet.stake_tngn);
+        const winPoints = Math.max(0, Math.floor(profit / 100));
+        if (winPoints > 0) {
+          await supabaseAdmin.rpc('award_points', {
+            p_user_id: bet.user_id,
+            p_reason: 'bet_win',
+            p_points: winPoints,
+            p_bet_id: bet.id,
+            p_metadata: { payout, profit, parimutuel: parimutuelPayout, floor: floorPayout, winTngn, winBonus },
+          });
+        }
+
+        try {
+          const message = winBonus > 0
+            ? `You won! ₦${Math.round(winTngn).toLocaleString()} cash + ₦${Math.round(winBonus).toLocaleString()} bonus balance credited. 🎉`
+            : `You won! ₦${Math.round(payout).toLocaleString()} has been credited to your account. 🎉`;
+          await supabaseAdmin.from('notifications').insert({
+            user_id: bet.user_id,
+            type: 'bet_won',
+            message,
+            amount: payout,
+          });
+        } catch (err) {
+          // non-critical
+        }
+      } catch (e) {
+        console.error(`Failed to settle winning bet ${bet.id} on market ${marketId}:`, e);
+        failedBetIds.push(bet.id);
       }
     }
 
@@ -804,48 +1084,86 @@ export async function POST(request: Request) {
     // loss notification (mirrors the locked-odds branch above so the
     // user always hears from us when their bet resolves).
     for (const bet of losingBets) {
-      await supabaseAdmin.from('user_bets').update({ status: 'lost', payout_tngn: 0 }).eq('id', bet.id);
-      await applyFirstBetInsurance(bet.user_id, bet, marketId);
       try {
-        await supabaseAdmin.from('notifications').insert({
-          user_id: bet.user_id,
-          type: 'bet_lost',
-          message: `Your prediction didn't land this time — better luck on the next call.`,
+        const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
+          p_bet_id: bet.id,
+          p_user_id: bet.user_id,
+          p_new_status: 'lost',
+          p_payout_tngn: 0,
+          p_tngn_delta: 0,
+          p_bonus_delta: 0,
         });
-      } catch { /* non-critical */ }
-
-      // This bet's pro-rata share of the gross rake.
-      const betRakeContribution = (bet.net_stake_tngn / totalPool) * grossRake;
-
-      const ref = referrerByUser[bet.user_id];
-      if (ref && ref.sharePct > 0 && betRakeContribution > 0) {
-        const vipCut = betRakeContribution * (ref.sharePct / 100);
-        if (vipCut > 0) {
-          await supabaseAdmin.rpc('credit_user', {
-            p_user_id: ref.vipId,
-            p_tngn_delta: 0,
-            p_bonus_delta: vipCut,
-          });
-          await supabaseAdmin.from('vip_referral_earnings').insert({
-            vip_user_id: ref.vipId,
-            referred_user_id: bet.user_id,
-            bet_id: bet.id,
-            market_id: marketId,
-            rake_share_pct: ref.sharePct,
-            rake_share_amount: vipCut,
-          });
-          // Tell the VIP they earned (mirrors the locked-odds branch).
-          try {
-            await supabaseAdmin.from('notifications').insert({
-              user_id: ref.vipId,
-              type: 'referral_earnings',
-              message: `You earned ₦${Math.round(vipCut).toLocaleString()} in referral commission from a referee's bet. 💸`,
-              amount: vipCut,
-            });
-          } catch { /* notification non-critical */ }
-          vipPayoutTotal += vipCut;
+        if (!applied) {
+          console.warn(`Bet ${bet.id} was already settled by another pass — skipping.`);
+          continue;
         }
+        try {
+          await applyFirstBetInsurance(bet.user_id, bet, marketId);
+        } catch (e) {
+          console.error(`Bet insurance failed for bet ${bet.id} (non-critical):`, e);
+        }
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: bet.user_id,
+            type: 'bet_lost',
+            message: `Your prediction didn't land this time — better luck on the next call.`,
+          });
+        } catch { /* non-critical */ }
+
+        // This bet's pro-rata share of the gross rake.
+        const betRakeContribution = (bet.net_stake_tngn / totalPool) * grossRake;
+
+        const ref = referrerByUser[bet.user_id];
+        if (ref && ref.sharePct > 0 && betRakeContribution > 0) {
+          const vipCut = betRakeContribution * (ref.sharePct / 100);
+          if (vipCut > 0) {
+            try {
+              await supabaseAdmin.rpc('credit_user', {
+                p_user_id: ref.vipId,
+                p_tngn_delta: 0,
+                p_bonus_delta: vipCut,
+              });
+              await supabaseAdmin.from('vip_referral_earnings').insert({
+                vip_user_id: ref.vipId,
+                referred_user_id: bet.user_id,
+                bet_id: bet.id,
+                market_id: marketId,
+                rake_share_pct: ref.sharePct,
+                rake_share_amount: vipCut,
+              });
+              // Tell the VIP they earned (mirrors the locked-odds branch).
+              try {
+                await supabaseAdmin.from('notifications').insert({
+                  user_id: ref.vipId,
+                  type: 'referral_earnings',
+                  message: `You earned ₦${Math.round(vipCut).toLocaleString()} in referral commission from a referee's bet. 💸`,
+                  amount: vipCut,
+                });
+              } catch { /* notification non-critical */ }
+              vipPayoutTotal += vipCut;
+            } catch (e) {
+              console.error(`VIP cut failed for bet ${bet.id} on market ${marketId} (non-critical):`, e);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`Failed to settle losing bet ${bet.id} on market ${marketId}:`, e);
+        failedBetIds.push(bet.id);
       }
+    }
+
+    if (failedBetIds.length > 0) {
+      await alertAdmins(`⚠️ Market ${marketId} resolve partially failed: ${failedBetIds.length} bet(s) could not be settled and remain active. Re-POST /api/markets/resolve with the same outcome to resume.`);
+      return NextResponse.json({
+        success: false,
+        partial: true,
+        status: 'locked',
+        marketId,
+        winnersCount: winningBets.length - failedBetIds.filter(id => winningBets.some(b => b.id === id)).length,
+        losersCount: losingBets.length - failedBetIds.filter(id => losingBets.some(b => b.id === id)).length,
+        failedBetIds,
+        note: 'Some bets failed to settle and remain active. Re-submit the same resolve request to resume — already-settled bets will not be re-processed.',
+      }, { status: 207 });
     }
 
     const houseRakeNet = grossRake - vipPayoutTotal;
@@ -863,6 +1181,7 @@ export async function POST(request: Request) {
     await supabaseAdmin.from('markets').update({
       status: 'resolved',
       resolved_outcome: winningOutcomeIndex,
+      resolved_outcomes: winningOutcomeIndices,
       total_pool: totalPool,
       resolved_at: new Date().toISOString(),
     }).eq('id', marketId);
@@ -873,6 +1192,7 @@ export async function POST(request: Request) {
       success: true,
       marketId,
       winningOutcomeIndex,
+      winningOutcomeIndices,
       totalPool,
       winningPool,
       losingPool,

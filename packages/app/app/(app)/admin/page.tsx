@@ -1895,7 +1895,15 @@ function ManualOverridePanel() {
         if (res.status === 401) throw new Error('Admin session expired — refresh the page and sign in again.');
         throw new Error(data.error);
       }
-      toast({ title: `Market ${resolveMarketId} resolved! ${data.winnersCount} winners paid.` });
+      if (data.partial) {
+        toast({
+          title: `Market ${resolveMarketId} only partially resolved`,
+          description: `${data.failedBetIds?.length ?? 0} bet(s) failed to settle and are still active — re-resolve to retry.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: `Market ${resolveMarketId} resolved! ${data.winnersCount ?? 0} winner(s) paid.` });
+      }
       setResolveMarketId('');
       setWinningOutcome('');
       setSelectedMarket(null);

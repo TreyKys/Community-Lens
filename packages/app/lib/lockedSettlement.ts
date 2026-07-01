@@ -57,7 +57,14 @@ export interface LockedBet {
 export interface MarketResolution {
   seedPool: number[];
   realPool: number[];
+  /** Primary/first winning outcome. Kept for back-compat with single-winner callers. */
   winningOutcomeIndex: number;
+  /**
+   * Full set of winning outcomes when a market resolves with more than
+   * one correct outcome (ties, "either of these counts" rulings). When
+   * omitted or empty, callers fall back to [winningOutcomeIndex].
+   */
+  winningOutcomeIndices?: number[];
 }
 
 export interface BetPayoutResult {
@@ -244,8 +251,11 @@ export function settleLockedMarket(
   bets: LockedBet[],
   resolution: MarketResolution,
 ): LockedSettlementSummary {
-  const winningBets = bets.filter(b => b.outcomeIndex === resolution.winningOutcomeIndex);
-  const losingBets  = bets.filter(b => b.outcomeIndex !== resolution.winningOutcomeIndex);
+  const winningSet = new Set(
+    resolution.winningOutcomeIndices?.length ? resolution.winningOutcomeIndices : [resolution.winningOutcomeIndex],
+  );
+  const winningBets = bets.filter(b => winningSet.has(b.outcomeIndex));
+  const losingBets  = bets.filter(b => !winningSet.has(b.outcomeIndex));
 
   const isOneSided = losingBets.length > 0 && winningBets.length === 0;
 
