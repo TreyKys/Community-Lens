@@ -10,6 +10,10 @@ const supabaseAdmin = createClient(
 // GET /api/admin/inspect-slip?slipId=...      — one specific slip, full detail
 // GET /api/admin/inspect-slip?userId=...       — every slip for a user
 // GET /api/admin/inspect-slip?email=...        — every slip for a user, by email
+// GET /api/admin/inspect-slip                  — every slip currently status='active',
+//                                                across ALL users (the "what's actually
+//                                                stuck right now" system-wide view)
+// GET /api/admin/inspect-slip?allStatuses=true — same as above but every status, not just active
 //
 // Read-only ground truth: the raw multiplier_slips row plus every one
 // of its multiplier_legs rows and the markets each leg points to, with
@@ -27,6 +31,8 @@ export async function GET(request: Request) {
   const slipId = url.searchParams.get('slipId');
   const userIdParam = url.searchParams.get('userId');
   const emailParam = url.searchParams.get('email');
+  const allStatuses = url.searchParams.get('allStatuses') === 'true';
+  const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 200));
 
   let userId: string | null = userIdParam;
   if (!userId && emailParam) {
@@ -37,15 +43,14 @@ export async function GET(request: Request) {
     userId = u.id;
   }
 
-  if (!slipId && !userId) {
-    return NextResponse.json({ error: 'Provide slipId, userId, or email' }, { status: 400 });
-  }
-
   let slipQuery = supabaseAdmin
     .from('multiplier_slips')
     .select('*')
-    .order('created_at', { ascending: false });
-  slipQuery = slipId ? slipQuery.eq('id', slipId) : slipQuery.eq('user_id', userId!);
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (slipId) slipQuery = slipQuery.eq('id', slipId);
+  else if (userId) slipQuery = slipQuery.eq('user_id', userId);
+  else if (!allStatuses) slipQuery = slipQuery.eq('status', 'active'); // default: system-wide, currently-stuck view
 
   const { data: slips, error: slipErr } = await slipQuery;
   if (slipErr) return NextResponse.json({ error: slipErr.message }, { status: 500 });
@@ -73,18 +78,46 @@ export async function GET(request: Request) {
       ...l,
       market: marketById[l.market_id] || null,
     }));
+    const allLegsSettled = slipLegs.length > 0 && slipLegs.every(l => l.status !== 'active');
+    const anyLegOnUnresolvedMarket = slipLegs.some(l => l.status === 'active' && l.market && l.market.status !== 'resolved' && l.market.status !== 'voided');
+    const anyLegOrphaned = slipLegs.some(l => l.status === 'active' && l.market && (l.market.status === 'resolved' || l.market.status === 'voided'));
     return {
       slip: s,
       legCountStored: s.legs_total,
       legCountFound: slipLegs.length,
       legCountMismatch: s.legs_total !== slipLegs.length,
+      // The sharpest signal for "frontend won't update no matter what":
+      // every leg already has a final status (won/lost/void), yet the
+      // SLIP row itself is still 'active' — meaning settle_multiplier_
+      // for_market updated the legs but never advanced/finalized the
+      // parent slip. No UI fix or refresh can help this; the slip row
+      // itself needs its status/legs_resolved/legs_won recomputed.
+      allLegsSettledButSlipStillActive: s.status === 'active' && allLegsSettled,
+      // A genuinely still-pending slip: at least one leg is 'active' and
+      // sitting on a market that hasn't resolved/voided yet. Expected,
+      // not a bug — nothing to do until that market resolves.
+      genuinelyWaitingOnMarket: s.status === 'active' && anyLegOnUnresolvedMarket,
+      // Same fingerprint diagnose-recent-resolutions calls orphaned_legs:
+      // a leg is 'active' but its market already finished — the repair
+      // tools (repair-multiplier-legs / re-resolve-voided-market) are
+      // what fixes this one.
+      anyLegOrphanedOnFinishedMarket: anyLegOrphaned,
       legs: slipLegs,
     };
   });
 
+  const summary = {
+    total: result.length,
+    allLegsSettledButSlipStillActive: result.filter(r => r.allLegsSettledButSlipStillActive).length,
+    anyLegOrphanedOnFinishedMarket: result.filter(r => r.anyLegOrphanedOnFinishedMarket).length,
+    genuinelyWaitingOnMarket: result.filter(r => r.genuinelyWaitingOnMarket).length,
+    legCountMismatch: result.filter(r => r.legCountMismatch).length,
+  };
+
   return NextResponse.json({
     found: result.length,
+    summary,
     slips: result,
-    note: 'Raw, unfiltered rows — this is exactly what is in the database right now. legCountMismatch=true means legs_total on the slip does not match the number of multiplier_legs rows actually found for it (a leg is missing, or extra rows exist) — that alone would explain a slip that never completes no matter what settle_multiplier_for_market does, since it is counting against a total that does not match reality.',
+    note: 'Raw, unfiltered rows. Check summary first: allLegsSettledButSlipStillActive means the legs are fine but the SLIP row itself never finalized (needs a direct fix, not a re-settle); anyLegOrphanedOnFinishedMarket means a leg is stuck active on an already-finished market (repair-multiplier-legs fixes this); legCountMismatch means legs_total does not match the actual number of leg rows, so the slip can never complete no matter what runs.',
   });
 }
