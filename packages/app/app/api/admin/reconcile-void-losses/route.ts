@@ -56,6 +56,19 @@ export async function POST(request: Request) {
     let body: any = {};
     try { body = await request.json(); } catch { /* empty body ok */ }
     const dryRun = body?.dryRun !== false;
+    // Hard safety gate: refunding stakes is ONLY correct for the narrow
+    // case where the bet row is genuinely gone AND we have no way to
+    // determine which outcome the user picked. If the market resolved
+    // with a real outcome, the user might have WON — and this tool
+    // would shortchange them. Callers must acknowledge this explicitly.
+    // For markets that were wrongly voided but have a known real
+    // outcome, use /api/admin/re-resolve-voided-market instead.
+    const acknowledgeRefundOnly = body?.acknowledgeRefundOnly === true;
+    if (!dryRun && !acknowledgeRefundOnly) {
+      return NextResponse.json({
+        error: 'This tool ONLY refunds stakes — it does not pay winners at their odds. If the affected markets had real outcomes, use /api/admin/re-resolve-voided-market instead. To confirm refund-only is what you want, re-POST with { acknowledgeRefundOnly: true }.',
+      }, { status: 400 });
+    }
     const explicitIds: number[] | null = Array.isArray(body?.marketIds)
       ? body.marketIds.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
       : null;
