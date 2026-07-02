@@ -139,10 +139,40 @@ export default function OpsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {mechanicState?.paused && (
-            <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30">
-              <PauseCircle className="w-3 h-3 mr-1" /> Auto-fix paused
-            </Badge>
+          {mechanicState?.paused ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-500/30 text-amber-300 gap-1.5"
+              onClick={async () => {
+                await fetch('/api/mechanic/state', {
+                  method: 'POST', headers: adminHeaders(), credentials: 'include',
+                  body: JSON.stringify({ action: 'unpause' }),
+                });
+                loadState();
+                toast({ title: 'Mechanic auto-fix resumed' });
+              }}
+              title={mechanicState.pause_reason}
+            >
+              <PauseCircle className="w-3 h-3" /> Paused — resume
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground gap-1.5"
+              onClick={async () => {
+                if (!confirm('Pause Mechanic auto-fix? Approval-required fixes on /ops still work; only the safe-auto cron stops.')) return;
+                await fetch('/api/mechanic/state', {
+                  method: 'POST', headers: adminHeaders(), credentials: 'include',
+                  body: JSON.stringify({ action: 'pause', reason: 'Paused from /ops' }),
+                });
+                loadState();
+                toast({ title: 'Mechanic auto-fix paused' });
+              }}
+            >
+              <PauseCircle className="w-3 h-3" /> Pause auto
+            </Button>
           )}
           <Button
             variant="ghost"
