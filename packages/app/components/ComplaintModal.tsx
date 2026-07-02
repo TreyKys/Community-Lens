@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, CheckCircle2, HelpCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, HelpCircle, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { MyComplaintsDialog } from './MyComplaintsDialog';
 
 // The "Something wrong?" modal. Opened from any page that needs it —
 // bets page, wallet page, market detail. Auto-attaches context so the
@@ -45,6 +46,7 @@ export function ComplaintModal({
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{ referenceCode: string; message: string } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Reset when the modal closes.
   useEffect(() => {
@@ -101,10 +103,24 @@ export function ComplaintModal({
         {!submitted ? (
           <>
             <DialogHeader>
-              <DialogTitle>Something wrong?</DialogTitle>
-              <DialogDescription>
-                Tell us what happened. We&apos;ll look at it right away and follow up in the app.
-              </DialogDescription>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <DialogTitle>Something wrong?</DialogTitle>
+                  <DialogDescription>
+                    Tell us what happened. We&apos;ll look at it right away and follow up in the app.
+                  </DialogDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-[10px] gap-1 shrink-0"
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  <MessageCircle className="w-3 h-3" />
+                  Past reports
+                </Button>
+              </div>
             </DialogHeader>
 
             <div className="space-y-4">
@@ -175,11 +191,16 @@ export function ComplaintModal({
               We&apos;ll notify you here as soon as it&apos;s addressed. If you need to follow up, quote reference <strong className="font-mono">{submitted.referenceCode}</strong>.
             </div>
             <DialogFooter>
+              <Button variant="outline" onClick={() => setHistoryOpen(true)}>
+                See past reports
+              </Button>
               <Button onClick={() => onOpenChange(false)} className="gap-2">Close</Button>
             </DialogFooter>
           </>
         )}
       </DialogContent>
+
+      <MyComplaintsDialog open={historyOpen} onOpenChange={setHistoryOpen} />
     </Dialog>
   );
 }
