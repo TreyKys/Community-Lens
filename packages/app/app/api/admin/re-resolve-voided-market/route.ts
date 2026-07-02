@@ -319,6 +319,13 @@ export async function POST(request: Request) {
       body: JSON.stringify({ marketId, winningOutcomeIndices }),
     });
     const resolveBody = await resolveRes.json().catch(() => ({}));
+    // resolveRes.ok is true for BOTH 200 (fully complete) and 207
+    // (partial — some bets/legs failed to settle and the market was
+    // deliberately left claimed+locked for a retry, see resolve's own
+    // no-bets-with-active-legs branch). Must check the body's own
+    // partial/success flags, not just the HTTP status, or a genuinely
+    // incomplete settlement gets reported as "complete".
+    const resolveFullySucceeded = resolveRes.ok && resolveBody?.partial !== true && resolveBody?.success !== false;
 
     return NextResponse.json({
       dryRun: false,
@@ -327,9 +334,9 @@ export async function POST(request: Request) {
       clawbackApplied,
       resolveStatus: resolveRes.status,
       resolveResult: resolveBody,
-      note: resolveRes.ok
+      note: resolveFullySucceeded
         ? 'Re-resolve complete. Winners paid at their true odds via /api/markets/resolve, losers lost cleanly. Full audit in treasury_log.'
-        : 'Void reversal applied but the final resolve call failed — market is now status=locked with reset bets/legs, safe to retry via the normal resolve UI/endpoint. See resolveResult.',
+        : 'Void reversal applied, but the final resolve call did NOT fully complete (see resolveResult — either it errored, or it came back partial with some bets/legs still unsettled). Market is left claimed+locked so it can be retried — re-POST resolve with the same marketId + winningOutcomeIndices, or investigate resolveResult first.',
     });
   } catch (e: any) {
     console.error('re-resolve-voided-market crashed:', e);

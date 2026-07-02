@@ -245,18 +245,29 @@ async function resolveLockedOddsMarket(args: {
       .eq('market_id', marketId)
       .eq('status', 'active');
     if ((activeLegCount ?? 0) > 0) {
-      await supabaseAdmin.from('markets').update({
-        status: 'resolved',
-        resolved_outcome: winningOutcomeIndex,
-        resolved_outcomes: winningOutcomeIndices,
-        resolved_at: new Date().toISOString(),
-      }).eq('id', marketId);
-      await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+      // settle_multiplier_for_market (called before this branch, up in
+      // POST) only ever leaves active legs behind if it genuinely
+      // failed to settle them — success means every active leg on this
+      // market got flipped to won/lost/void in that same call, so this
+      // count would already be 0. Seeing legs still active here means
+      // settlement did NOT actually complete for them, regardless of
+      // whether the RPC call above threw or silently under-processed.
+      // Do NOT mark the market 'resolved' in that case — that would
+      // both lie about what happened AND take the market out of
+      // 'locked', which is the only state a retry can resume from. Stay
+      // claimed-but-locked (already true from the claim/resume step
+      // above) so the exact same request, re-submitted, naturally
+      // retries settle_multiplier_for_market (idempotent — only
+      // touches status='active' legs) instead of getting silently
+      // marked done with stale legs underneath it.
+      await alertAdmins(`⚠️ Market ${marketId} has ${activeLegCount} multiplier leg(s) that failed to settle (no single bets, so this would otherwise have looked "empty" and voided). NOT marking resolved — re-POST resolve with the same outcome to retry, or investigate why settle_multiplier_for_market isn't clearing these legs.`);
       return NextResponse.json({
-        status: 'resolved',
-        reason: `No single bets on this market, but ${activeLegCount} multiplier leg(s) settled against the real outcome.`,
-        winnersCount: 0, losersCount: 0, multiplierLegsSettled: activeLegCount,
-      });
+        success: false,
+        partial: true,
+        status: 'locked',
+        reason: `No single bets on this market, and ${activeLegCount} multiplier leg(s) failed to settle. Market kept claimed+locked for a retry — re-submit the same resolve request.`,
+        winnersCount: 0, losersCount: 0, unsettledMultiplierLegs: activeLegCount,
+      }, { status: 207 });
     }
     await queueVoidForApproval(marketId, 'no_bets_placed_locked_odds');
     return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
@@ -841,17 +852,19 @@ export async function POST(request: Request) {
         .eq('market_id', marketId)
         .eq('status', 'active');
       if ((activeLegCount ?? 0) > 0) {
-        await supabaseAdmin.from('markets').update({
-          status: 'resolved',
-          resolved_outcome: winningOutcomeIndex,
-          resolved_outcomes: winningOutcomeIndices,
-          resolved_at: new Date().toISOString(),
-        }).eq('id', marketId);
+        // See the locked-odds branch's identical check above for the
+        // full write-up: legs still active here means settlement did
+        // NOT complete for them, so we must not claim 'resolved' —
+        // that would both misreport what happened and take the market
+        // out of the only status ('locked') a retry can resume from.
+        await alertAdmins(`⚠️ Market ${marketId} has ${activeLegCount} multiplier leg(s) that failed to settle (no single bets, so this would otherwise have looked "empty" and voided). NOT marking resolved — re-POST resolve with the same outcome to retry, or investigate why settle_multiplier_for_market isn't clearing these legs.`);
         return NextResponse.json({
-          status: 'resolved',
-          reason: `No single bets on this market, but ${activeLegCount} multiplier leg(s) settled against the real outcome.`,
-          winnersCount: 0, losersCount: 0, multiplierLegsSettled: activeLegCount,
-        });
+          success: false,
+          partial: true,
+          status: 'locked',
+          reason: `No single bets on this market, and ${activeLegCount} multiplier leg(s) failed to settle. Market kept claimed+locked for a retry — re-submit the same resolve request.`,
+          winnersCount: 0, losersCount: 0, unsettledMultiplierLegs: activeLegCount,
+        }, { status: 207 });
       }
       await queueVoidForApproval(marketId, 'no_bets_placed_parimutuel');
       return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });

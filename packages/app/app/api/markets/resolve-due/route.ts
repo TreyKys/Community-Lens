@@ -77,9 +77,15 @@ export async function POST(request: Request) {
       body: JSON.stringify({ marketId: m.id, winningOutcomeIndex }),
     });
     const body = await resolveRes.json().catch(() => ({}));
+    // resolveRes.ok is true for 200 AND 207 (partial — market left
+    // claimed+locked for a retry, some bets/legs didn't settle). Next
+    // cron pass re-queries status='locked' markets so an incomplete
+    // one gets retried regardless, but the result log itself must not
+    // claim success for a run that didn't actually finish.
+    const fullySucceeded = resolveRes.ok && body?.partial !== true && body?.success !== false;
 
-    if (!resolveRes.ok) {
-      results.push({ marketId: m.id, success: false, error: body.error });
+    if (!fullySucceeded) {
+      results.push({ marketId: m.id, success: false, error: body.error || body.reason, partial: body?.partial === true });
     } else {
       results.push({ marketId: m.id, success: true, outcome: winningOutcomeIndex });
     }

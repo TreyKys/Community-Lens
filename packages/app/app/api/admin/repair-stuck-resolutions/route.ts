@@ -91,7 +91,11 @@ export async function POST(request: Request) {
           body: JSON.stringify({ marketId: m.id, winningOutcomeIndices }),
         });
         entry.resumeResult = await res.json().catch(() => ({}));
-        entry.resumed = res.ok;
+        // res.ok is true for 200 (fully resumed) AND 207 (partial —
+        // some bets/legs still didn't settle, market deliberately left
+        // claimed+locked for another retry). Must check the body's own
+        // flags too, or a still-incomplete resume gets reported as done.
+        entry.resumed = res.ok && entry.resumeResult?.partial !== true && entry.resumeResult?.success !== false;
       } catch (e: any) {
         entry.resumed = false;
         entry.error = e?.message || 'resume call failed';
