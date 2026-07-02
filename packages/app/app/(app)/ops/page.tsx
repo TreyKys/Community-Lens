@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Activity, AlertTriangle, CheckCircle2, RefreshCw, Wrench, MessageSquare, PauseCircle, PlayCircle, Eye, ShieldAlert } from 'lucide-react';
+import { Loader2, Activity, AlertTriangle, CheckCircle2, RefreshCw, Wrench, MessageSquare, PauseCircle, PlayCircle, Eye, ShieldAlert, MessageCircle, User as UserIcon, Send, Users as UsersIcon, RotateCcw } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
 // /ops — Monitor & Mechanic control panel.
@@ -201,11 +202,9 @@ export default function OpsPage() {
           <MechanicPanel findings={findings} onFixed={runScan} />
         </TabsContent>
 
-        {/* Complaints inbox (wired in checkpoints 3–4) */}
+        {/* Complaints inbox */}
         <TabsContent value="complaints" className="pt-4">
-          <div className="text-sm text-muted-foreground p-4 border border-dashed rounded-lg">
-            Complaints inbox wires in at checkpoints 3–4.
-          </div>
+          <ComplaintsPanel />
         </TabsContent>
       </Tabs>
     </div>
@@ -479,5 +478,289 @@ function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: ()
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// ── Complaints panel: inbox + reply + resolve ────────────────────────
+
+interface ComplaintRow {
+  id: string;
+  user_id: string;
+  user_email?: string;
+  user_username?: string;
+  reference_code: string;
+  type: string;
+  description: string | null;
+  status: string;
+  ai_triage_category: string | null;
+  mechanic_attempted: boolean;
+  mechanic_result: any;
+  admin_response: string | null;
+  admin_responded_at: string | null;
+  aggregate_child_count: number;
+  related_bet_id: string | null;
+  related_slip_id: string | null;
+  related_market_id: number | null;
+  context: any;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+const STATUS_TABS: Array<{ id: string; label: string }> = [
+  { id: 'all',                 label: 'All open' },
+  { id: 'submitted',           label: 'New' },
+  { id: 'monitor_review',      label: 'Monitor' },
+  { id: 'admin_working',       label: 'Working' },
+  { id: 'mechanic_fixed',      label: 'Auto-fixed' },
+  { id: 'resolved',            label: 'Resolved' },
+];
+
+function ComplaintsPanel() {
+  const { toast } = useToast();
+  const [items, setItems] = useState<ComplaintRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [selected, setSelected] = useState<ComplaintRow | null>(null);
+  const [reply, setReply] = useState('');
+  const [andResolve, setAndResolve] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const openStatuses = ['submitted', 'monitor_review', 'admin_working', 'mechanic_fixed', 'mechanic_attempting'];
+      const params = new URLSearchParams();
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      params.set('limit', '100');
+      params.set('_', String(Date.now()));
+      const r = await fetch(`/api/admin/complaints?${params.toString()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      // For "all open" filter, drop resolved/closed client-side so the
+      // server call can stay generic.
+      const filtered = statusFilter === 'all'
+        ? (data.complaints || []).filter((c: ComplaintRow) => openStatuses.includes(c.status))
+        : (data.complaints || []);
+      setItems(filtered);
+    } catch (e: any) {
+      toast({ title: 'Failed to load complaints', description: e.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter, toast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Refresh silently every 30s.
+  useEffect(() => {
+    const iv = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 30_000);
+    return () => clearInterval(iv);
+  }, [load]);
+
+  const doAction = async (id: string, action: string, extra: any = {}) => {
+    setSending(true);
+    try {
+      const r = await fetch('/api/admin/complaints', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ complaintId: id, action, ...extra }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      const kids = data.replied_to_children ? ` (+${data.replied_to_children} grouped)` : '';
+      toast({ title: `Action '${action}' applied${kids}` });
+      setSelected(null);
+      setReply('');
+      setAndResolve(false);
+      load();
+    } catch (e: any) {
+      toast({ title: 'Action failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        {STATUS_TABS.map(t => (
+          <Button
+            key={t.id}
+            size="sm"
+            variant={statusFilter === t.id ? 'default' : 'outline'}
+            onClick={() => setStatusFilter(t.id)}
+            className="h-7 text-xs"
+          >
+            {t.label}
+          </Button>
+        ))}
+        <Button size="sm" variant="ghost" onClick={load} disabled={loading} className="h-7 text-xs ml-auto">
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+        </Button>
+      </div>
+
+      {items.length === 0 && !loading ? (
+        <div className="border rounded-lg p-8 text-center space-y-2">
+          <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+          <p className="text-sm font-medium">No complaints in this view.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => { setSelected(c); setReply(''); setAndResolve(false); }}
+              className={cn(
+                'w-full text-left border rounded-lg p-3 space-y-1 hover:bg-muted/30 transition-colors',
+                c.status === 'submitted' && 'border-blue-500/30 bg-blue-500/5',
+                c.status === 'admin_working' && 'border-amber-500/30 bg-amber-500/5',
+                c.status === 'resolved' && 'opacity-60',
+              )}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-mono font-bold text-emerald-300">{c.reference_code}</span>
+                <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">{c.type}</Badge>
+                {c.ai_triage_category && (
+                  <Badge variant="outline" className="text-[9px] uppercase px-1 py-0 text-blue-300 border-blue-500/30">
+                    AI: {c.ai_triage_category}
+                  </Badge>
+                )}
+                <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">{c.status.replace(/_/g, ' ')}</Badge>
+                {c.aggregate_child_count > 0 && (
+                  <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/30 text-[9px] px-1 py-0">
+                    <UsersIcon className="w-2.5 h-2.5 mr-0.5" /> +{c.aggregate_child_count} more
+                  </Badge>
+                )}
+                {c.mechanic_attempted && (
+                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[9px] px-1 py-0">
+                    <Wrench className="w-2.5 h-2.5 mr-0.5" /> Mechanic ran
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <UserIcon className="inline w-3 h-3 mr-1" />
+                {c.user_email || c.user_username || c.user_id.slice(0, 8)} · {new Date(c.created_at).toLocaleString()}
+              </p>
+              {c.description && <p className="text-xs line-clamp-2">{c.description}</p>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Detail / reply drawer */}
+      <Dialog open={!!selected} onOpenChange={(v) => { if (!v) setSelected(null); }}>
+        <DialogContent className="max-w-2xl">
+          {selected && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageCircle className="w-4 h-4" />
+                  {selected.reference_code} · {selected.type}
+                </DialogTitle>
+                <DialogDescription>
+                  {selected.user_email || selected.user_username || selected.user_id.slice(0, 12)}
+                  {' · '}
+                  {new Date(selected.created_at).toLocaleString()}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                {selected.description && (
+                  <div className="bg-muted/20 border rounded-md p-3 text-xs whitespace-pre-wrap">
+                    {selected.description}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                  <MiniStat label="Status" value={selected.status.replace(/_/g, ' ')} />
+                  <MiniStat label="AI category" value={selected.ai_triage_category || '—'} />
+                  <MiniStat label="Related slip" value={selected.related_slip_id ? selected.related_slip_id.slice(0, 8) + '…' : '—'} />
+                  <MiniStat label="Related market" value={selected.related_market_id ? `#${selected.related_market_id}` : '—'} />
+                  <MiniStat label="Aggregate group" value={selected.aggregate_child_count > 0 ? `+${selected.aggregate_child_count} more users` : 'solo'} />
+                  <MiniStat label="Balance @ submit" value={selected.context?.snapshot ? `₦${(selected.context.snapshot.tngn_balance || 0).toLocaleString()} + ₦${(selected.context.snapshot.bonus_balance || 0).toLocaleString()} bonus` : '—'} />
+                </div>
+
+                {selected.mechanic_attempted && selected.mechanic_result && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-md p-3 text-[11px] space-y-1">
+                    <p className="font-medium text-emerald-300 flex items-center gap-1"><Wrench className="w-3 h-3" /> Mechanic auto-fix result</p>
+                    <p className="text-muted-foreground">{selected.mechanic_result?.detail || 'ran'}</p>
+                    <p className="text-[10px] text-muted-foreground">outcome: {selected.mechanic_result?.outcomeStatus}</p>
+                  </div>
+                )}
+
+                {selected.admin_response && (
+                  <div className="bg-muted/20 border rounded-md p-3 text-xs">
+                    <p className="text-[10px] uppercase text-muted-foreground mb-1">Previous admin reply · {selected.admin_responded_at && new Date(selected.admin_responded_at).toLocaleString()}</p>
+                    <p className="whitespace-pre-wrap">{selected.admin_response}</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wider text-muted-foreground">Reply to user</label>
+                  <Textarea
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    placeholder="What should we tell this user? (Will notify them in-app.)"
+                    className="text-sm min-h-[100px]"
+                  />
+                  {selected.aggregate_child_count > 0 && (
+                    <p className="text-[10px] text-amber-300">
+                      This message will also go to the {selected.aggregate_child_count} other user(s) grouped with this complaint.
+                    </p>
+                  )}
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={andResolve} onChange={(e) => setAndResolve(e.target.checked)} />
+                    Mark resolved after sending
+                  </label>
+                </div>
+              </div>
+
+              <DialogFooter className="flex-wrap gap-2">
+                {selected.status !== 'resolved' && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => doAction(selected.id, 'resolve')}
+                      disabled={sending}
+                    >
+                      <CheckCircle2 className="w-3 h-3 mr-1" /> Resolve
+                    </Button>
+                    <Button
+                      className="bg-emerald-600 hover:bg-emerald-500 gap-1.5"
+                      size="sm"
+                      onClick={() => doAction(selected.id, 'reply', { message: reply.trim(), andResolve })}
+                      disabled={sending || !reply.trim()}
+                    >
+                      {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                      Send reply
+                    </Button>
+                  </>
+                )}
+                {selected.status === 'resolved' && (
+                  <Button variant="outline" size="sm" onClick={() => doAction(selected.id, 'reopen')} disabled={sending}>
+                    <RotateCcw className="w-3 h-3 mr-1" /> Reopen
+                  </Button>
+                )}
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-muted/20 rounded p-1.5">
+      <p className="text-[9px] uppercase text-muted-foreground">{label}</p>
+      <p className="text-[11px] font-semibold truncate">{value}</p>
+    </div>
   );
 }
