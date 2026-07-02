@@ -54,6 +54,7 @@ export default function OpsPage() {
   const [scanning, setScanning] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [mechanicState, setMechanicState] = useState<any>(null);
+  const [metrics, setMetrics] = useState<any>(null);
 
   // Auth handshake — sees if the admin cookie is set.
   useEffect(() => {
@@ -80,8 +81,12 @@ export default function OpsPage() {
 
   const loadState = useCallback(async () => {
     try {
-      const { data } = await supabase.from('mechanic_state').select('*').eq('id', 1).maybeSingle();
+      const [{ data }, mRes] = await Promise.all([
+        supabase.from('mechanic_state').select('*').eq('id', 1).maybeSingle(),
+        fetch(`/api/mechanic/metrics?_=${Date.now()}`, { credentials: 'include', cache: 'no-store' }),
+      ]);
       setMechanicState(data);
+      if (mRes.ok) setMetrics(await mRes.json());
     } catch { /* not critical */ }
   }, []);
 
@@ -189,6 +194,33 @@ export default function OpsPage() {
         </div>
       </div>
 
+      {/* Metrics strip */}
+      {metrics && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <SummaryTile
+            label="SLA median (7d)"
+            value={metrics.sla7d?.medianMinutes != null ? `${Math.round(metrics.sla7d.medianMinutes)}m` : '—' as any}
+            tone={metrics.sla7d?.medianMinutes != null && metrics.sla7d.medianMinutes > 240 ? 'warn' : 'ok'}
+          />
+          <SummaryTile
+            label="SLA p95 (7d)"
+            value={metrics.sla7d?.p95Minutes != null ? `${Math.round(metrics.sla7d.p95Minutes)}m` : '—' as any}
+            tone={metrics.sla7d?.p95Minutes != null && metrics.sla7d.p95Minutes > 1440 ? 'warn' : 'ok'}
+          />
+          <SummaryTile
+            label="Auto-fixes 24h"
+            value={metrics.autoFixesLast24h ?? 0}
+            tone={(metrics.autoFixesLast24h ?? 0) > 15 ? 'warn' : 'ok'}
+          />
+          <SummaryTile
+            label="Open alerts"
+            value={metrics.openAlerts?.total ?? 0}
+            tone={(metrics.openAlerts?.bySeverity?.critical || 0) > 0 ? 'critical'
+                : (metrics.openAlerts?.bySeverity?.warning || 0) > 0 ? 'warn' : 'ok'}
+          />
+        </div>
+      )}
+
       {/* Summary strip */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
         <SummaryTile label="Total" value={scan?.totalFindings ?? 0} tone="neutral" />
@@ -241,7 +273,7 @@ export default function OpsPage() {
   );
 }
 
-function SummaryTile({ label, value, tone }: { label: string; value: number; tone: 'ok' | 'warn' | 'critical' | 'neutral' }) {
+function SummaryTile({ label, value, tone }: { label: string; value: number | string; tone: 'ok' | 'warn' | 'critical' | 'neutral' }) {
   const toneClasses = {
     ok:       'bg-emerald-500/10 border-emerald-500/20 text-emerald-300',
     warn:     'bg-amber-500/10 border-amber-500/20 text-amber-300',
