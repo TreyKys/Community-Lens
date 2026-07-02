@@ -16,6 +16,8 @@ import {
 import { cn } from '@/lib/utils';
 import { POOL_RAKE_PCT } from '@/lib/displayPool';
 import { SharePickModal } from '@/components/SharePickModal';
+import { ComplaintModal, type ComplaintContext } from '@/components/ComplaintModal';
+import { HelpCircle } from 'lucide-react';
 
 interface Bet {
   id: string;
@@ -586,6 +588,10 @@ export default function BetsPage() {
   // on any bet/slip card. Reset to null when the modal closes.
   const [pickShare, setPickShare] = useState<{ type: 'bet' | 'slip'; id: string } | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  // "Something wrong?" complaint modal — opened from the header button,
+  // or from the per-slip inline "Report an issue" link when a specific
+  // slip is being reported so we can auto-attach its id.
+  const [complaint, setComplaint] = useState<ComplaintContext | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -775,9 +781,21 @@ export default function BetsPage() {
             {slips.length > 0 && <> · {slips.length} Multiplier{slips.length !== 1 ? 's' : ''}</>}
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={fetchBets} className="text-muted-foreground">
-          Refresh
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setComplaint({ page: '/bets' })}
+            className="text-muted-foreground gap-1.5"
+            title="Report an issue with a prediction"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
+            Something wrong?
+          </Button>
+          <Button variant="ghost" size="sm" onClick={fetchBets} className="text-muted-foreground">
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -847,6 +865,12 @@ export default function BetsPage() {
           defaultUsername={username}
         />
       )}
+
+      <ComplaintModal
+        open={complaint !== null}
+        onOpenChange={(v) => { if (!v) setComplaint(null); }}
+        context={complaint || undefined}
+      />
     </div>
   );
 }
