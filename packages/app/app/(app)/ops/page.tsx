@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Activity, AlertTriangle, CheckCircle2, RefreshCw, Wrench, MessageSquare, PauseCircle, PlayCircle } from 'lucide-react';
+import { Loader2, Activity, AlertTriangle, CheckCircle2, RefreshCw, Wrench, MessageSquare, PauseCircle, PlayCircle, Eye, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // /ops — Monitor & Mechanic control panel.
@@ -195,11 +196,9 @@ export default function OpsPage() {
           <MonitorPanel findings={findings} scanning={scanning} />
         </TabsContent>
 
-        {/* Mechanic: same list but with Fix buttons (wired in checkpoint 2) */}
+        {/* Mechanic: findings with Fix buttons + preview-before-apply */}
         <TabsContent value="mechanic" className="pt-4">
-          <div className="text-sm text-muted-foreground p-4 border border-dashed rounded-lg">
-            Fix dispatcher wires in at checkpoint 2. Findings show under Monitor for now.
-          </div>
+          <MechanicPanel findings={findings} onFixed={runScan} />
         </TabsContent>
 
         {/* Complaints inbox (wired in checkpoints 3–4) */}
@@ -279,5 +278,206 @@ function MonitorPanel({ findings, scanning }: { findings: Finding[]; scanning: b
         </Card>
       ))}
     </div>
+  );
+}
+
+// ── Mechanic panel: Fix buttons with preview-before-apply ────────────
+
+const AUTO_TIER_TYPES = new Set(['open_past_close']);
+const NO_AUTO_FIX_TYPES = new Set(['never_resolved', 'negative_balance', 'voided_empty_duplicate', 'pending_deposit', 'slow_withdrawal']);
+
+function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: () => void }) {
+  const { toast } = useToast();
+  const [preview, setPreview] = useState<{ finding: Finding; result: any } | null>(null);
+  const [busyFingerprint, setBusyFingerprint] = useState<string | null>(null);
+  const [applyConfirmed, setApplyConfirmed] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+
+  const previewFix = async (finding: Finding) => {
+    setBusyFingerprint(finding.fingerprint);
+    try {
+      const r = await fetch('/api/mechanic/fix', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ finding, dryRun: true }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      setPreview({ finding, result: data.outcome });
+      setApplyConfirmed(false);
+    } catch (e: any) {
+      toast({ title: 'Preview failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setBusyFingerprint(null);
+    }
+  };
+
+  const applyFix = async () => {
+    if (!preview) return;
+    setIsApplying(true);
+    try {
+      const r = await fetch('/api/mechanic/fix', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ finding: preview.finding, dryRun: false }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      if (data.ok) {
+        toast({ title: 'Fix applied', description: data.outcome?.summary || 'ok' });
+      } else {
+        toast({ title: 'Fix did not fully succeed', description: data.outcome?.summary || 'see console', variant: 'destructive' });
+      }
+      setPreview(null);
+      onFixed();
+    } catch (e: any) {
+      toast({ title: 'Apply failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  if (findings.length === 0) {
+    return (
+      <div className="border rounded-lg p-8 text-center space-y-2">
+        <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+        <p className="text-sm font-medium">Nothing to fix — the queue is clean.</p>
+      </div>
+    );
+  }
+
+  // Group by category same as Monitor.
+  const grouped: Record<string, Finding[]> = {};
+  for (const f of findings) (grouped[f.category] ||= []).push(f);
+
+  return (
+    <>
+      <div className="space-y-4">
+        {Object.entries(grouped).map(([cat, fs]) => (
+          <Card key={cat}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm capitalize flex items-center justify-between">
+                <span>{cat.replace(/_/g, ' ')}</span>
+                <Badge variant="outline" className="text-[10px]">{fs.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {fs.map(f => {
+                const noAutoFix = NO_AUTO_FIX_TYPES.has(f.issueType) || !f.proposedFix;
+                const isAuto = AUTO_TIER_TYPES.has(f.issueType);
+                return (
+                  <div
+                    key={f.fingerprint}
+                    className={cn(
+                      'border rounded-lg p-3 space-y-2',
+                      f.severity === 'critical' ? 'border-red-500/30 bg-red-500/5' :
+                      f.severity === 'warning'  ? 'border-amber-500/30 bg-amber-500/5' :
+                                                  'border-muted',
+                    )}
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">{f.severity}</Badge>
+                      <Badge className={cn('text-[9px] uppercase px-1 py-0', isAuto ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30')}>
+                        {isAuto ? 'Safe auto' : 'Approval'}
+                      </Badge>
+                      <span className="text-[10px] font-mono text-muted-foreground">{f.issueType}</span>
+                    </div>
+                    <p className="text-xs font-medium">{f.title}</p>
+                    <p className="text-[11px] text-muted-foreground">{f.detail}</p>
+                    <div className="flex items-center gap-2 pt-1">
+                      {noAutoFix ? (
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground italic">
+                          <ShieldAlert className="w-3 h-3" />
+                          Manual investigation only — no auto-fix registered.
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1.5"
+                          onClick={() => previewFix(f)}
+                          disabled={busyFingerprint === f.fingerprint}
+                        >
+                          {busyFingerprint === f.fingerprint
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <Eye className="w-3 h-3" />}
+                          Preview fix
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Preview-before-apply dialog */}
+      <Dialog open={!!preview} onOpenChange={(v) => { if (!v) { setPreview(null); setApplyConfirmed(false); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Preview fix</DialogTitle>
+            <DialogDescription>{preview?.finding.title}</DialogDescription>
+          </DialogHeader>
+
+          {preview && (
+            <div className="space-y-3">
+              <div className="bg-muted/20 border rounded-md p-3 text-xs">
+                <p className="font-medium mb-1">Plan</p>
+                <p className="text-muted-foreground">{preview.result?.summary || 'No plan summary returned.'}</p>
+              </div>
+
+              {preview.result?.deltaTngn ? (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-3 text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-amber-300 font-medium">Money movement</span>
+                    <span className="font-mono">₦{Math.round(preview.result.deltaTngn).toLocaleString()}</span>
+                  </div>
+                  {preview.result.affectedUserIds?.length ? (
+                    <p className="text-muted-foreground">
+                      {preview.result.affectedUserIds.length} user(s) affected.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <details className="text-[10px] text-muted-foreground">
+                <summary className="cursor-pointer">Raw response</summary>
+                <pre className="whitespace-pre-wrap mt-2 max-h-40 overflow-auto bg-muted/20 p-2 rounded">
+                  {JSON.stringify(preview.result?.details ?? preview.result, null, 2)}
+                </pre>
+              </details>
+
+              <label className="flex items-start gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={applyConfirmed}
+                  onChange={(e) => setApplyConfirmed(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>I have reviewed the plan above and want to apply this fix. This is irreversible for most fix types.</span>
+              </label>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setPreview(null); setApplyConfirmed(false); }} disabled={isApplying}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-500 gap-2"
+              onClick={applyFix}
+              disabled={!applyConfirmed || isApplying}
+            >
+              {isApplying ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wrench className="w-3 h-3" />}
+              Apply fix
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
