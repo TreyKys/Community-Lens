@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Finding, CascadeTier } from './types';
-import { getBaseUrl, cronHeaders } from '@/lib/oracle';
+import { getBaseUrl } from '@/lib/oracle';
 
 // The fix dispatcher. Every fixer is a small wrapper around an existing
 // admin repair endpoint — this file adds nothing new to the fix logic,
@@ -29,14 +29,28 @@ export interface FixOutcome {
 
 const NO_UNDO = null;
 
-async function callEndpoint(endpoint: string, body: any, opts: { asAdminCookie?: boolean } = {}): Promise<{ status: number; body: any }> {
+// Every repair endpoint this dispatcher calls (reconcile-void-losses,
+// repair-multiplier-legs, repair-stuck-resolutions, finalize-stalled-
+// slips, re-resolve-voided-market) gates on isAdminRequest(), which
+// only accepts an `Authorization: Bearer <ADMIN_SECRET>` header or the
+// admin cookie — NOT the x-cron-secret header /api/markets/resolve and
+// /api/markets/lock also happen to accept. Mechanic runs server-side
+// with no browser cookie to forward, so Bearer ADMIN_SECRET is the one
+// header that authenticates against every endpoint in the dispatch
+// table uniformly. (This was the literal cause of "fixes aren't
+// working" — every dispatched call was silently 401ing.)
+function adminServiceHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${process.env.ADMIN_SECRET}`,
+  };
+}
+
+async function callEndpoint(endpoint: string, body: any): Promise<{ status: number; body: any }> {
   const baseUrl = getBaseUrl();
-  const headers = opts.asAdminCookie
-    ? cronHeaders()
-    : cronHeaders();  // Mechanic calls always use the cron secret — service-to-service
   const res = await fetch(`${baseUrl}${endpoint}`, {
     method: 'POST',
-    headers,
+    headers: adminServiceHeaders(),
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
