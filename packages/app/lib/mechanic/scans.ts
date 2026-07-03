@@ -170,21 +170,41 @@ async function scanSettlement(db: SupabaseClient): Promise<Finding[]> {
     .is('resolved_outcome', null)
     .gte('resolved_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
     .limit(200);
-  for (const m of emptyVoided || []) {
-    if (!m.question) continue;
-    const { data: dupes } = await db.from('markets').select('id, status').eq('question', m.question).neq('id', m.id);
-    if (!dupes || dupes.length === 0) continue;
-    findings.push({
-      fingerprint: `voided_empty_duplicate:${m.id}`,
-      category: 'settlement',
-      issueType: 'voided_empty_duplicate',
-      severity: 'critical',
-      tier: 'approval_required',
-      title: `Market #${m.id} voided empty — but has ${dupes.length} duplicate market row(s)`,
-      detail: `Same question text exists as market ${dupes.map(d => `#${d.id} (${d.status})`).join(', ')}. Bets probably landed on the other row while this one was voided as empty.`,
-      affectedIds: { marketId: m.id, marketIds: dupes.map(d => d.id) },
-      meta: { question: m.question, duplicates: dupes },
-    });
+  // Batch this into ONE query instead of one-per-market. The old code
+  // did an individually-awaited `.eq('question', ...)` call inside this
+  // loop — fine at low volume, but right after an incident with many
+  // markets voided empty (exactly the scenario this scanner exists
+  // for), that's dozens-to-hundreds of sequential round-trips in a
+  // single scan, easily enough to make one /api/mechanic/scan call
+  // take a very long time or hit the route's 60s cap. Fetch every
+  // market sharing ANY of the candidate questions in one shot and
+  // group in memory instead.
+  const candidateQuestions = Array.from(new Set((emptyVoided || []).map(m => m.question).filter(Boolean)));
+  if (candidateQuestions.length > 0) {
+    const { data: allMatches } = await db
+      .from('markets')
+      .select('id, question, status')
+      .in('question', candidateQuestions);
+    const byQuestion: Record<string, { id: number; status: string }[]> = {};
+    for (const row of allMatches || []) {
+      (byQuestion[row.question] ||= []).push({ id: row.id, status: row.status });
+    }
+    for (const m of emptyVoided || []) {
+      if (!m.question) continue;
+      const dupes = (byQuestion[m.question] || []).filter(d => d.id !== m.id);
+      if (dupes.length === 0) continue;
+      findings.push({
+        fingerprint: `voided_empty_duplicate:${m.id}`,
+        category: 'settlement',
+        issueType: 'voided_empty_duplicate',
+        severity: 'critical',
+        tier: 'approval_required',
+        title: `Market #${m.id} voided empty — but has ${dupes.length} duplicate market row(s)`,
+        detail: `Same question text exists as market ${dupes.map(d => `#${d.id} (${d.status})`).join(', ')}. Bets probably landed on the other row while this one was voided as empty.`,
+        affectedIds: { marketId: m.id, marketIds: dupes.map(d => d.id) },
+        meta: { question: m.question, duplicates: dupes },
+      });
+    }
   }
 
   return findings;

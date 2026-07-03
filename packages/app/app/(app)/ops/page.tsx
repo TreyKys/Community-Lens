@@ -68,13 +68,26 @@ export default function OpsPage() {
 
   const runScan = useCallback(async () => {
     setScanning(true);
+    // Client-side safety net — the scan route caps itself at 60s
+    // (maxDuration), but if the platform ever hangs a connection open
+    // past that instead of returning an error (cold start, a slow
+    // upstream), this guarantees the spinner and "scanning" state
+    // still clear instead of looking stuck forever.
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), 65_000);
     try {
-      const r = await fetch(`/api/mechanic/scan?_=${Date.now()}`, { credentials: 'include', cache: 'no-store' });
+      const r = await fetch(`/api/mechanic/scan?_=${Date.now()}`, { credentials: 'include', cache: 'no-store', signal: abort.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setScan(await r.json());
     } catch (e: any) {
-      toast({ title: 'Scan failed', description: e.message, variant: 'destructive' });
+      const isTimeout = e?.name === 'AbortError';
+      toast({
+        title: isTimeout ? 'Scan timed out' : 'Scan failed',
+        description: isTimeout ? 'The scan took longer than 65s and was cancelled client-side. Try again — if it keeps happening, one of the detectors may need attention.' : e.message,
+        variant: 'destructive',
+      });
     } finally {
+      clearTimeout(timeout);
       setScanning(false);
     }
   }, [toast]);
