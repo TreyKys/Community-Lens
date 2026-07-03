@@ -345,7 +345,17 @@ function MonitorPanel({ findings, scanning }: { findings: Finding[]; scanning: b
 // ── Mechanic panel: Fix buttons with preview-before-apply ────────────
 
 const AUTO_TIER_TYPES = new Set(['open_past_close']);
-const NO_AUTO_FIX_TYPES = new Set(['never_resolved', 'negative_balance', 'voided_empty_duplicate', 'pending_deposit', 'slow_withdrawal']);
+// negative_balance / pending_deposit / slow_withdrawal genuinely have
+// no safe auto-fixer yet (gateway/ledger investigation needed).
+// never_resolved and voided_empty_duplicate get their OWN dedicated
+// actions below instead of the generic Preview/Apply flow — neither
+// has a single deterministic fix (never_resolved has no oracle source
+// of truth to query; voided_empty_duplicate needs a human to look at
+// both market rows before picking an outcome), so they're excluded
+// from the "no auto-fix" bucket but ALSO excluded from the generic
+// Preview button.
+const NO_AUTO_FIX_TYPES = new Set(['negative_balance', 'pending_deposit', 'slow_withdrawal']);
+const SPECIAL_ACTION_TYPES = new Set(['never_resolved', 'voided_empty_duplicate']);
 
 function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: () => void }) {
   const { toast } = useToast();
@@ -353,6 +363,8 @@ function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: ()
   const [busyFingerprint, setBusyFingerprint] = useState<string | null>(null);
   const [applyConfirmed, setApplyConfirmed] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
+  const [investigate, setInvestigate] = useState<{ finding: Finding; data: any } | null>(null);
+  const [investigateLoading, setInvestigateLoading] = useState(false);
 
   const previewFix = async (finding: Finding) => {
     setBusyFingerprint(finding.fingerprint);
@@ -398,6 +410,63 @@ function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: ()
     } finally {
       setIsApplying(false);
     }
+  };
+
+  const openInvestigate = async (finding: Finding) => {
+    setInvestigateLoading(true);
+    setInvestigate({ finding, data: null });
+    try {
+      const marketId = finding.affectedIds.marketId;
+      const r = await fetch(`/api/mechanic/investigate-duplicate?marketId=${marketId}`, {
+        credentials: 'include',
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      setInvestigate({ finding, data });
+    } catch (e: any) {
+      toast({ title: 'Investigate failed', description: e.message, variant: 'destructive' });
+      setInvestigate(null);
+    } finally {
+      setInvestigateLoading(false);
+    }
+  };
+
+  const dismissFinding = async (finding: Finding, note?: string) => {
+    try {
+      const r = await fetch('/api/mechanic/acknowledge-alert', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ fingerprint: finding.fingerprint, note }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      toast({ title: 'Dismissed', description: 'This won’t reappear even though the underlying condition is unchanged.' });
+      setInvestigate(null);
+      onFixed();
+    } catch (e: any) {
+      toast({ title: 'Dismiss failed', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  // Investigate modal's "re-resolve at this outcome" hands off to the
+  // SAME preview/apply flow used everywhere else — construct a
+  // synthetic Finding pointing re-resolve-voided-market at the market
+  // being investigated, with the admin-picked outcome.
+  const previewReResolve = (marketId: number, outcomeIndex: number) => {
+    const synthetic: Finding = {
+      fingerprint: `wrong_void:${marketId}`,
+      category: 'settlement',
+      issueType: 'wrong_void',
+      severity: 'critical',
+      tier: 'approval_required',
+      title: `Re-resolve market #${marketId} at outcome ${outcomeIndex}`,
+      detail: 'Manually chosen outcome from the duplicate-market investigation.',
+      affectedIds: { marketId },
+      meta: { attemptedOutcome: outcomeIndex },
+    };
+    setInvestigate(null);
+    previewFix(synthetic);
   };
 
   if (findings.length === 0) {
@@ -448,7 +517,30 @@ function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: ()
                     <p className="text-xs font-medium">{f.title}</p>
                     <p className="text-[11px] text-muted-foreground">{f.detail}</p>
                     <div className="flex items-center gap-2 pt-1">
-                      {noAutoFix ? (
+                      {f.issueType === 'never_resolved' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1.5"
+                          onClick={() => window.open(`/admin/resolve?marketId=${f.affectedIds.marketId}`, '_blank')}
+                        >
+                          <Wrench className="w-3 h-3" />
+                          Resolve now
+                        </Button>
+                      ) : f.issueType === 'voided_empty_duplicate' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1.5"
+                          onClick={() => openInvestigate(f)}
+                          disabled={investigateLoading && investigate?.finding.fingerprint === f.fingerprint}
+                        >
+                          {investigateLoading && investigate?.finding.fingerprint === f.fingerprint
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <Eye className="w-3 h-3" />}
+                          Investigate
+                        </Button>
+                      ) : noAutoFix ? (
                         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground italic">
                           <ShieldAlert className="w-3 h-3" />
                           Manual investigation only — no auto-fix registered.
@@ -539,7 +631,129 @@ function MechanicPanel({ findings, onFixed }: { findings: Finding[]; onFixed: ()
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Investigate dialog — voided_empty_duplicate. Shows both market
+          rows side by side with bet/leg counts so an admin can decide
+          in one screen instead of three manual SQL queries, then either
+          dismisses (nothing wrong) or picks a real outcome to re-resolve
+          the empty-voided market with (handed off to the same preview/
+          apply flow above via previewReResolve). */}
+      <Dialog open={!!investigate} onOpenChange={(v) => { if (!v) setInvestigate(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Investigate duplicate market</DialogTitle>
+            <DialogDescription>{investigate?.finding.title}</DialogDescription>
+          </DialogHeader>
+
+          {investigateLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : investigate?.data ? (
+            <div className="space-y-3">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-3 text-xs">
+                <p className="font-medium text-amber-300 mb-1">Recommendation</p>
+                <p className="text-muted-foreground">{investigate.data.recommendation}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <MarketCompareCard label="Voided-empty (this one)" market={investigate.data.primary} />
+                {(investigate.data.duplicates || []).map((d: any) => (
+                  <MarketCompareCard key={d.id} label={`Duplicate #${d.id}`} market={d} />
+                ))}
+              </div>
+
+              <ReResolvePicker
+                market={investigate.data.primary}
+                onPick={(outcomeIndex) => previewReResolve(investigate.data.primary.id, outcomeIndex)}
+              />
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInvestigate(null)}>Close</Button>
+            {investigate && (
+              <Button
+                variant="outline"
+                className="border-emerald-500/30 text-emerald-300 gap-1.5"
+                onClick={() => dismissFinding(investigate.finding, 'Reviewed via /ops investigate — no action needed.')}
+              >
+                <CheckCircle2 className="w-3 h-3" />
+                Dismiss — nothing wrong
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+function MarketCompareCard({ label, market }: { label: string; market: any }) {
+  const s = market.stats || {};
+  const hasActivity = (s.won || 0) + (s.lost || 0) + (s.active || 0) + (s.refunded || 0) + (s.legs || 0) > 0;
+  return (
+    <div className={cn('border rounded-lg p-3 text-xs space-y-1.5', hasActivity ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-muted')}>
+      <div className="flex items-center justify-between">
+        <span className="font-medium">{label}</span>
+        <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">{market.status}</Badge>
+      </div>
+      <p className="text-muted-foreground line-clamp-2">{market.question}</p>
+      <div className="grid grid-cols-5 gap-1 pt-1">
+        <DuplicateStat label="Won" value={s.won} />
+        <DuplicateStat label="Lost" value={s.lost} />
+        <DuplicateStat label="Active" value={s.active} />
+        <DuplicateStat label="Refund" value={s.refunded} />
+        <DuplicateStat label="Legs" value={s.legs} />
+      </div>
+      {market.resolved_outcome !== null && market.resolved_outcome !== undefined && (
+        <p className="text-[10px] text-muted-foreground">Resolved outcome: {market.resolved_outcome}</p>
+      )}
+    </div>
+  );
+}
+
+function DuplicateStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-muted/20 rounded p-1 text-center">
+      <p className="text-[8px] uppercase text-muted-foreground">{label}</p>
+      <p className="text-[10px] font-semibold tabular-nums">{value ?? 0}</p>
+    </div>
+  );
+}
+
+function ReResolvePicker({ market, onPick }: { market: any; onPick: (outcomeIndex: number) => void }) {
+  const [selected, setSelected] = useState<number | null>(null);
+  const options: string[] = market?.options || [];
+  if (options.length === 0) return null;
+  return (
+    <div className="border rounded-lg p-3 space-y-2">
+      <p className="text-xs font-medium">If this market&#39;s bets were wrongly voided, pick the real outcome:</p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((opt, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setSelected(i)}
+            className={cn(
+              'text-xs px-2.5 py-1.5 rounded-md border transition-colors',
+              selected === i ? 'border-emerald-500 bg-emerald-500/10' : 'border-muted hover:bg-muted/40',
+            )}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      <Button
+        size="sm"
+        className="h-7 text-xs gap-1.5"
+        disabled={selected === null}
+        onClick={() => selected !== null && onPick(selected)}
+      >
+        <Eye className="w-3 h-3" />
+        Preview re-resolve at this outcome
+      </Button>
+    </div>
   );
 }
 

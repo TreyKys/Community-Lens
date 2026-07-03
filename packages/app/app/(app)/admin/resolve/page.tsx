@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +28,21 @@ type MarketRow = {
   distribution: { option: string; count: number; stake: number; percentage: number }[];
 };
 
+// useSearchParams requires a Suspense boundary above it in the App
+// Router, even on a fully client-rendered page — the default export
+// just wraps the real page so a deep link (e.g. from /ops's "Resolve
+// now" action on a never_resolved finding) can pass ?marketId=X.
 export default function ResolvePage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+      <ResolvePageInner />
+    </Suspense>
+  );
+}
+
+function ResolvePageInner() {
+  const searchParams = useSearchParams();
+  const deepLinkMarketId = searchParams.get('marketId');
   const [markets, setMarkets] = useState<MarketRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmMarket, setConfirmMarket] = useState<MarketRow | null>(null);
@@ -35,6 +50,7 @@ export default function ResolvePage() {
   // rulings need more than one marked correct. Empty until the admin picks.
   const [confirmOutcomes, setConfirmOutcomes] = useState<number[]>([]);
   const [isResolving, setIsResolving] = useState(false);
+  const [deepLinkHandled, setDeepLinkHandled] = useState(false);
   const { toast } = useToast();
 
   const fetchMarkets = useCallback(async () => {
@@ -87,6 +103,28 @@ export default function ResolvePage() {
   useEffect(() => {
     fetchMarkets();
   }, [fetchMarkets]);
+
+  // Deep link from /ops's "Resolve now" action on a never_resolved
+  // finding — once the market list loads, auto-open the confirm dialog
+  // for the requested market so the admin lands directly on the
+  // outcome picker instead of having to search the table. Only fires
+  // once per page load (deepLinkHandled) so closing the dialog doesn't
+  // immediately reopen it.
+  useEffect(() => {
+    if (deepLinkHandled || !deepLinkMarketId || markets.length === 0) return;
+    const target = markets.find(m => m.id === Number(deepLinkMarketId));
+    if (target) {
+      setConfirmMarket(target);
+      setConfirmOutcomes([]);
+    } else {
+      toast({
+        title: `Market #${deepLinkMarketId} not found`,
+        description: 'It may already be resolved, or is not open/locked.',
+        variant: 'destructive',
+      });
+    }
+    setDeepLinkHandled(true);
+  }, [deepLinkHandled, deepLinkMarketId, markets, toast]);
 
   const performResolve = async (market: MarketRow, outcomeIndices: number[]) => {
     if (market.status === 'open') {

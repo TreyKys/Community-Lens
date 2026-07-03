@@ -443,25 +443,74 @@ export async function runMechanicScan(
 
   // Upsert findings into system_alerts by fingerprint — first seen /
   // last seen / occurrence_count get maintained automatically.
+  //
+  // IMPORTANT: a fingerprint that's already 'admin_resolved' means a
+  // human explicitly reviewed it and dismissed it (e.g. two market
+  // rows are permanent, harmless duplicates — the underlying condition
+  // will never go away on its own). Re-detecting the same condition on
+  // the next scan must NOT silently flip that back to 'open' — that
+  // would undo the admin's decision within one scan interval and make
+  // "acknowledge" pointless for anything that isn't naturally self-
+  // resolving. Only fingerprints NOT already admin_resolved get their
+  // status reset to 'open'; admin_resolved rows just get last_seen_at
+  // bumped so they don't look stale, but keep their resolved state.
+  //
+  // Same set is used below to filter dismissed findings OUT of what
+  // this function returns — otherwise /ops would keep showing an item
+  // right after an admin dismissed it, since the underlying DB
+  // condition (e.g. the duplicate market rows) never actually changes
+  // and the scanner would just re-detect it every 30s regardless of
+  // system_alerts state.
+  let adminResolvedSet = new Set<string>();
   if (findings.length > 0) {
-    const upserts = findings.map(f => ({
-      severity: f.severity,
-      category: f.category,
-      title: f.title,
-      message: f.detail,
-      fingerprint: f.fingerprint,
-      affected_ids: f.affectedIds as any,
-      status: 'open',
-      last_seen_at: new Date().toISOString(),
-    }));
-    await db.from('system_alerts').upsert(upserts as any, {
-      onConflict: 'fingerprint',
-      ignoreDuplicates: false,
-    });
+    const allFingerprints = findings.map(f => f.fingerprint);
+    const { data: existing } = await db
+      .from('system_alerts')
+      .select('fingerprint, status')
+      .in('fingerprint', allFingerprints);
+    adminResolvedSet = new Set((existing || []).filter(e => e.status === 'admin_resolved').map(e => e.fingerprint));
+
+    const toReopen = findings.filter(f => !adminResolvedSet.has(f.fingerprint));
+    const toBumpOnly = findings.filter(f => adminResolvedSet.has(f.fingerprint));
+
+    if (toReopen.length > 0) {
+      const upserts = toReopen.map(f => ({
+        severity: f.severity,
+        category: f.category,
+        title: f.title,
+        message: f.detail,
+        fingerprint: f.fingerprint,
+        affected_ids: f.affectedIds as any,
+        status: 'open',
+        last_seen_at: new Date().toISOString(),
+      }));
+      await db.from('system_alerts').upsert(upserts as any, {
+        onConflict: 'fingerprint',
+        ignoreDuplicates: false,
+      });
+    }
+    if (toBumpOnly.length > 0) {
+      await db.from('system_alerts')
+        .update({ last_seen_at: new Date().toISOString() })
+        .in('fingerprint', toBumpOnly.map(f => f.fingerprint));
+    }
     // Bump occurrence_count on rows that were already there.
     // Postgres UPSERT can't add-1 in supabase-js — do it as a separate
     // update on the affected fingerprints in one shot.
-    await db.rpc('bump_alert_occurrences' as any, { p_fingerprints: findings.map(f => f.fingerprint) }).then(() => undefined, () => undefined);
+    await db.rpc('bump_alert_occurrences' as any, { p_fingerprints: allFingerprints }).then(() => undefined, () => undefined);
+  }
+
+  // Drop dismissed findings from what we return + count. They're still
+  // "detected" internally (system_alerts.last_seen_at just got bumped
+  // above) but an admin already reviewed them — they shouldn't clutter
+  // the live queue again.
+  if (adminResolvedSet.size > 0) {
+    for (let i = findings.length - 1; i >= 0; i--) {
+      if (adminResolvedSet.has(findings[i].fingerprint)) {
+        countsByCategory[findings[i].category] -= 1;
+        findings.splice(i, 1);
+      }
+    }
   }
 
   // Auto-resolve alerts whose fingerprints are NO LONGER in the scan.
