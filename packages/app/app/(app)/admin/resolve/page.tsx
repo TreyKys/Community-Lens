@@ -6,9 +6,10 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, CheckCircle2, ChevronLeft, AlertTriangle, Check } from 'lucide-react';
+import { Loader2, CheckCircle2, ChevronLeft, AlertTriangle, Check, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { DataTable, Column } from '@/components/admin/DataTable';
 
@@ -52,6 +53,40 @@ function ResolvePageInner() {
   const [isResolving, setIsResolving] = useState(false);
   const [deepLinkHandled, setDeepLinkHandled] = useState(false);
   const { toast } = useToast();
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+  const [adminInput, setAdminInput] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/admin/auth')
+      .then((res) => { if (res.ok) setIsAdmin(true); })
+      .finally(() => setIsChecking(false));
+  }, []);
+
+  const handleAdminLogin = async () => {
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret: adminInput }),
+      });
+      if (res.ok) {
+        setIsAdmin(true);
+        setAdminInput('');
+      } else {
+        setLoginError('Invalid admin secret');
+      }
+    } catch {
+      setLoginError('Network error');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const fetchMarkets = useCallback(async () => {
     setIsLoading(true);
@@ -101,8 +136,9 @@ function ResolvePageInner() {
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchMarkets();
-  }, [fetchMarkets]);
+  }, [fetchMarkets, isAdmin]);
 
   // Deep link from /ops's "Resolve now" action on a never_resolved
   // finding — once the market list loads, auto-open the confirm dialog
@@ -290,6 +326,31 @@ function ResolvePageInner() {
         .filter((_, i) => !confirmOutcomes.includes(i))
         .reduce((s, d) => s + d.stake, 0)
     : 0;
+
+  if (isChecking) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Card className="w-80">
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4" /> Admin Access</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              type="password"
+              placeholder="Admin secret"
+              value={adminInput}
+              onChange={e => setAdminInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdminLogin()}
+            />
+            {loginError && <p className="text-xs text-destructive">{loginError}</p>}
+            <Button className="w-full" onClick={handleAdminLogin} disabled={isLoggingIn || !adminInput}>
+              {isLoggingIn ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Verifying…</> : 'Enter'}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
