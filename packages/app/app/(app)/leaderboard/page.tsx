@@ -5,15 +5,27 @@ import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Trophy, Crown, Sparkles, Flame, Loader2, AlertCircle } from 'lucide-react';
+import { Trophy, Crown, Sparkles, Clock, Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pollWhileVisible } from '@/lib/pollWhileVisible';
 
 // Public leaderboard — flipped live from the previous waitlist
 // teaser. Daily / Weekly / All-time tabs, top-3 podium, then a full
-// list of ranked predictors. Driven by /api/leaderboard (service-role
-// reads of leaderboard_points), cached 60s at the edge so a Twitter
-// burst won't melt the RPC.
+// list of ranked predictors. Driven by /api/leaderboard, which serves
+// whatever an admin last published (POST /api/admin/leaderboard/publish)
+// rather than recomputing live — the admin controls the cadence.
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return 'just now';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 interface Row {
   rank: number;
@@ -119,26 +131,33 @@ function ListRow({ row }: { row: Row }) {
 export default function LeaderboardPage() {
   const [windowKey, setWindowKey] = useState<WindowKey>('weekly');
   const [rows, setRows] = useState<Row[]>([]);
+  const [publishedAt, setPublishedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Reload on tab change + 60s visibility-gated poll so a phone left
-  // open during a Sunday afternoon doesn't burn battery refetching.
+  // Reload on tab change + a slow visibility-gated poll so a page left
+  // open picks up the next admin publish without a manual refresh.
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
         const res = await fetch(`/api/leaderboard?window=${windowKey}&limit=50`);
         const data = await res.json();
-        if (alive) setRows(data.rows || []);
+        if (alive) {
+          setRows(data.rows || []);
+          setPublishedAt(data.publishedAt ?? null);
+        }
       } catch {
-        if (alive) setRows([]);
+        if (alive) {
+          setRows([]);
+          setPublishedAt(null);
+        }
       } finally {
         if (alive) setIsLoading(false);
       }
     };
     setIsLoading(true);
     load();
-    const cleanup = pollWhileVisible(load, 60_000);
+    const cleanup = pollWhileVisible(load, 120_000);
     return () => { alive = false; cleanup(); };
   }, [windowKey]);
 
@@ -154,14 +173,14 @@ export default function LeaderboardPage() {
 
       <div className="relative z-10 max-w-3xl mx-auto p-4 md:p-8 space-y-5 pb-24">
         <div className="text-center space-y-2 pt-2">
-          <Badge className="bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-3 py-0.5">
-            <Flame className="w-3 h-3 mr-1" /> Live now
+          <Badge className="bg-amber-500/15 text-amber-300 border border-amber-500/30 px-3 py-0.5">
+            <Clock className="w-3 h-3 mr-1" /> {publishedAt ? `Updated ${timeAgo(publishedAt)}` : 'Not yet published'}
           </Badge>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
             The <span className="text-amber-400">Leaderboard</span>
           </h1>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
-            The country&rsquo;s sharpest forecasters, ranked by points. Updates every Monday 00:00 WAT.
+            The country&rsquo;s sharpest forecasters, ranked by points. Refreshed periodically, not live.
           </p>
         </div>
 
@@ -182,9 +201,13 @@ export default function LeaderboardPage() {
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <AlertCircle className="w-10 h-10 text-muted-foreground/40 mb-3" />
                   <p className="text-sm text-muted-foreground">
-                    No-one&rsquo;s on the board {WINDOW_LABEL[k].toLowerCase()} yet.
+                    {publishedAt
+                      ? <>No-one&rsquo;s on the board {WINDOW_LABEL[k].toLowerCase()} yet.</>
+                      : <>The board hasn&rsquo;t been published yet.</>}
                   </p>
-                  <p className="text-[11px] text-muted-foreground/70 mt-1">Be the first to land a correct call.</p>
+                  <p className="text-[11px] text-muted-foreground/70 mt-1">
+                    {publishedAt ? 'Be the first to land a correct call.' : 'Check back soon.'}
+                  </p>
                 </div>
               ) : (
                 <>

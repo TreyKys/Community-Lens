@@ -352,10 +352,36 @@ function CohortActivity({ cohorts, fallback }: { cohorts?: any; fallback: any })
 // predictors by points (volume + win + referral), with Daily / Weekly /
 // All-Time windows and the prize structure advertised on the teaser. The
 // data (points_log) has accrued since launch, so this is real, not mock.
+function timeAgoShort(iso: string | null | undefined): string {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return 'just now';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function LeaderboardPreviewPanel() {
   const [window, setWindow] = useState<'daily' | 'weekly' | 'alltime'>('weekly');
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [publishedAt, setPublishedAt] = useState<Record<string, string | null>>({});
+  const [publishing, setPublishing] = useState<'all' | 'one' | null>(null);
+  const { toast } = useToast();
+
+  const loadPublishStatus = useCallback(() => {
+    fetch('/api/admin/leaderboard/publish', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => {
+        const map: Record<string, string | null> = {};
+        for (const s of d.snapshots || []) map[s.window] = s.published_at;
+        setPublishedAt(map);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -367,6 +393,31 @@ function LeaderboardPreviewPanel() {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [window]);
+
+  useEffect(() => { loadPublishStatus(); }, [loadPublishStatus]);
+
+  const publish = async (target?: 'daily' | 'weekly' | 'alltime') => {
+    setPublishing(target ? 'one' : 'all');
+    try {
+      const res = await fetch('/api/admin/leaderboard/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(target ? { window: target } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Publish failed');
+      toast({
+        title: target ? `Published ${target}` : 'Published all windows',
+        description: 'The public leaderboard now shows this snapshot.',
+      });
+      loadPublishStatus();
+    } catch (e: any) {
+      toast({ title: 'Publish failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setPublishing(null);
+    }
+  };
 
   const f = (n: number) => `₦${Math.round(n || 0).toLocaleString()}`;
 
@@ -391,27 +442,43 @@ function LeaderboardPreviewPanel() {
         <CardTitle className="text-base flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400" />
           Top 3 Predictors
-          <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-300">PRE-LAUNCH</Badge>
+          <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-300">ADMIN ONLY — LIVE</Badge>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Live ranking from real data — exactly what users will see at rollout.
+          This is the live board. The public leaderboard only shows what you publish below —
+          publish this window to push it live to users.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex gap-1.5">
-          {(['daily', 'weekly', 'alltime'] as const).map(w => (
-            <button
-              key={w}
-              onClick={() => setWindow(w)}
-              className={cn(
-                'px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors',
-                window === w ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                             : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
-              )}
-            >
-              {w === 'alltime' ? 'All-Time' : w}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-1.5">
+            {(['daily', 'weekly', 'alltime'] as const).map(w => (
+              <button
+                key={w}
+                onClick={() => setWindow(w)}
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors',
+                  window === w ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                               : 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+                )}
+              >
+                {w === 'alltime' ? 'All-Time' : w}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              Public {window}: {timeAgoShort(publishedAt[window])}
+            </span>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!!publishing} onClick={() => publish(window)}>
+              {publishing === 'one' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
+              Publish {window}
+            </Button>
+            <Button size="sm" className="h-7 text-xs bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30" disabled={!!publishing} onClick={() => publish()}>
+              {publishing === 'all' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Upload className="w-3 h-3 mr-1" />}
+              Publish all
+            </Button>
+          </div>
         </div>
 
         {loading ? (
