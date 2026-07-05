@@ -1313,10 +1313,12 @@ function CreateMarketPanel() {
   const [parentMarketId, setParentMarketId] = useState<string>('');
   const [parentOptions, setParentOptions] = useState<Array<{ id: number; question: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // ─── Locked-odds config (Pro tier) ────────────────────────────────
-  // Collapsed by default — admins explicitly opt a market into the
-  // locked-odds engine. Defaults preserve the legacy parimutuel path.
-  const [isLockedOdds, setIsLockedOdds] = useState(false);
+  // ─── Locked-odds config ────────────────────────────────────────────
+  // On by default — every market created going forward is expected to
+  // carry locked odds; parimutuel (unchecking this) is still fully
+  // supported for the rare case that calls for it, and remains the
+  // live fallback path when the reserve is under stress.
+  const [isLockedOdds, setIsLockedOdds] = useState(true);
   const [seedSize, setSeedSize] = useState<string>('10000');
   const [seedProbability, setSeedProbability] = useState<string>('0.5'); // binary YES
   // Per-outcome probabilities for markets with 3+ outcomes. Synced to
@@ -1342,6 +1344,38 @@ function CreateMarketPanel() {
   const [clonedLeagueCode, setClonedLeagueCode] = useState('');
   const [clonedDescription, setClonedDescription] = useState('');
 
+  // Saved market "shapes" for one-click reuse — see market_templates.
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateNameInput, setTemplateNameInput] = useState('');
+  const [showTemplateNameInput, setShowTemplateNameInput] = useState(false);
+
+  const loadTemplates = useCallback(() => {
+    setTemplatesLoading(true);
+    fetch('/api/admin/market-templates', { headers: adminHeaders(), credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setTemplates(d.templates || []))
+      .catch(() => setTemplates([]))
+      .finally(() => setTemplatesLoading(false));
+  }, []);
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
+
+  const deleteTemplate = async (id: number) => {
+    setTemplates(prev => prev.filter(t => t.id !== id));
+    try {
+      const res = await fetch(`/api/admin/market-templates?id=${id}`, {
+        method: 'DELETE',
+        headers: adminHeaders(),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Delete failed');
+    } catch {
+      toast({ title: 'Failed to delete template', variant: 'destructive' });
+      loadTemplates();
+    }
+  };
+
   const updateOption = (idx: number, value: string) => {
     setOptions(prev => prev.map((o, i) => (i === idx ? value : o)));
   };
@@ -1357,13 +1391,15 @@ function CreateMarketPanel() {
   };
   const numOutcomesNow = options.map(o => o.trim()).filter(Boolean).length;
 
-  // Prefill the form from an existing market — "Clone & Edit". Close
-  // time, fixture ID and parent link are deliberately left blank/cleared
-  // since a clone is a new instance (new event, new timeframe); the
-  // locked-odds config is converted back from the stored seed_pool
-  // amounts into probabilities so it round-trips through the same
-  // validation path as a hand-typed one.
-  const applyClone = (m: any) => {
+  // Shared prefill core for both "Clone & Edit" (from a past market row)
+  // and "quick-create from template" (from a saved market_templates
+  // row) — both shapes carry the same field names. Close time, fixture
+  // ID and parent link are deliberately left blank/cleared since both
+  // are starting points for a NEW instance, never a past one's
+  // schedule. Locked-odds config is converted back from the stored
+  // seed_pool amounts into probabilities so it round-trips through the
+  // same validation path as a hand-typed one.
+  const prefillMarketShape = (m: any) => {
     const cleanOptions = Array.isArray(m.options) && m.options.length >= 2 ? m.options as string[] : ['', ''];
     setQuestion(m.question || '');
     setCategory(m.category || 'sports');
@@ -1395,8 +1431,22 @@ function CreateMarketPanel() {
     } else {
       setIsLockedOdds(false);
     }
+  };
 
+  const applyClone = (m: any) => {
+    prefillMarketShape(m);
     toast({ title: `Cloned market #${m.id}`, description: 'Set a new close time (and schedule, if wanted) before creating.' });
+  };
+
+  const applyTemplate = (t: any) => {
+    prefillMarketShape(t);
+    if (t.default_closes_in_hours) {
+      const d = new Date(Date.now() + Number(t.default_closes_in_hours) * 60 * 60 * 1000);
+      // datetime-local input format: YYYY-MM-DDTHH:mm, in local time.
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setClosesAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    }
+    toast({ title: `Loaded template "${t.name}"`, description: 'Review the question and close time before creating.' });
   };
 
   // Re-shape seedProbsMulti when the options count changes so the inputs
@@ -1556,11 +1606,131 @@ function CreateMarketPanel() {
     } finally { setIsSubmitting(false); }
   };
 
+  // Save the current form (minus closesAt/fixtureId/parentMarketId,
+  // same instance-specific fields Clone & Edit clears) as a named,
+  // reusable template. Recomputes the seed pool with the same math
+  // handleCreate uses so the template round-trips through
+  // prefillMarketShape identically to a cloned market.
+  const handleSaveTemplate = async () => {
+    const name = templateNameInput.trim();
+    if (!name) {
+      toast({ title: 'Give the template a name', variant: 'destructive' });
+      return;
+    }
+    const cleanedOptions = options.map(o => o.trim()).filter(Boolean);
+    if (cleanedOptions.length < 2) {
+      toast({ title: 'At least 2 options required', variant: 'destructive' });
+      return;
+    }
+
+    let seedPool: Record<string, number> | null = null;
+    if (isLockedOdds) {
+      const seedSizeNum = Number(seedSize) || 0;
+      if (cleanedOptions.length === 2) {
+        const p = Number(seedProbability) || 0.5;
+        const yes = Math.round(seedSizeNum * p);
+        seedPool = { '0': yes, '1': seedSizeNum - yes };
+      } else {
+        const probs = seedProbsMulti.slice(0, cleanedOptions.length).map(s => Number(s) || 0);
+        const raw = probs.map(p => Math.round(seedSizeNum * p));
+        const drift = seedSizeNum - raw.reduce((a, v) => a + v, 0);
+        raw[0] += drift;
+        seedPool = Object.fromEntries(raw.map((v, i) => [String(i), v]));
+      }
+    }
+
+    setSavingTemplate(true);
+    try {
+      const res = await fetch('/api/admin/market-templates', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({
+          name,
+          question,
+          category,
+          options: cleanedOptions,
+          sport: clonedSport || undefined,
+          homeTeam: clonedHomeTeam || undefined,
+          awayTeam: clonedAwayTeam || undefined,
+          leagueCode: clonedLeagueCode || undefined,
+          description: clonedDescription || undefined,
+          isLockedOdds,
+          seedPool,
+          seedProbability: isLockedOdds && cleanedOptions.length === 2 ? Number(seedProbability) : null,
+          vigPct: isLockedOdds && vigOverride.trim() !== '' ? Number(vigOverride) : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save template');
+      toast({ title: `Template "${name}" saved` });
+      setTemplateNameInput('');
+      setShowTemplateNameInput(false);
+      loadTemplates();
+    } catch (err: any) {
+      toast({ title: 'Failed to save template', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Create Market</CardTitle></CardHeader>
       <CardContent className="space-y-4">
+        {!templatesLoading && templates.length > 0 && (
+          <div className="space-y-1.5 rounded-lg border border-dashed border-muted-foreground/30 p-3">
+            <Label className="text-xs font-medium">Quick-create from a saved template</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {templates.map((t) => (
+                <div key={t.id} className="group relative">
+                  <button
+                    type="button"
+                    onClick={() => applyTemplate(t)}
+                    className="text-xs pl-2.5 pr-6 py-1.5 rounded-md bg-muted/50 hover:bg-muted transition-colors flex items-center gap-1.5"
+                  >
+                    {t.is_locked_odds && <Sparkles className="w-3 h-3 text-amber-400" />}
+                    {t.name}
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete template"
+                    onClick={() => deleteTemplate(t.id)}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <CloneMarketPicker onSelect={applyClone} />
+
+        <div className="flex justify-end">
+          {!showTemplateNameInput ? (
+            <Button type="button" size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setShowTemplateNameInput(true)}>
+              <Copy className="w-3 h-3" /> Save current form as template
+            </Button>
+          ) : (
+            <div className="flex items-center gap-1.5 w-full">
+              <Input
+                placeholder='Template name, e.g. "EPL 1X2"'
+                value={templateNameInput}
+                onChange={e => setTemplateNameInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSaveTemplate()}
+                className="h-8 text-xs"
+              />
+              <Button type="button" size="sm" className="h-8 text-xs shrink-0" disabled={savingTemplate} onClick={handleSaveTemplate}>
+                {savingTemplate ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" className="h-8 text-xs shrink-0" onClick={() => { setShowTemplateNameInput(false); setTemplateNameInput(''); }}>
+                Cancel
+              </Button>
+            </div>
+          )}
+        </div>
 
         <div className="space-y-2">
           <Label>Category</Label>
@@ -1795,6 +1965,288 @@ function CloneMarketPicker({ onSelect }: { onSelect: (m: any) => void }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+// ── Bulk / CSV import ─────────────────────────────────────────────────────
+//
+// For "I already have a spreadsheet of markets" — paste rows, review/edit
+// in a lightweight table (approve-before-submit, same pattern as the AI
+// generator), then submit through the normal /api/admin/market endpoint.
+// A shared locked-odds config (on by default) and an optional shared
+// schedule apply to every approved row, same UX as the AI generator's
+// bulk-submit controls.
+
+const CSV_REQUIRED_HEADERS = ['question', 'category', 'options', 'closesat'];
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      out.push(cur); cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+function parseMarketCsv(text: string): { rows: any[]; error: string | null } {
+  const lines = text.split(/\r\n|\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return { rows: [], error: 'Paste a header row plus at least one data row.' };
+
+  const header = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
+  if (!CSV_REQUIRED_HEADERS.every(h => header.includes(h))) {
+    return { rows: [], error: `Header row must include: question, category, options, closesAt. Got: "${lines[0]}"` };
+  }
+
+  const rows = lines.slice(1).map((line, i) => {
+    const cells = parseCsvLine(line);
+    const r: Record<string, string> = {};
+    header.forEach((h, j) => { r[h] = cells[j] || ''; });
+
+    const options = (r.options || '').split(';').map(o => o.trim()).filter(Boolean);
+    const closesValid = !!r.closesat && !isNaN(new Date(r.closesat).getTime());
+    return {
+      id: `csv_${i}`,
+      question: r.question || '',
+      category: ['sports', 'politics', 'economics', 'entertainment', 'finance'].includes(r.category?.toLowerCase())
+        ? r.category.toLowerCase() : 'sports',
+      sport: r.sport || null,
+      options: options.length >= 2 ? options.slice(0, 4) : ['', ''],
+      closes_at: closesValid ? new Date(r.closesat).toISOString() : '',
+      home_team: r.hometeam || null,
+      away_team: r.awayteam || null,
+      description: r.description || null,
+      approved: options.length >= 2 && closesValid,
+    };
+  });
+
+  return { rows, error: null };
+}
+
+function BulkImportPanel() {
+  const { toast } = useToast();
+  const [csvText, setCsvText] = useState('');
+  const [rows, setRows] = useState<any[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [opensAt, setOpensAt] = useState('');
+  const [lockedOddsEnabled, setLockedOddsEnabled] = useState(true);
+  const [seedSize, setSeedSize] = useState('10000');
+  const [vigOverride, setVigOverride] = useState('');
+
+  const handleParse = () => {
+    const { rows: parsed, error } = parseMarketCsv(csvText);
+    if (error) {
+      toast({ title: 'Could not parse', description: error, variant: 'destructive' });
+      return;
+    }
+    setRows(parsed);
+    const invalid = parsed.filter(r => !r.approved).length;
+    toast({
+      title: `${parsed.length} row(s) parsed`,
+      description: invalid > 0 ? `${invalid} row(s) need a fix (bad options or close time) before they'll submit.` : 'Review, then submit.',
+    });
+  };
+
+  const updateRow = (id: string, field: string, value: any) => {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+  const removeRow = (id: string) => setRows(prev => prev.filter(r => r.id !== id));
+  const approvedCount = rows.filter(r => r.approved).length;
+
+  const handleSubmit = async () => {
+    const approved = rows.filter(r => r.approved && r.options.filter(Boolean).length >= 2 && r.closes_at);
+    if (approved.length === 0) {
+      toast({ title: 'No valid approved rows to submit', variant: 'destructive' });
+      return;
+    }
+    if (scheduleEnabled && !opensAt) {
+      toast({ title: 'Pick an open time, or turn scheduling off', variant: 'destructive' });
+      return;
+    }
+    if (lockedOddsEnabled && !(Number(seedSize) > 0)) {
+      toast({ title: 'Enter a valid seed size, or turn locked odds off', variant: 'destructive' });
+      return;
+    }
+    const opensAtIso = scheduleEnabled && opensAt ? new Date(opensAt).toISOString() : null;
+    setIsSubmitting(true);
+    let created = 0;
+    let failed = 0;
+    for (const row of approved) {
+      try {
+        const res = await fetch('/api/admin/market', {
+          method: 'POST',
+          headers: adminHeaders(),
+          body: JSON.stringify({
+            question: row.question,
+            category: row.category,
+            sport: row.sport,
+            options: row.options.filter(Boolean),
+            closesAt: row.closes_at,
+            homeTeam: row.home_team,
+            awayTeam: row.away_team,
+            description: row.description,
+            opensAt: opensAtIso,
+            isLockedOdds: lockedOddsEnabled,
+            seedSizeTngn: lockedOddsEnabled ? Number(seedSize) : undefined,
+            seedProbability: lockedOddsEnabled && row.options.filter(Boolean).length === 2 ? 0.5 : null,
+            vigPct: lockedOddsEnabled && vigOverride.trim() !== '' ? Number(vigOverride) : null,
+          }),
+        });
+        if (res.ok) { created++; } else { failed++; }
+      } catch { failed++; }
+    }
+    setRows(prev => prev.filter(r => !r.approved));
+    toast({
+      title: `${created} market${created !== 1 ? 's' : ''} ${opensAtIso ? 'scheduled' : 'created'}${failed > 0 ? `, ${failed} failed` : ''}`,
+      description: opensAtIso ? `Opens automatically ${new Date(opensAtIso).toLocaleString()}.` : undefined,
+    });
+    setIsSubmitting(false);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Upload className="w-4 h-4 text-cyan-400" />
+          Bulk Import (paste / CSV)
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Header row required: <code className="bg-muted/40 px-1 py-0.5 rounded text-[10px]">question,category,options,closesAt</code>{' '}
+          (optional: <code className="bg-muted/40 px-1 py-0.5 rounded text-[10px]">sport,homeTeam,awayTeam,description</code>).
+          Separate options with a semicolon, e.g. <code className="bg-muted/40 px-1 py-0.5 rounded text-[10px]">Home Win;Draw;Away Win</code>.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <textarea
+          className="w-full h-32 bg-muted/30 border border-border rounded-lg p-3 text-sm font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+          placeholder={'question,category,options,closesAt\n"Will Arsenal beat Chelsea?",sports,Yes;No,2026-08-01T15:00:00Z'}
+          value={csvText}
+          onChange={e => setCsvText(e.target.value)}
+        />
+        <Button onClick={handleParse} disabled={!csvText.trim()} variant="outline" size="sm" className="gap-2">
+          Parse rows
+        </Button>
+
+        {rows.length > 0 && (
+          <>
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/50">
+              <button
+                type="button"
+                onClick={() => setLockedOddsEnabled(v => !v)}
+                className={cn(
+                  'text-xs px-2 py-1 rounded-md border flex items-center gap-1.5 transition-colors',
+                  lockedOddsEnabled ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-border text-muted-foreground hover:bg-muted/30',
+                )}
+              >
+                <Sparkles className="w-3 h-3" /> Locked odds for all approved
+              </button>
+              {lockedOddsEnabled && (
+                <>
+                  <Input type="number" placeholder="Seed size ₦" value={seedSize} onChange={e => setSeedSize(e.target.value)} className="h-7 text-xs w-32" />
+                  <Input type="number" step="0.01" placeholder="Vig (default)" value={vigOverride} onChange={e => setVigOverride(e.target.value)} className="h-7 text-xs w-28" />
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setScheduleEnabled(v => !v)}
+                className={cn(
+                  'text-xs px-2 py-1 rounded-md border flex items-center gap-1.5 transition-colors',
+                  scheduleEnabled ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : 'border-border text-muted-foreground hover:bg-muted/30',
+                )}
+              >
+                <CalendarClock className="w-3 h-3" /> Schedule all for later
+              </button>
+              {scheduleEnabled && (
+                <Input type="datetime-local" value={opensAt} onChange={e => setOpensAt(e.target.value)} className="h-7 text-xs w-56" />
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+              {rows.map(row => (
+                <div
+                  key={row.id}
+                  className={cn(
+                    'border rounded-lg p-3 space-y-2',
+                    row.approved ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5',
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={row.approved}
+                      onChange={e => updateRow(row.id, 'approved', e.target.checked)}
+                      className="mt-1 w-4 h-4 cursor-pointer accent-emerald-500"
+                    />
+                    <input
+                      type="text"
+                      value={row.question}
+                      onChange={e => updateRow(row.id, 'question', e.target.value)}
+                      placeholder="Question"
+                      className="flex-1 bg-transparent text-sm font-medium border-b border-transparent hover:border-border focus:border-primary focus:outline-none pb-0.5"
+                    />
+                    <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => removeRow(row.id)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 pl-6">
+                    <Input
+                      value={row.options.join('; ')}
+                      onChange={e => updateRow(row.id, 'options', e.target.value.split(';').map((o: string) => o.trim()).filter(Boolean))}
+                      placeholder="Option A; Option B"
+                      className="h-7 text-xs"
+                    />
+                    <Select value={row.category} onValueChange={(v) => updateRow(row.id, 'category', v)}>
+                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="sports">Sports</SelectItem>
+                        <SelectItem value="politics">Politics</SelectItem>
+                        <SelectItem value="economics">Economics</SelectItem>
+                        <SelectItem value="entertainment">Entertainment</SelectItem>
+                        <SelectItem value="finance">Finance / Crypto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="datetime-local"
+                      value={row.closes_at ? row.closes_at.slice(0, 16) : ''}
+                      onChange={e => updateRow(row.id, 'closes_at', e.target.value ? new Date(e.target.value).toISOString() : '')}
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                  {!row.approved && (
+                    <p className="text-[10px] text-red-300 pl-6">Needs 2+ options and a valid close time before it can submit.</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting || approvedCount === 0}
+              className="w-full gap-2 bg-emerald-600 hover:bg-emerald-500"
+            >
+              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Submit {approvedCount} Approved
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -3635,6 +4087,14 @@ function AIMarketGenerator() {
   // chosen future time instead of the instant they're submitted.
   const [bulkScheduleEnabled, setBulkScheduleEnabled] = useState(false);
   const [bulkOpensAt, setBulkOpensAt] = useState('');
+  // Locked odds on by default for AI-generated markets too — matches
+  // every other creation surface. A shared seed size + vig applies to
+  // every approved draft; binary drafts seed at an even 0.5 (no natural
+  // skew to infer from a generated question) — use Clone & Edit
+  // afterward on any specific one that needs a deliberate tilt.
+  const [bulkLockedOddsEnabled, setBulkLockedOddsEnabled] = useState(true);
+  const [bulkSeedSize, setBulkSeedSize] = useState('10000');
+  const [bulkVigOverride, setBulkVigOverride] = useState('');
 
   // Load eligible parent markets once so each draft can opt to attach itself
   // as a sub-market on submit.
@@ -3706,6 +4166,10 @@ function AIMarketGenerator() {
       toast({ title: 'Pick an open time, or turn scheduling off', variant: 'destructive' });
       return;
     }
+    if (bulkLockedOddsEnabled && !(Number(bulkSeedSize) > 0)) {
+      toast({ title: 'Enter a valid seed size, or turn locked odds off', variant: 'destructive' });
+      return;
+    }
     const opensAtIso = bulkScheduleEnabled && bulkOpensAt ? new Date(bulkOpensAt).toISOString() : null;
     setIsSubmitting(true);
     let created = 0;
@@ -3727,6 +4191,15 @@ function AIMarketGenerator() {
             description: draft.description,
             parentMarketId: draft.parent_market_id || null,
             opensAt: opensAtIso,
+            isLockedOdds: bulkLockedOddsEnabled,
+            seedSizeTngn: bulkLockedOddsEnabled ? Number(bulkSeedSize) : undefined,
+            // Binary drafts need an explicit seed probability — no natural
+            // skew to infer from a generated question, so seed even and
+            // let the admin tilt specific ones later via Clone & Edit.
+            // 3+ option drafts fall through to buildSeedPool's own
+            // uniform-split fallback server-side.
+            seedProbability: bulkLockedOddsEnabled && draft.options.length === 2 ? 0.5 : null,
+            vigPct: bulkLockedOddsEnabled && bulkVigOverride.trim() !== '' ? Number(bulkVigOverride) : null,
           }),
         });
         if (res.ok) { created++; } else { failed++; }
@@ -3830,6 +4303,41 @@ function AIMarketGenerator() {
                   onChange={e => setBulkOpensAt(e.target.value)}
                   className="h-7 text-xs w-56"
                 />
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBulkLockedOddsEnabled(v => !v)}
+                className={cn(
+                  'text-xs px-2 py-1 rounded-md border flex items-center gap-1.5 transition-colors',
+                  bulkLockedOddsEnabled ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-border text-muted-foreground hover:bg-muted/30',
+                )}
+              >
+                <Sparkles className="w-3 h-3" />
+                Locked odds for all approved
+              </button>
+              {bulkLockedOddsEnabled && (
+                <>
+                  <Input
+                    type="number"
+                    placeholder="Seed size ₦"
+                    value={bulkSeedSize}
+                    onChange={e => setBulkSeedSize(e.target.value)}
+                    className="h-7 text-xs w-32"
+                  />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="Vig (default)"
+                    value={bulkVigOverride}
+                    onChange={e => setBulkVigOverride(e.target.value)}
+                    className="h-7 text-xs w-28"
+                  />
+                  <span className="text-[10px] text-muted-foreground">
+                    Binary drafts seed at 0.50 · 3+ options split evenly — adjust specific ones after via Clone &amp; Edit.
+                  </span>
+                </>
               )}
             </div>
           </CardHeader>
@@ -4862,6 +5370,7 @@ export default function AdminPage() {
           <div className="space-y-6">
             <OddsCalculatorPanel />
             <CreateMarketPanel />
+            <BulkImportPanel />
           </div>
         </TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
