@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       title, question, category, options, closesAt,
       parentMarketId, fixtureId, isJackpotEligible,
       sport, homeTeam, awayTeam, leagueCode, description,
+      opensAt,           // optional — schedule the market to open later
       // Locked-odds config (all optional; absence keeps the legacy
       // parimutuel default of is_locked_odds = false).
       isLockedOdds,
@@ -161,6 +162,26 @@ export async function POST(request: Request) {
       };
     }
 
+    // Scheduling: if opensAt is set and is genuinely in the future, the
+    // market goes in as 'scheduled' instead of 'open' — invisible to
+    // every public list query until /api/markets/open-scheduled (cron,
+    // every 5 min) flips it. published_at stays null until that flip so
+    // the New/Trending feed can sort by "went live", not "was authored".
+    let status = 'open';
+    let opensAtIso: string | null = null;
+    let publishedAtIso: string | null = new Date().toISOString();
+    if (opensAt) {
+      const parsedOpensAt = new Date(opensAt);
+      if (isNaN(parsedOpensAt.getTime())) {
+        return NextResponse.json({ error: 'Invalid opensAt' }, { status: 400 });
+      }
+      if (parsedOpensAt.getTime() > Date.now()) {
+        status = 'scheduled';
+        opensAtIso = parsedOpensAt.toISOString();
+        publishedAtIso = null;
+      }
+    }
+
     const { data: market, error } = await supabaseAdmin
       .from('markets')
       .insert({
@@ -169,7 +190,9 @@ export async function POST(request: Request) {
         category,
         options,
         closes_at: closesAt,
-        status: 'open',
+        status,
+        opens_at: opensAtIso,
+        published_at: publishedAtIso,
         parent_market_id: parentMarketId || null,
         fixture_id: fixtureId || null,
         is_jackpot_eligible: isJackpotEligible || false,
@@ -182,7 +205,7 @@ export async function POST(request: Request) {
         created_at: new Date().toISOString(),
         ...lockedFields,
       })
-      .select('id, title, question, category, closes_at, status, sport, is_locked_odds, seed_pool, vig_pct')
+      .select('id, title, question, category, closes_at, status, opens_at, sport, is_locked_odds, seed_pool, vig_pct')
       .single();
 
     if (error) {

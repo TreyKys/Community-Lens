@@ -38,6 +38,7 @@ interface Market {
   is_trending: boolean;
   trending_rank: number | null;
   is_locked_odds?: boolean;
+  published_at?: string | null;
 }
 
 interface MarketCardProps {
@@ -1137,8 +1138,13 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, trending_rank, is_locked_odds')
+        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, trending_rank, is_locked_odds, published_at')
         .not('status', 'eq', 'voided')
+        // Scheduled markets haven't opened yet, and pending_void markets
+        // are mid-investigation — neither is meant to be public, in any
+        // status view including "All".
+        .not('status', 'eq', 'scheduled')
+        .not('status', 'eq', 'pending_void')
         .or(`status.neq.resolved,resolved_at.gte.${cutoff}`);
 
       // Sort. Explicit picks ('closing' / 'pool' from the toolbar) win on
@@ -1147,8 +1153,13 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       // pick, sortParam defaults to 'new' — but on the Trending tab "new"
       // doesn't mean recency, it means the admin-curated manual order, so
       // that default is special-cased to trending_rank instead of id.
-      // Secondary ordering by id keeps ties (all-null rank, or pool=0
-      // pre-launch markets) stable rather than reshuffling on every refetch.
+      // Everywhere else, "new" sorts by published_at — when a market
+      // actually went live — rather than id/created_at, so a market
+      // authored ahead of time via a schedule still lands at the top of
+      // New the moment it opens instead of being buried under whatever
+      // was created (not necessarily opened) in the meantime. Secondary
+      // ordering by id keeps ties (equal published_at, or legacy nulls)
+      // stable rather than reshuffling on every refetch.
       if (sortParam === 'closing') query = query.order('closes_at', { ascending: true });
       else if (sortParam === 'pool') query = query
         .order('total_pool', { ascending: false })
@@ -1156,7 +1167,9 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       else if (category === 'trending') query = query
         .order('trending_rank', { ascending: true, nullsFirst: false })
         .order('id', { ascending: false });
-      else query = query.order('id', { ascending: false });
+      else query = query
+        .order('published_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false });
 
       if (filterExactMarketId !== undefined) {
         query = query.eq('id', filterExactMarketId);

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus, Ban, Search, AlertTriangle, XCircle } from 'lucide-react';
+import { Loader2, Shield, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus, Ban, Search, AlertTriangle, XCircle, Copy, CalendarClock } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
@@ -1326,6 +1326,22 @@ function CreateMarketPanel() {
   const [vigOverride, setVigOverride] = useState<string>(''); // empty = use default per category
   const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
 
+  // Scheduling — leave off (default) to open immediately, same as
+  // today. When on, the market inserts as 'scheduled' and the
+  // open-scheduled cron flips it to 'open' at opensAt.
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [opensAt, setOpensAt] = useState('');
+
+  // Carried through by "Clone & Edit" but not exposed as their own
+  // inputs on this form (the AI generator is the only other writer of
+  // these fields today) — kept so a clone of an AI-generated sports
+  // market doesn't silently lose its sport/team/description on save.
+  const [clonedSport, setClonedSport] = useState('');
+  const [clonedHomeTeam, setClonedHomeTeam] = useState('');
+  const [clonedAwayTeam, setClonedAwayTeam] = useState('');
+  const [clonedLeagueCode, setClonedLeagueCode] = useState('');
+  const [clonedDescription, setClonedDescription] = useState('');
+
   const updateOption = (idx: number, value: string) => {
     setOptions(prev => prev.map((o, i) => (i === idx ? value : o)));
   };
@@ -1340,6 +1356,48 @@ function CreateMarketPanel() {
     setOptions(prev => [...prev, '']);
   };
   const numOutcomesNow = options.map(o => o.trim()).filter(Boolean).length;
+
+  // Prefill the form from an existing market — "Clone & Edit". Close
+  // time, fixture ID and parent link are deliberately left blank/cleared
+  // since a clone is a new instance (new event, new timeframe); the
+  // locked-odds config is converted back from the stored seed_pool
+  // amounts into probabilities so it round-trips through the same
+  // validation path as a hand-typed one.
+  const applyClone = (m: any) => {
+    const cleanOptions = Array.isArray(m.options) && m.options.length >= 2 ? m.options as string[] : ['', ''];
+    setQuestion(m.question || '');
+    setCategory(m.category || 'sports');
+    setOptions(cleanOptions);
+    setClosesAt('');
+    setFixtureId('');
+    setParentMarketId(parentOptions.some(p => p.id === m.parent_market_id) ? String(m.parent_market_id) : '');
+    setClonedSport(m.sport || '');
+    setClonedHomeTeam(m.home_team || '');
+    setClonedAwayTeam(m.away_team || '');
+    setClonedLeagueCode(m.league_code || '');
+    setClonedDescription(m.description || '');
+    setScheduleEnabled(false);
+    setOpensAt('');
+
+    if (m.is_locked_odds) {
+      const pool = m.seed_pool || {};
+      const values = cleanOptions.map((_: string, i: number) => Number(pool[String(i)] || 0));
+      const total = values.reduce((a: number, v: number) => a + v, 0);
+      setIsLockedOdds(true);
+      setSeedSize(total > 0 ? String(Math.round(total)) : '10000');
+      if (cleanOptions.length === 2) {
+        const p = total > 0 ? values[0] / total : Number(m.seed_probability ?? 0.5);
+        setSeedProbability(p.toFixed(2));
+      } else if (total > 0) {
+        setSeedProbsMulti(values.map((v: number) => (v / total).toFixed(2)));
+      }
+      setVigOverride(m.vig_pct != null ? String(m.vig_pct) : '');
+    } else {
+      setIsLockedOdds(false);
+    }
+
+    toast({ title: `Cloned market #${m.id}`, description: 'Set a new close time (and schedule, if wanted) before creating.' });
+  };
 
   // Re-shape seedProbsMulti when the options count changes so the inputs
   // always match the actual outcomes — and regenerate cleanly when the
@@ -1410,6 +1468,11 @@ function CreateMarketPanel() {
       return;
     }
 
+    if (scheduleEnabled && !opensAt) {
+      toast({ title: 'Pick an open time, or turn scheduling off', variant: 'destructive' });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       // For 3+ outcomes, convert per-outcome probabilities into an
@@ -1455,6 +1518,12 @@ function CreateMarketPanel() {
           closesAt: new Date(closesAt).toISOString(),
           fixtureId: fixtureId ? parseInt(fixtureId) : null,
           parentMarketId: parentMarketId ? parseInt(parentMarketId) : null,
+          opensAt: scheduleEnabled && opensAt ? new Date(opensAt).toISOString() : null,
+          sport: clonedSport || undefined,
+          homeTeam: clonedHomeTeam || undefined,
+          awayTeam: clonedAwayTeam || undefined,
+          leagueCode: clonedLeagueCode || undefined,
+          description: clonedDescription || undefined,
           ...lockedPayload,
         }),
       });
@@ -1466,13 +1535,22 @@ function CreateMarketPanel() {
       }
 
       toast({
-        title: `Market created! ID: ${data.market.id}`,
-        description: parentMarketId ? `Linked as sub-market under #${parentMarketId}` : undefined,
+        title: data.market.status === 'scheduled' ? `Market scheduled! ID: ${data.market.id}` : `Market created! ID: ${data.market.id}`,
+        description: data.market.status === 'scheduled'
+          ? `Opens automatically ${new Date(data.market.opens_at).toLocaleString()}.`
+          : (parentMarketId ? `Linked as sub-market under #${parentMarketId}` : undefined),
       });
       setQuestion('');
       setClosesAt('');
       setFixtureId('');
       setParentMarketId('');
+      setScheduleEnabled(false);
+      setOpensAt('');
+      setClonedSport('');
+      setClonedHomeTeam('');
+      setClonedAwayTeam('');
+      setClonedLeagueCode('');
+      setClonedDescription('');
     } catch (err: any) {
       toast({ title: 'Failed to create market', description: err.message, variant: 'destructive' });
     } finally { setIsSubmitting(false); }
@@ -1482,6 +1560,8 @@ function CreateMarketPanel() {
     <Card>
       <CardHeader><CardTitle className="text-base">Create Market</CardTitle></CardHeader>
       <CardContent className="space-y-4">
+        <CloneMarketPicker onSelect={applyClone} />
+
         <div className="space-y-2">
           <Label>Category</Label>
           <Select value={category} onValueChange={setCategory}>
@@ -1574,6 +1654,32 @@ function CreateMarketPanel() {
           </div>
         </div>
 
+        <div className="space-y-2 rounded-md border border-border/60 px-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => setScheduleEnabled(v => !v)}
+            className="flex items-center justify-between w-full"
+          >
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <CalendarClock className="w-4 h-4 text-muted-foreground" />
+              Schedule for later
+            </span>
+            <span className={cn('text-xs px-2 py-0.5 rounded-full', scheduleEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-muted/50 text-muted-foreground')}>
+              {scheduleEnabled ? 'On' : 'Off'}
+            </span>
+          </button>
+          {scheduleEnabled && (
+            <div className="space-y-1.5 pt-1">
+              <Label className="text-xs">Opens At</Label>
+              <Input type="datetime-local" value={opensAt} onChange={e => setOpensAt(e.target.value)} />
+              <p className="text-[10px] text-muted-foreground">
+                Stays hidden from every public list until this time, then opens automatically
+                (checked every 5 min) and surfaces at the top of New.
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-2">
           <Label>Parent Market (optional — makes this a sub-market)</Label>
           <Select value={parentMarketId || 'none'} onValueChange={(v) => setParentMarketId(v === 'none' ? '' : v)}>
@@ -1617,6 +1723,78 @@ function CreateMarketPanel() {
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+// ── Clone & Edit ──────────────────────────────────────────────────────────
+//
+// Fast-path for mass market creation: search any existing market by ID
+// or question and prefill CreateMarketPanel's form from it (including
+// its locked-odds config) so the admin only edits what's different for
+// the new instance, instead of retyping the whole shape every time.
+function CloneMarketPicker({ onSelect }: { onSelect: (m: any) => void }) {
+  const { toast } = useToast();
+  const [term, setTerm] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+
+  useEffect(() => {
+    const t = term.trim();
+    if (!t) { setResults([]); return; }
+    const h = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const asId = Number(t);
+        let q = supabase
+          .from('markets')
+          .select('id, question, category, options, status, sport, home_team, away_team, league_code, description, parent_market_id, is_locked_odds, seed_pool, seed_probability, vig_pct')
+          .order('id', { ascending: false })
+          .limit(15);
+        q = Number.isInteger(asId) && asId > 0 ? q.eq('id', asId) : q.ilike('question', `%${t}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        setResults(data || []);
+      } catch (err: any) {
+        toast({ title: 'Clone search failed', description: err.message, variant: 'destructive' });
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(h);
+  }, [term, toast]);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-muted-foreground/30 p-3">
+      <Label className="flex items-center gap-2 text-xs font-medium">
+        <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+        Clone & Edit — start from an existing market
+      </Label>
+      <Input
+        placeholder="Search by ID or question to copy its shape + locked odds"
+        value={term}
+        onChange={e => setTerm(e.target.value)}
+      />
+      {searching ? (
+        <div className="flex items-center justify-center py-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+        </div>
+      ) : results.length > 0 ? (
+        <div className="space-y-1 max-h-48 overflow-y-auto">
+          {results.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => { onSelect(m); setTerm(''); setResults([]); }}
+              className="w-full text-left px-2 py-1.5 rounded hover:bg-muted/40 flex items-center gap-2"
+            >
+              <span className="text-[10px] font-mono text-muted-foreground w-12 shrink-0">#{m.id}</span>
+              <Badge variant="outline" className="text-[9px] uppercase px-1 py-0 shrink-0">{m.is_locked_odds ? 'Locked' : 'Parimutuel'}</Badge>
+              <span className="text-xs truncate flex-1">{m.question}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -2261,6 +2439,8 @@ function VoidPanel() {
 
   useEffect(() => { loadPending(); }, [loadPending]);
 
+  const [batchBusy, setBatchBusy] = useState(false);
+
   const decide = async (marketId: number, action: 'approve' | 'reject') => {
     setBusyId(marketId);
     try {
@@ -2281,6 +2461,33 @@ function VoidPanel() {
       toast({ title: 'Void queue action failed', description: err.message, variant: 'destructive' });
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const batchDecide = async (marketIds: number[], action: 'approve' | 'reject') => {
+    if (marketIds.length === 0) return;
+    setBatchBusy(true);
+    try {
+      const res = await fetch('/api/admin/void-queue', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ marketIds, action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const updatedCount = (data.updated || []).length;
+      toast({
+        title: action === 'approve' ? `${updatedCount} market(s) voided` : `${updatedCount} market(s) sent back to locked`,
+        description: (data.notEligible || []).length > 0
+          ? `${data.notEligible.length} skipped — no longer pending_void.`
+          : (action === 'reject' ? 'Investigate before re-resolving.' : undefined),
+      });
+      loadPending();
+    } catch (err: any) {
+      toast({ title: 'Batch void action failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setBatchBusy(false);
     }
   };
 
@@ -2374,17 +2581,34 @@ function VoidPanel() {
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-          ) : pending.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-6">Queue is empty.</p>
           ) : (
-            <div className="space-y-2 max-h-[520px] overflow-y-auto">
-              {pending.map((e) => (
-                <div key={e.marketId} className={cn(
-                  'border rounded-lg p-3 space-y-2',
-                  e.suspicious ? 'border-red-500/30 bg-red-500/5' : 'border-muted',
-                )}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
+            <DataTable
+              rows={pending}
+              rowKey={(e) => e.marketId}
+              searchFields={(e) => `${e.marketId} ${e.question}`}
+              pageSize={15}
+              emptyMessage="Queue is empty."
+              bulkActions={[
+                {
+                  label: 'Approve void (selected)',
+                  variant: 'destructive',
+                  disabled: () => batchBusy,
+                  onClick: (rows) => batchDecide(rows.map(r => r.marketId), 'approve'),
+                },
+                {
+                  label: 'Back to locked (selected)',
+                  variant: 'outline',
+                  disabled: () => batchBusy,
+                  onClick: (rows) => batchDecide(rows.map(r => r.marketId), 'reject'),
+                },
+              ]}
+              columns={[
+                {
+                  key: 'market',
+                  label: 'Market',
+                  className: 'min-w-[240px] max-w-sm',
+                  render: (e) => (
+                    <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-[10px] font-mono text-muted-foreground">#{e.marketId}</span>
                         <Badge variant="outline" className="text-[9px] uppercase px-1 py-0">{e.isLockedOdds ? 'Locked' : 'Parimutuel'}</Badge>
@@ -2394,45 +2618,55 @@ function VoidPanel() {
                       </div>
                       <p className="text-xs font-medium leading-snug line-clamp-2">{e.question}</p>
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1 text-[10px]">
-                    <Stat label="Bets" value={e.totalBetRows} />
-                    <Stat label="Legs" value={e.activeLegs} />
-                    <Stat label="Rake rows" value={e.corroboratingTreasuryRows} highlight={e.corroboratingTreasuryRows > 0} />
-                    <Stat label="Dupes" value={(e.duplicateMarketIds || []).length} highlight={(e.duplicateMarketIds || []).length > 0} />
-                  </div>
-
-                  <p className={cn(
-                    'text-[10px] italic',
-                    e.suspicious ? 'text-red-300' : 'text-muted-foreground',
-                  )}>
-                    {e.recommendation}
-                  </p>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs border-red-500/30 text-red-300 hover:bg-red-500/10"
-                      disabled={busyId === e.marketId}
-                      onClick={() => decide(e.marketId, 'approve')}
-                    >
-                      {busyId === e.marketId ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Ban className="w-3 h-3 mr-1" />Approve void</>}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      disabled={busyId === e.marketId}
-                      onClick={() => decide(e.marketId, 'reject')}
-                    >
-                      <Unlock className="w-3 h-3 mr-1" />Back to locked
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  ),
+                },
+                {
+                  key: 'signals',
+                  label: 'Signals',
+                  className: 'min-w-[220px]',
+                  render: (e) => (
+                    <div className="space-y-1.5">
+                      <div className="grid grid-cols-4 gap-1 text-[10px]">
+                        <Stat label="Bets" value={e.totalBetRows} />
+                        <Stat label="Legs" value={e.activeLegs} />
+                        <Stat label="Rake rows" value={e.corroboratingTreasuryRows} highlight={e.corroboratingTreasuryRows > 0} />
+                        <Stat label="Dupes" value={(e.duplicateMarketIds || []).length} highlight={(e.duplicateMarketIds || []).length > 0} />
+                      </div>
+                      <p className={cn('text-[10px] italic', e.suspicious ? 'text-red-300' : 'text-muted-foreground')}>
+                        {e.recommendation}
+                      </p>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'actions',
+                  label: 'Actions',
+                  className: 'w-40',
+                  render: (e) => (
+                    <div className="flex flex-col items-start gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-red-500/30 text-red-300 hover:bg-red-500/10 w-full justify-start"
+                        disabled={busyId === e.marketId || batchBusy}
+                        onClick={() => decide(e.marketId, 'approve')}
+                      >
+                        {busyId === e.marketId ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Ban className="w-3 h-3 mr-1" />Approve void</>}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs w-full justify-start"
+                        disabled={busyId === e.marketId || batchBusy}
+                        onClick={() => decide(e.marketId, 'reject')}
+                      >
+                        <Unlock className="w-3 h-3 mr-1" />Back to locked
+                      </Button>
+                    </div>
+                  ),
+                },
+              ]}
+            />
           )}
         </CardContent>
       </Card>
@@ -3396,6 +3630,11 @@ function AIMarketGenerator() {
   const [drafts, setDrafts] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [parentOptions, setParentOptions] = useState<Array<{ id: number; question: string }>>([]);
+  // Optional shared schedule applied to every approved draft on submit —
+  // lets a whole batch of AI-generated markets go live together at a
+  // chosen future time instead of the instant they're submitted.
+  const [bulkScheduleEnabled, setBulkScheduleEnabled] = useState(false);
+  const [bulkOpensAt, setBulkOpensAt] = useState('');
 
   // Load eligible parent markets once so each draft can opt to attach itself
   // as a sub-market on submit.
@@ -3463,6 +3702,11 @@ function AIMarketGenerator() {
       toast({ title: 'Approve at least one market first', variant: 'destructive' });
       return;
     }
+    if (bulkScheduleEnabled && !bulkOpensAt) {
+      toast({ title: 'Pick an open time, or turn scheduling off', variant: 'destructive' });
+      return;
+    }
+    const opensAtIso = bulkScheduleEnabled && bulkOpensAt ? new Date(bulkOpensAt).toISOString() : null;
     setIsSubmitting(true);
     let created = 0;
     let failed = 0;
@@ -3482,6 +3726,7 @@ function AIMarketGenerator() {
             awayTeam: draft.away_team,
             description: draft.description,
             parentMarketId: draft.parent_market_id || null,
+            opensAt: opensAtIso,
           }),
         });
         if (res.ok) { created++; } else { failed++; }
@@ -3489,7 +3734,8 @@ function AIMarketGenerator() {
     }
     setDrafts(prev => prev.filter(d => !d.approved));
     toast({
-      title: `${created} market${created !== 1 ? 's' : ''} created${failed > 0 ? `, ${failed} failed` : ''}`,
+      title: `${created} market${created !== 1 ? 's' : ''} ${opensAtIso ? 'scheduled' : 'created'}${failed > 0 ? `, ${failed} failed` : ''}`,
+      description: opensAtIso ? `Opens automatically ${new Date(opensAtIso).toLocaleString()}.` : undefined,
     });
     setIsSubmitting(false);
   };
@@ -3564,6 +3810,27 @@ function AIMarketGenerator() {
                   Submit {approvedCount} Approved
                 </Button>
               </div>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBulkScheduleEnabled(v => !v)}
+                className={cn(
+                  'text-xs px-2 py-1 rounded-md border flex items-center gap-1.5 transition-colors',
+                  bulkScheduleEnabled ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : 'border-border text-muted-foreground hover:bg-muted/30',
+                )}
+              >
+                <CalendarClock className="w-3 h-3" />
+                Schedule all approved for later
+              </button>
+              {bulkScheduleEnabled && (
+                <Input
+                  type="datetime-local"
+                  value={bulkOpensAt}
+                  onChange={e => setBulkOpensAt(e.target.value)}
+                  className="h-7 text-xs w-56"
+                />
+              )}
             </div>
           </CardHeader>
           <CardContent>

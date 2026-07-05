@@ -51,33 +51,66 @@ export async function GET(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const entries = [];
-  for (const m of pending || []) {
-    const [{ count: activeBets }, { count: anyBets }, { count: activeLegs }, { count: rakeRows }, { count: tierRoutingRows }, { data: duplicates }] = await Promise.all([
-      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
-      supabaseAdmin.from('user_bets').select('id', { count: 'exact', head: true }).eq('market_id', m.id),
-      supabaseAdmin.from('multiplier_legs').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('status', 'active'),
-      supabaseAdmin.from('treasury_log').select('id', { count: 'exact', head: true }).eq('market_id', m.id).eq('type', 'entry_rake'),
-      supabaseAdmin.from('tier_routing_log').select('id', { count: 'exact', head: true }).eq('market_id', m.id),
-      // Duplicate-market check: the AI generator's own-fixture dedup only
-      // runs for parent markets with a fixture_id — every AI-generated
-      // prop market has neither, so nothing stops the same question
-      // being created twice as separate rows. If that happened, real
-      // bets could be sitting on the OTHER row while this one looks
-      // empty and gets flagged for void.
-      supabaseAdmin.from('markets').select('id, status').eq('question', m.question).neq('id', m.id),
-    ]);
+  if (!pending || pending.length === 0) {
+    return NextResponse.json({ pendingCount: 0, entries: [] }, { headers: NO_CACHE });
+  }
+
+  const ids = pending.map(m => m.id);
+  const uniqueQuestions = Array.from(new Set(pending.map(m => m.question)));
+
+  // Was 1 + 6*N round trips (a per-row query per market for each of 6
+  // signals) — the classic N+1 that made this endpoint slower the
+  // bigger the queue got. Batched into 6 total queries regardless of N,
+  // aggregated in memory below (no awaits in the loop).
+  const [activeBetsRes, anyBetsRes, activeLegsRes, rakeRes, tierRes, dupRes] = await Promise.all([
+    supabaseAdmin.from('user_bets').select('market_id').eq('status', 'active').in('market_id', ids),
+    supabaseAdmin.from('user_bets').select('market_id').in('market_id', ids),
+    supabaseAdmin.from('multiplier_legs').select('market_id').eq('status', 'active').in('market_id', ids),
+    supabaseAdmin.from('treasury_log').select('market_id').eq('type', 'entry_rake').in('market_id', ids),
+    supabaseAdmin.from('tier_routing_log').select('market_id').in('market_id', ids),
+    // Duplicate-market check: the AI generator's own-fixture dedup only
+    // runs for parent markets with a fixture_id — every AI-generated
+    // prop market has neither, so nothing stops the same question
+    // being created twice as separate rows. If that happened, real
+    // bets could be sitting on the OTHER row while this one looks
+    // empty and gets flagged for void.
+    supabaseAdmin.from('markets').select('id, question, status').in('question', uniqueQuestions),
+  ]);
+
+  const countBy = (rows: { market_id: number }[] | null): Record<number, number> => {
+    const map: Record<number, number> = {};
+    for (const r of rows || []) map[r.market_id] = (map[r.market_id] || 0) + 1;
+    return map;
+  };
+  const activeBetsMap = countBy(activeBetsRes.data as any);
+  const anyBetsMap = countBy(anyBetsRes.data as any);
+  const activeLegsMap = countBy(activeLegsRes.data as any);
+  const rakeMap = countBy(rakeRes.data as any);
+  const tierMap = countBy(tierRes.data as any);
+
+  const dupByQuestion: Record<string, { id: number; status: string }[]> = {};
+  for (const d of (dupRes.data as any[]) || []) {
+    (dupByQuestion[d.question] ||= []).push({ id: d.id, status: d.status });
+  }
+
+  const entries = pending.map((m) => {
+    const activeBets = activeBetsMap[m.id] ?? 0;
+    const anyBets = anyBetsMap[m.id] ?? 0;
+    const activeLegs = activeLegsMap[m.id] ?? 0;
+    const rakeRows = rakeMap[m.id] ?? 0;
+    const tierRoutingRows = tierMap[m.id] ?? 0;
+    const duplicates = (dupByQuestion[m.question] || []).filter(d => d.id !== m.id);
 
     // entry_rake / tier_routing_log rows are written in the SAME
     // transaction as a successful bet insert (place_bet/place_bet_locked).
     // If either has rows but user_bets is genuinely empty, that's
     // independent evidence bets were placed and the row itself is
     // missing — approving this void would be wrong.
-    const hasCorroboratingRows = (rakeRows ?? 0) > 0 || (tierRoutingRows ?? 0) > 0;
-    const hasDuplicateQuestion = (duplicates?.length ?? 0) > 0;
-    const suspicious = (anyBets ?? 0) === 0 && (hasCorroboratingRows || hasDuplicateQuestion);
+    const hasCorroboratingRows = rakeRows > 0 || tierRoutingRows > 0;
+    const hasDuplicateQuestion = duplicates.length > 0;
+    const suspicious = anyBets === 0 && (hasCorroboratingRows || hasDuplicateQuestion);
 
-    entries.push({
+    return {
       marketId: m.id,
       question: m.question,
       isLockedOdds: m.is_locked_odds,
@@ -86,20 +119,20 @@ export async function GET(request: Request) {
       attemptedOutcome: m.resolved_outcome,
       attemptedOutcomes: m.resolved_outcomes,
       closesAt: m.closes_at,
-      activeBets: activeBets ?? 0,
-      totalBetRows: anyBets ?? 0,
-      activeLegs: activeLegs ?? 0,
-      corroboratingTreasuryRows: rakeRows ?? 0,
-      corroboratingTierRoutingRows: tierRoutingRows ?? 0,
-      duplicateMarketIds: (duplicates || []).map(d => ({ id: d.id, status: d.status })),
+      activeBets,
+      totalBetRows: anyBets,
+      activeLegs,
+      corroboratingTreasuryRows: rakeRows,
+      corroboratingTierRoutingRows: tierRoutingRows,
+      duplicateMarketIds: duplicates,
       suspicious,
       recommendation: suspicious
         ? hasDuplicateQuestion
-          ? `DO NOT APPROVE — another market row exists with the exact same question: ${(duplicates || []).map(d => `#${d.id} (${d.status})`).join(', ')}. Bets were very likely placed against that row instead of this one — check it before voiding this one.`
+          ? `DO NOT APPROVE — another market row exists with the exact same question: ${duplicates.map(d => `#${d.id} (${d.status})`).join(', ')}. Bets were very likely placed against that row instead of this one — check it before voiding this one.`
           : 'DO NOT APPROVE without investigating — treasury/tier-routing rows exist for this market but user_bets does not. Bets were very likely placed and the row is missing.'
         : 'No corroborating evidence of bets on this market. Void appears safe to approve.',
-    });
-  }
+    };
+  });
 
   return NextResponse.json({ pendingCount: entries.length, entries }, { headers: NO_CACHE });
 }
@@ -113,13 +146,78 @@ export async function POST(request: Request) {
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: 'Malformed body' }, { status: 400 }); }
 
-  const marketId = Number(body?.marketId);
   const action = body?.action;
   const reason = typeof body?.reason === 'string' ? body.reason : null;
   const validActions = ['approve', 'reject', 'force_void'];
-  if (!marketId || !validActions.includes(action)) {
-    return NextResponse.json({ error: `Provide marketId and action: one of ${validActions.join(', ')}` }, { status: 400 });
+  if (!validActions.includes(action)) {
+    return NextResponse.json({ error: `Provide marketId(s) and action: one of ${validActions.join(', ')}` }, { status: 400 });
   }
+
+  // Accepts either a single marketId (unchanged single-market callers)
+  // or a marketIds array (batch selection from the admin table).
+  const rawIds: any[] = Array.isArray(body?.marketIds)
+    ? body.marketIds
+    : (body?.marketId != null ? [body.marketId] : []);
+  const marketIds = Array.from(new Set(
+    rawIds.map((v: any) => Number(v)).filter((n: number) => Number.isFinite(n) && n > 0),
+  ));
+  if (marketIds.length === 0) {
+    return NextResponse.json({ error: 'Provide marketId or marketIds' }, { status: 400 });
+  }
+
+  // approve/reject are pure status flips on markets with zero bets —
+  // safe to batch as one bulk UPDATE regardless of how many are
+  // selected. force_void moves money per active bet, so it stays
+  // single-market only (see below) — batching that would mean guessing
+  // at partial-failure/refund bookkeeping across markets in one request,
+  // which this app treats as too risky to do silently.
+  if (action === 'approve' || action === 'reject') {
+    const { data: markets, error: mErr } = await supabaseAdmin
+      .from('markets')
+      .select('id, status')
+      .in('id', marketIds);
+    if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+
+    const foundIds = new Set((markets || []).map(m => m.id));
+    const eligibleIds = (markets || []).filter(m => m.status === 'pending_void').map(m => m.id);
+    const notFound = marketIds.filter(id => !foundIds.has(id));
+    const notEligible = marketIds.filter(id => foundIds.has(id) && !eligibleIds.includes(id));
+
+    if (eligibleIds.length === 0) {
+      return NextResponse.json({
+        success: false,
+        updated: [],
+        notFound,
+        notEligible,
+        error: 'No eligible pending_void markets in the given set.',
+      }, { status: 400, headers: NO_CACHE });
+    }
+
+    const updatePayload = action === 'approve'
+      ? { status: 'voided', resolved_outcome: null, resolved_outcomes: null }
+      : { status: 'locked', resolved_outcome: null, resolved_outcomes: null, void_reason: null, void_requested_at: null };
+
+    const { error: updErr } = await supabaseAdmin.from('markets').update(updatePayload).in('id', eligibleIds);
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+    return NextResponse.json({
+      success: true,
+      marketId: eligibleIds.length === 1 ? eligibleIds[0] : undefined,
+      updated: eligibleIds,
+      status: action === 'approve' ? 'voided' : 'locked',
+      notFound,
+      notEligible,
+    }, { headers: NO_CACHE });
+  }
+
+  // ── force_void ── single market only, see note above ─────────────────
+  if (marketIds.length > 1) {
+    return NextResponse.json(
+      { error: 'force_void only supports one market at a time — it moves money per bet and needs individual review.' },
+      { status: 400 },
+    );
+  }
+  const marketId = marketIds[0];
 
   const { data: market, error: mErr } = await supabaseAdmin
     .from('markets')
@@ -128,33 +226,6 @@ export async function POST(request: Request) {
     .single();
   if (mErr || !market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
 
-  if (action === 'approve') {
-    if (market.status !== 'pending_void') {
-      return NextResponse.json({ error: `Market ${marketId} is not pending_void (status=${market.status})` }, { status: 400 });
-    }
-    await supabaseAdmin.from('markets').update({
-      status: 'voided',
-      resolved_outcome: null,
-      resolved_outcomes: null,
-    }).eq('id', marketId);
-    return NextResponse.json({ success: true, marketId, status: 'voided' }, { headers: NO_CACHE });
-  }
-
-  if (action === 'reject') {
-    if (market.status !== 'pending_void') {
-      return NextResponse.json({ error: `Market ${marketId} is not pending_void (status=${market.status})` }, { status: 400 });
-    }
-    await supabaseAdmin.from('markets').update({
-      status: 'locked',
-      resolved_outcome: null,
-      resolved_outcomes: null,
-      void_reason: null,
-      void_requested_at: null,
-    }).eq('id', marketId);
-    return NextResponse.json({ success: true, marketId, status: 'locked' }, { headers: NO_CACHE });
-  }
-
-  // ── force_void ──────────────────────────────────────────────────────
   // Admin explicitly wants this market gone regardless of its current
   // state. Refund every ACTIVE single-bet stake (to bonus_balance so a
   // mistaken force-void is still clawable — same convention the recoup
