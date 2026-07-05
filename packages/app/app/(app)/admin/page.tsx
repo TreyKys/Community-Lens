@@ -1303,6 +1303,53 @@ function OddsCalculatorPanel() {
   );
 }
 
+// ── One place for every creation path ───────────────────────────────────
+//
+// Manual (+ Clone & Edit + saved templates), AI Generate, and Bulk Import
+// (CSV) used to live in two separate top-level tabs — this puts all three
+// under a single "Create" tab with a mode switch, so there's one place to
+// remember. Every mode carries its own locked-odds config (on by default,
+// since every market is expected to have it now); nothing here changes
+// that, it just changes where each tool lives.
+function MarketCreationHub() {
+  const [mode, setMode] = useState<'manual' | 'ai' | 'bulk'>('manual');
+  const MODES = [
+    { key: 'manual' as const, label: 'Manual', icon: Plus },
+    { key: 'ai' as const, label: 'AI Generate', icon: Sparkles },
+    { key: 'bulk' as const, label: 'Bulk Import (CSV)', icon: Upload },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap gap-1.5 p-1 bg-muted/30 rounded-lg w-fit">
+        {MODES.map(m => (
+          <button
+            key={m.key}
+            type="button"
+            onClick={() => setMode(m.key)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+              mode === m.key ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <m.icon className="w-3.5 h-3.5" />
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'manual' && (
+        <div className="space-y-6">
+          <OddsCalculatorPanel />
+          <CreateMarketPanel />
+        </div>
+      )}
+      {mode === 'ai' && <AIMarketGenerator />}
+      {mode === 'bulk' && <BulkImportPanel />}
+    </div>
+  );
+}
+
 function CreateMarketPanel() {
   const { toast } = useToast();
   const [question, setQuestion] = useState('');
@@ -5347,12 +5394,11 @@ export default function AdminPage() {
       </div>
 
       <Tabs defaultValue="treasury">
-        <TabsList className="grid w-full grid-cols-4 md:grid-cols-10">
+        <TabsList className="grid w-full grid-cols-4 md:grid-cols-9">
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
           <TabsTrigger value="vip">VIP</TabsTrigger>
-          <TabsTrigger value="ai">AI Markets</TabsTrigger>
           <TabsTrigger value="create">Create</TabsTrigger>
           <TabsTrigger value="override">Override</TabsTrigger>
           <TabsTrigger value="void">Void</TabsTrigger>
@@ -5365,13 +5411,8 @@ export default function AdminPage() {
         <TabsContent value="users" className="pt-4"><UsersPanel /></TabsContent>
         <TabsContent value="leaderboard" className="pt-4"><LeaderboardPreviewPanel /></TabsContent>
         <TabsContent value="vip" className="pt-4"><VIPPanel /></TabsContent>
-        <TabsContent value="ai" className="pt-4"><AIMarketGenerator /></TabsContent>
         <TabsContent value="create" className="pt-4">
-          <div className="space-y-6">
-            <OddsCalculatorPanel />
-            <CreateMarketPanel />
-            <BulkImportPanel />
-          </div>
+          <MarketCreationHub />
         </TabsContent>
         <TabsContent value="override" className="pt-4"><ManualOverridePanel /></TabsContent>
         <TabsContent value="void" className="pt-4"><VoidPanel /></TabsContent>
