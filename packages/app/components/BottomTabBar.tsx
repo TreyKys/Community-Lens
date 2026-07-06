@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Compass, Receipt, User, Menu } from 'lucide-react';
+import { Home, Compass, Receipt, User, Menu, LayoutDashboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -32,19 +32,29 @@ export function BottomTabBar() {
         <SheetContent side="left" className="p-0 w-64 bg-background border-r">
           <div className="p-4 border-b flex items-center gap-4">
             <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 text-black font-extrabold rounded-md shadow-lg shadow-emerald-500/20 tracking-tighter text-xs">O/N</div>
-            <span className="font-bold">Odds.ng</span>
+            <span className="font-bold">Opinions.ng</span>
           </div>
           <Sidebar />
         </SheetContent>
       </Sheet>
 
-      <button
-        onClick={() => router.push('/')}
-        className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors', pathname === '/' ? 'text-foreground' : 'text-muted-foreground')}
-      >
-        <Home className="w-5 h-5" />
-        <span className="text-[10px] font-medium">Home</span>
-      </button>
+      {session ? (
+        <button
+          onClick={() => router.push('/dashboard')}
+          className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors', pathname === '/dashboard' ? 'text-foreground' : 'text-muted-foreground')}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Wallet</span>
+        </button>
+      ) : (
+        <button
+          onClick={() => router.push('/')}
+          className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors', pathname === '/' ? 'text-foreground' : 'text-muted-foreground')}
+        >
+          <Home className="w-5 h-5" />
+          <span className="text-[10px] font-medium">Home</span>
+        </button>
+      )}
 
       <button
         onClick={() => router.push('/markets')}
@@ -60,12 +70,12 @@ export function BottomTabBar() {
           className={cn('flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors relative', pathname.startsWith('/bets') ? 'text-foreground' : 'text-muted-foreground')}
         >
           <Receipt className="w-5 h-5" />
-          <span className="text-[10px] font-medium">Bets</span>
+          <span className="text-[10px] font-medium">Picks</span>
         </button>
       ) : (
         <button className="flex flex-col items-center justify-center w-16 h-full gap-1 text-muted-foreground">
           <Receipt className="w-5 h-5 opacity-40" />
-          <span className="text-[10px] font-medium opacity-40">Bets</span>
+          <span className="text-[10px] font-medium opacity-40">Picks</span>
         </button>
       )}
 

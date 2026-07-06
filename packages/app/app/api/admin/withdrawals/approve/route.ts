@@ -12,15 +12,18 @@ const supabaseAdmin = createClient(
 
 /**
  * POST /api/admin/withdrawals/approve
- * Body: { withdrawalId: string, gateway: 'paystack' | 'squad' }
+ * Body: { withdrawalId: string, gateway: 'paystack' | 'squad' | 'manual',
+ *         manualPaidFrom?: string, manualReference?: string }
  *
- * Approves a pending withdrawal and fires a real transfer through the chosen
- * gateway. Records the gateway choice + payout reference on the withdrawal row
- * and emits a treasury_movements row tagged with the gateway so the dashboard
- * stays accurate.
+ * Approves a pending withdrawal. For 'paystack'/'squad' we fire a real transfer
+ * through the chosen gateway. For 'manual' we record an already-sent direct
+ * bank transfer (used while Squad's payout API isn't activated yet) — the
+ * operator must supply the bank they sent from + the bank's transaction
+ * reference so reconciliation against statements is straightforward.
  *
- * Idempotency: if the row is already 'completed' or has a gateway_transfer_code,
- * we no-op. The user_bets/balance side has already been deducted in /api/withdraw.
+ * Every path writes a treasury_movements row tagged with the gateway and a
+ * notification to the user. Idempotency: if the row is already 'completed'
+ * or has a gateway_transfer_code we no-op.
  */
 export async function POST(request: Request) {
   if (!isAdminRequest(request)) {
@@ -30,9 +33,21 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({} as any));
     const withdrawalId = String(body?.withdrawalId || '').trim();
     const gateway = String(body?.gateway || '').toLowerCase();
+    const manualPaidFrom = String(body?.manualPaidFrom || '').trim();
+    const manualReference = String(body?.manualReference || '').trim();
+
     if (!withdrawalId) return NextResponse.json({ error: 'Missing withdrawalId' }, { status: 400 });
-    if (gateway !== 'paystack' && gateway !== 'squad') {
-      return NextResponse.json({ error: 'gateway must be paystack or squad' }, { status: 400 });
+    if (gateway !== 'paystack' && gateway !== 'squad' && gateway !== 'manual') {
+      return NextResponse.json({ error: 'gateway must be paystack, squad, or manual' }, { status: 400 });
+    }
+    if (gateway === 'manual') {
+      // Guard against fat-finger empties — these go straight onto the ledger.
+      if (!manualPaidFrom || manualPaidFrom.length < 2) {
+        return NextResponse.json({ error: 'manualPaidFrom must be at least 2 characters (e.g. "GTBank")' }, { status: 400 });
+      }
+      if (!manualReference || manualReference.length < 4) {
+        return NextResponse.json({ error: 'manualReference must be at least 4 characters — use the session ID from your bank app' }, { status: 400 });
+      }
     }
 
     const { data: w, error: wErr } = await supabaseAdmin
@@ -51,10 +66,10 @@ export async function POST(request: Request) {
     let transferCode: string;
     let transferStatus: string;
     let rawResponse: any;
+    let nextStatus: string;
 
     try {
       if (gateway === 'paystack') {
-        // Paystack needs a recipient first.
         const recipientCode = await createTransferRecipient({
           name: w.account_name || w.bank_code,
           accountNumber: w.account_number,
@@ -64,23 +79,31 @@ export async function POST(request: Request) {
           recipientCode,
           amountNGN: Number(w.naira_to_send),
           reference: transactionRef,
-          reason: `Odds.ng withdrawal ${withdrawalId.slice(0, 8)}`,
+          reason: `Opinions.ng withdrawal ${withdrawalId.slice(0, 8)}`,
         });
         transferCode = t.transferCode;
         transferStatus = t.status;
         rawResponse = { recipientCode, ...t };
-      } else {
+        nextStatus = 'transfer_initiated';
+      } else if (gateway === 'squad') {
         const t = await squadInitiate({
           amountKobo,
           bankCode: w.bank_code,
           accountNumber: w.account_number,
-          accountName: w.account_name || 'Odds.ng User',
+          accountName: w.account_name || 'Opinions.ng User',
           transactionRef,
-          remark: `Odds.ng withdrawal ${withdrawalId.slice(0, 8)}`,
+          remark: `Opinions.ng withdrawal ${withdrawalId.slice(0, 8)}`,
         });
         transferCode = t.transactionRef;
         transferStatus = t.status;
         rawResponse = t;
+        nextStatus = 'transfer_initiated';
+      } else {
+        // Manual: operator already sent the bank transfer; we're just recording it.
+        transferCode = manualReference;
+        transferStatus = 'completed';
+        rawResponse = { manual_paid_from: manualPaidFrom, manual_reference: manualReference };
+        nextStatus = 'completed';
       }
     } catch (err: any) {
       console.error(`[treasury approve] ${gateway} transfer failed`, err?.message || err);
@@ -95,16 +118,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: err?.message || 'Transfer failed' }, { status: 502 });
     }
 
-    // Mark approved + ledger row.
+    const nowIso = new Date().toISOString();
+    const update: Record<string, any> = {
+      status: nextStatus,
+      gateway,
+      gateway_transfer_code: transferCode,
+      gateway_response: rawResponse,
+      approved_at: nowIso,
+    };
+    if (gateway === 'manual') {
+      update.manual_paid_from = manualPaidFrom;
+      update.manual_reference = manualReference;
+      update.processed_at = nowIso;
+    }
+
     await supabaseAdmin
       .from('withdrawals')
-      .update({
-        status: 'transfer_initiated',
-        gateway,
-        gateway_transfer_code: transferCode,
-        gateway_response: rawResponse,
-        approved_at: new Date().toISOString(),
-      })
+      .update(update)
       .eq('id', withdrawalId);
 
     await supabaseAdmin.from('treasury_movements').insert({
@@ -114,14 +144,19 @@ export async function POST(request: Request) {
       direction: 'out',
       amount_ngn: Number(w.naira_to_send),
       reference: withdrawalId,
-      metadata: { transfer_code: transferCode, transfer_status: transferStatus },
+      metadata: gateway === 'manual'
+        ? { manual_paid_from: manualPaidFrom, manual_reference: manualReference }
+        : { transfer_code: transferCode, transfer_status: transferStatus },
     });
 
-    // Notify the user.
+    const userMessage = gateway === 'manual'
+      ? `Your ₦${Number(w.naira_to_send).toLocaleString()} withdrawal has been sent to your bank.`
+      : `Your ₦${Number(w.naira_to_send).toLocaleString()} withdrawal has been approved. Funds en route via ${gateway === 'paystack' ? 'Paystack' : 'Squad'}.`;
+
     await supabaseAdmin.from('notifications').insert({
       user_id: w.user_id,
       type: 'withdrawal',
-      message: `Your ₦${Number(w.naira_to_send).toLocaleString()} withdrawal has been approved. Funds en route via ${gateway === 'paystack' ? 'Paystack' : 'Squad'}.`,
+      message: userMessage,
       amount: Number(w.naira_to_send),
     });
 

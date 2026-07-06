@@ -1,37 +1,196 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Loader2, Lock, Check } from 'lucide-react';
+import Link from 'next/link';
+import { cn } from '@/lib/utils';
 
-export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon' }) {
+// Referral field shared across all three signup forms (email / phone /
+// password). When `locked` it renders read-only with a lock affordance —
+// the code arrived from an invite link (?ref= or a /r/CODE landing) and
+// must not be editable, so the invite that drove the acquisition is the
+// one that gets credited.
+function ReferralField({
+  id, value, onChange, locked,
+}: { id: string; value: string; onChange: (v: string) => void; locked: boolean }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id} className="flex items-center justify-between">
+        <span>Referral Code <span className="text-emerald-400 text-[10px]">(VIP codes drop a ₦500+ bonus)</span></span>
+      </Label>
+      <div className="relative">
+        <Input
+          id={id}
+          type="text"
+          placeholder="e.g. ALEX25"
+          value={value}
+          onChange={(e) => onChange(e.target.value.toUpperCase())}
+          maxLength={20}
+          readOnly={locked}
+          aria-readonly={locked}
+          tabIndex={locked ? -1 : undefined}
+          className={cn(
+            'uppercase tracking-wider',
+            locked && 'pr-9 bg-emerald-500/[0.06] border-emerald-500/40 text-emerald-300 cursor-not-allowed',
+          )}
+        />
+        {locked && (
+          <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-400 pointer-events-none" />
+        )}
+      </div>
+      {locked && (
+        <p className="text-[10px] text-emerald-400/90 flex items-center gap-1">
+          <Check className="w-3 h-3" /> Applied from your invite link
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Event name + first-claim guard for opening the auth dialog from outside
+// this component (e.g. WelcomeModal's "Claim my bonus" CTA). AuthModal
+// is rendered TWICE when signed-out (Navbar for desktop, BottomTabBar
+// for mobile), so without the guard a single dispatch would open two
+// dialogs and stack two backdrops. First mount claims the handler;
+// subsequent mounts no-op, and the unmount cleanup releases the claim.
+const AUTH_OPEN_EVENT = 'opinionsng:open-auth';
+let authOpenHandlerActive = false;
+
+interface AuthModalProps {
+  variant?: 'default' | 'icon';
+  trigger?: ReactNode;
+}
+
+type AuthMethod = 'otp' | 'password' | 'phone';
+
+export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
+  const [phone, setPhone] = useState('');
+  const [pinId, setPinId] = useState('');
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('otp');
   const [step, setStep] = useState<'request' | 'verify'>('request');
   const [isLoading, setIsLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [referralCode, setReferralCode] = useState('');
+  const [referralLocked, setReferralLocked] = useState(false);
   const { toast } = useToast();
+
+  // Capture an invite code from the URL (?ref=CODE) or a /r/CODE landing
+  // page (localStorage, with the lock flag). Either source locks the
+  // field — the invitee shouldn't be able to swap the code that paid for
+  // their acquisition. The actual redeem still runs post-signup in
+  // applyPostAuthHooks, which reads pending_referral_code.
+  useEffect(() => {
+    try {
+      const fromUrl = new URL(window.location.href).searchParams.get('ref');
+      const stored = localStorage.getItem('pending_referral_code');
+      const lockedFlag = localStorage.getItem('referral_locked') === '1';
+      const code = (fromUrl || stored || '').trim().toUpperCase().slice(0, 20);
+      if (code) {
+        setReferralCode(code);
+        if (fromUrl || lockedFlag) {
+          setReferralLocked(true);
+          localStorage.setItem('pending_referral_code', code);
+          localStorage.setItem('referral_locked', '1');
+        }
+      }
+    } catch { /* private mode / SSR guard — no-op */ }
+  }, []);
+
+  // Imperative open from outside the component (e.g. WelcomeModal,
+  // future deep-link/CTA buttons). See module-scope comment for why
+  // we first-claim the listener.
+  useEffect(() => {
+    if (authOpenHandlerActive) return;
+    authOpenHandlerActive = true;
+    const handler = () => setIsOpen(true);
+    window.addEventListener(AUTH_OPEN_EVENT, handler);
+    return () => {
+      window.removeEventListener(AUTH_OPEN_EVENT, handler);
+      authOpenHandlerActive = false;
+    };
+  }, []);
+
+  const applyPostAuthHooks = async (accessToken: string) => {
+    try {
+      fetch('/api/user/accept-terms', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {});
+
+      const pendingRef = typeof window !== 'undefined' ? localStorage.getItem('pending_referral_code') : null;
+      if (pendingRef) {
+        // Await so we can read the granted signup bonus and stash it for
+        // the next page's toast. If the call fails, no toast — but the
+        // user-facing flow still proceeds.
+        try {
+          const res = await fetch('/api/referral/redeem', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ code: pendingRef }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok && Number(body?.signupBonusTngn) > 0) {
+            try {
+              sessionStorage.setItem(
+                'pending_referral_bonus',
+                JSON.stringify({ amount: Number(body.signupBonusTngn), at: Date.now() }),
+              );
+            } catch {}
+          }
+        } catch {
+          // fire-and-forget on network failure
+        } finally {
+          try {
+            localStorage.removeItem('pending_referral_code');
+            localStorage.removeItem('referral_locked');
+          } catch {}
+        }
+      }
+    } catch {}
+  };
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!acceptedTerms) {
+      toast({
+        title: 'Accept the terms',
+        description: 'You need to agree to our Terms & Privacy Policy to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsLoading(true);
 
     try {
       if (!email.includes('@')) throw new Error('Invalid email address');
+
+      // Stash the referral code locally so the post-signup hook can redeem
+      // it once the user_id is known.
+      const trimmedRef = referralCode.trim().toUpperCase();
+      if (trimmedRef) {
+        try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
+      }
 
       // signInWithOtp with shouldCreateUser:true sends a 6-digit code
       // (NOT a magic link) as long as "Confirm email" is OFF in Supabase dashboard.
       // Dashboard path: Authentication → Providers → Email → disable "Confirm email"
       const { error } = await supabase.auth.signInWithOtp({
         email: email.trim().toLowerCase(),
-        options: {
-          shouldCreateUser: true,
-        },
+        options: { shouldCreateUser: true },
       });
 
       if (error) throw error;
@@ -52,42 +211,184 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
     }
   };
 
+  const handlePasswordAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptedTerms) {
+      toast({
+        title: 'Accept the terms',
+        description: 'You need to agree to our Terms & Privacy Policy to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      if (!email.includes('@')) throw new Error('Invalid email address');
+      if (password.length < 8) throw new Error('Password must be at least 8 characters');
+
+      const trimmedRef = referralCode.trim().toUpperCase();
+      if (trimmedRef) {
+        try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
+      }
+
+      // Try sign-in first; if there's no account yet, fall back to sign-up.
+      // The fallback used to throw whatever signUp errored with, which was
+      // confusing for accounts that already existed via OTP (no password
+      // set yet) — Supabase replied "User already registered" and users
+      // saw that instead of a useful "wrong password" hint.
+      const signInResult = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      if (signInResult.error) {
+        const signUpResult = await supabase.auth.signUp({
+          email: email.trim().toLowerCase(),
+          password,
+        });
+        if (signUpResult.error) {
+          const msg = (signUpResult.error.message || '').toLowerCase();
+          // The email already has an account, but our password didn't sign
+          // them in. Almost always means they signed up via email code and
+          // never set a password. Tell them what to do.
+          if (msg.includes('already') || msg.includes('exists') || msg.includes('registered')) {
+            throw new Error(
+              'That email already has an account, but the password didn\'t match. If you signed up with the email code, switch to "Email Code" to sign in.',
+            );
+          }
+          throw signUpResult.error;
+        }
+        // signUp returns no session when Supabase has "Confirm email" turned
+        // on — surface that clearly instead of pretending the user is in.
+        if (!signUpResult.data?.session) {
+          throw new Error(
+            'Account created. Check your inbox to confirm your email, then sign in.',
+          );
+        }
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await applyPostAuthHooks(session.access_token);
+      }
+
+      toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
+      setIsOpen(false);
+      window.location.href = '/markets';
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to sign in.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRequestPhoneOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptedTerms) {
+      toast({
+        title: 'Accept the terms',
+        description: 'You need to agree to our Terms & Privacy Policy to continue.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      const trimmedRef = referralCode.trim().toUpperCase();
+      if (trimmedRef) {
+        try { localStorage.setItem('pending_referral_code', trimmedRef); } catch {}
+      }
+
+      const res = await fetch('/api/auth/phone/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Could not send code');
+
+      setPinId(body.pinId);
+      setStep('verify');
+      toast({ title: 'Code Sent', description: `Check ${body.phone} for your 6-digit code.` });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to send code.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/phone/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, pinId, pin: otp }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Invalid or expired code.');
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: body.access_token,
+        refresh_token: body.refresh_token,
+      });
+      if (sessionError) throw sessionError;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await applyPostAuthHooks(session.access_token);
+      }
+
+      toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
+      setIsOpen(false);
+      window.location.href = '/markets';
+    } catch (error: any) {
+      toast({
+        title: 'Verification failed',
+        description: error.message || 'Invalid or expired code.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const { data: { session }, error } = await supabase.auth.verifyOtp({
+      const { error } = await supabase.auth.verifyOtp({
         email: email.trim().toLowerCase(),
-        token: otp.trim(),
+        token: otp,
         type: 'email',
       });
-
       if (error) throw error;
 
-      if (session?.user) {
-        // Sync user record to our backend — creates the users row + derives wallet address
-        const res = await fetch('/api/auth/verify-otp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ email }),
-        });
-
-        if (!res.ok) {
-          console.error('Backend sync failed — user will still be logged in');
-        }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        await applyPostAuthHooks(session.access_token);
       }
 
+      toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
       setIsOpen(false);
-      resetForm();
-      window.location.reload();
+      window.location.href = '/markets';
     } catch (error: any) {
       toast({
-        title: 'Invalid Code',
-        description: error.message || 'The code is incorrect or expired. Try again.',
+        title: 'Verification failed',
+        description: error.message || 'Invalid or expired code.',
         variant: 'destructive',
       });
     } finally {
@@ -98,7 +399,10 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
   const resetForm = () => {
     setStep('request');
     setOtp('');
+    setPassword('');
     setEmail('');
+    setPhone('');
+    setPinId('');
     setIsLoading(false);
   };
 
@@ -111,7 +415,9 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
       }}
     >
       <DialogTrigger asChild>
-        {variant === 'icon' ? (
+        {trigger ? (
+          trigger
+        ) : variant === 'icon' ? (
           <button className="flex flex-col items-center justify-center w-full h-full gap-1 text-muted-foreground transition-colors hover:text-foreground">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             <span className="text-[10px] font-medium">Log In</span>
@@ -122,41 +428,198 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[400px]">
+      <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {step === 'request' ? 'Welcome to Odds.ng' : 'Enter Your Code'}
+            {step === 'request'
+              ? 'Welcome to Opinions.ng'
+              : authMethod === 'password'
+                ? 'Set Your Password'
+                : 'Enter Your Code'}
           </DialogTitle>
           <DialogDescription>
             {step === 'request'
               ? 'Log in or create an account to start predicting.'
-              : `We sent a 6-digit code to ${email}`}
+              : authMethod === 'otp'
+                ? `We sent a 6-digit code to ${email}`
+                : authMethod === 'phone'
+                  ? `We sent a 6-digit code to ${phone}`
+                  : 'Create a password for faster future logins'}
           </DialogDescription>
         </DialogHeader>
 
         {step === 'request' ? (
-          <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-              />
+          <>
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 mb-4 text-xs text-emerald-300 text-center font-medium">
+              🎁 Deposit ₦500+, we match it — up to ₦1,000 free. Ends Sat.
             </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Sending...' : 'Continue with Email'}
-            </Button>
-            <p className="text-xs text-center text-muted-foreground">
-              Phone login coming soon via SMS
-            </p>
-          </form>
+            <div className="flex gap-2 mb-4">
+              <Button
+                type="button"
+                variant={authMethod === 'otp' ? 'default' : 'outline'}
+                className="flex-1"
+                onClick={() => setAuthMethod('otp')}
+              >
+                Email Code
+              </Button>
+              <Button
+                type="button"
+                variant={authMethod === 'password' ? 'default' : 'outline'}
+                className="flex-1"
+                onClick={() => setAuthMethod('password')}
+              >
+                Password
+              </Button>
+              {process.env.NEXT_PUBLIC_ENABLE_PHONE_AUTH === 'true' && (
+                <Button
+                  type="button"
+                  variant={authMethod === 'phone' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setAuthMethod('phone')}
+                >
+                  Phone Code
+                </Button>
+              )}
+            </div>
+
+            {authMethod === 'otp' ? (
+              <form onSubmit={handleRequestOtp} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+                <ReferralField id="ref" value={referralCode} onChange={setReferralCode} locked={referralLocked} />
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={acceptedTerms}
+                    onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I&apos;m 18+ and agree to the{' '}
+                    <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                      Privacy Policy
+                    </Link>.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms}>
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Sending code…
+                    </span>
+                  ) : 'Continue with Email'}
+                </Button>
+              </form>
+            ) : authMethod === 'phone' ? (
+              <form onSubmit={handleRequestPhoneOtp} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="080XXXXXXXX"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/[^\d+]/g, ''))}
+                    required
+                    autoComplete="tel"
+                  />
+                  <p className="text-[10px] text-muted-foreground">We&apos;ll text you a 6-digit code</p>
+                </div>
+                <ReferralField id="ref-phone" value={referralCode} onChange={setReferralCode} locked={referralLocked} />
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={acceptedTerms}
+                    onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I&apos;m 18+ and agree to the{' '}
+                    <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                      Privacy Policy
+                    </Link>.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms || phone.length < 10}>
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Sending code…
+                    </span>
+                  ) : 'Continue with Phone'}
+                </Button>
+              </form>
+            ) : (
+              <form onSubmit={handlePasswordAuth} className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email-pwd">Email Address</Label>
+                  <Input
+                    id="email-pwd"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="At least 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Min. 8 characters for security</p>
+                </div>
+                <ReferralField id="ref-pwd" value={referralCode} onChange={setReferralCode} locked={referralLocked} />
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={acceptedTerms}
+                    onCheckedChange={(c) => setAcceptedTerms(c === true)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    I&apos;m 18+ and agree to the{' '}
+                    <Link href="/terms" target="_blank" className="text-emerald-400 underline">
+                      Terms of Service
+                    </Link>
+                    {' '}and{' '}
+                    <Link href="/privacy" target="_blank" className="text-emerald-400 underline">
+                      Privacy Policy
+                    </Link>.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full" disabled={isLoading || !acceptedTerms || password.length < 8}>
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Signing in…
+                    </span>
+                  ) : 'Sign In / Sign Up'}
+                </Button>
+              </form>
+            )}
+          </>
         ) : (
-          <form onSubmit={handleVerifyOtp} className="space-y-4 pt-4">
+          <form onSubmit={authMethod === 'phone' ? handleVerifyPhoneOtp : handleVerifyOtp} className="space-y-4 pt-4">
             <div className="space-y-2">
               <Label htmlFor="otp">6-Digit Code</Label>
               <Input
@@ -177,7 +640,11 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
               className="w-full"
               disabled={isLoading || otp.length < 6}
             >
-              {isLoading ? 'Verifying...' : 'Verify Code'}
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
+                </span>
+              ) : 'Verify Code'}
             </Button>
             <div className="text-center">
               <Button
@@ -187,7 +654,7 @@ export function AuthModal({ variant = 'default' }: { variant?: 'default' | 'icon
                 onClick={resetForm}
                 className="text-muted-foreground"
               >
-                Wrong email? Go back
+                {authMethod === 'phone' ? 'Wrong number? Go back' : 'Wrong email? Go back'}
               </Button>
             </div>
           </form>

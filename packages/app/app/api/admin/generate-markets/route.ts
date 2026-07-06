@@ -5,7 +5,7 @@ import { isAdminRequest } from '@/lib/adminAuth';
 // Accepts a document (text content) and uses Gemini to generate
 // structured prediction market objects for review before submission.
 
-const SYSTEM_PROMPT = `You are a prediction market curator for Odds.ng, Nigeria's leading event-derivative market.
+const SYSTEM_PROMPT = `You are a prediction market curator for Opinions.ng, Nigeria's leading event-derivative market.
 
 Your job: read a document and extract or generate high-quality prediction markets.
 

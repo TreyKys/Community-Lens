@@ -4,20 +4,21 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
-  Sparkles, Trophy, Music2, Landmark, Cpu, Bitcoin, MapPin, Tv,
+  Sparkles, Clock, Trophy, Swords, Landmark, Coins,
 } from 'lucide-react';
 
-// Polymarket-style horizontal tab bar that drives the ?category= query param
-// the existing MarketList already understands.
+// Tab model: Trending = admin-curated featured set (a few hot ones);
+// New = everything else, newest first. Splitting them stops "Trending"
+// from meaning "everything" — the hot Golden Boot / Messi / group
+// winner markets stay surfaced instead of getting buried by the long
+// tail of less popular markets.
 const TABS = [
   { id: 'trending', label: 'Trending', Icon: Sparkles },
-  { id: 'sports', label: 'Sports', Icon: Trophy },
-  { id: 'entertainment', label: 'Pop Culture', Icon: Music2 },
+  { id: 'new', label: 'New', Icon: Clock },
+  { id: 'ball', label: 'Ball', Icon: Trophy },
+  { id: 'fight', label: 'Fight', Icon: Swords },
   { id: 'politics', label: 'Politics', Icon: Landmark },
-  { id: 'tech', label: 'Tech', Icon: Cpu },
-  { id: 'crypto', label: 'Crypto', Icon: Bitcoin },
-  { id: 'economy', label: 'Naija', Icon: MapPin },
-  { id: 'geo', label: 'World', Icon: Tv },
+  { id: 'economy', label: 'Everything Economy', Icon: Coins },
 ] as const;
 
 export function CategoryTabs() {

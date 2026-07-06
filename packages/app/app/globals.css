@@ -7,6 +7,7 @@
     text-wrap: balance;
   }
 
+  /* Skeleton shimmer used everywhere we're waiting on data. */
   .shimmer {
     position: relative;
     overflow: hidden;
@@ -30,6 +31,59 @@
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(100%); }
   }
+
+  /* Static green-on-black backdrop. The old version used two huge animated
+     radial blobs with filter: blur(140px). On Mali/Adreno (most Android
+     GPUs) and weaker integrated chips, animating a blurred low-alpha
+     radial-gradient causes horizontal banding artifacts — the rasterizer
+     can't keep alpha stable across the animated transform, and the page
+     looks like it's losing TV signal. Same emerald glow, no blur, no
+     animation, no GPU drama. */
+  .opinions-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 70vw 70vh at 15% -10%, rgba(16,185,129,0.18), rgba(16,185,129,0) 60%),
+      radial-gradient(ellipse 75vw 75vh at 110% 110%, rgba(5,150,105,0.14), rgba(5,150,105,0) 60%);
+  }
+
+  /* Soft pulse for landing page mesh */
+  .animate-pulse-slow {
+    animation: pulse-slow 6s ease-in-out infinite;
+  }
+  .animate-float-slow {
+    animation: float-slow 14s ease-in-out infinite;
+  }
+  @keyframes pulse-slow {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50%      { opacity: 0.85; transform: scale(1.06); }
+  }
+  @keyframes float-slow {
+    0%, 100% { transform: translate(0, 0); }
+    50%      { transform: translate(-2vw, 3vh); }
+  }
+
+  /* Hide horizontal scrollbars on tab/pill rows while keeping touch-scroll. */
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
+  /* Inline thin progress bar for loading flows */
+  .progress-stripe {
+    background-image: linear-gradient(
+      90deg,
+      rgba(16,185,129,0.6) 0%,
+      rgba(16,185,129,0.9) 50%,
+      rgba(16,185,129,0.6) 100%
+    );
+    background-size: 200% 100%;
+    animation: progress-slide 1.2s linear infinite;
+  }
+  @keyframes progress-slide {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 }
 
 
@@ -42,20 +96,20 @@
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
+    --primary: 152 76% 38%;            /* emerald-600 */
     --primary-foreground: 0 0% 98%;
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
     --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --accent: 152 76% 38%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
+    --ring: 152 76% 38%;
+    --chart-1: 152 76% 45%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
@@ -63,27 +117,27 @@
     --radius: 0.5rem;
   }
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
+    --background: 152 35% 3.5%;        /* very dark emerald-tinted black */
+    --foreground: 152 8% 96%;
+    --card: 152 25% 5%;
+    --card-foreground: 152 8% 96%;
+    --popover: 152 25% 4%;
+    --popover-foreground: 152 8% 96%;
+    --primary: 152 76% 45%;            /* emerald-400 */
+    --primary-foreground: 152 35% 3.5%;
+    --secondary: 152 12% 12%;
+    --secondary-foreground: 152 8% 96%;
+    --muted: 152 12% 12%;
+    --muted-foreground: 152 8% 64%;
+    --accent: 152 76% 38%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 62.8% 40%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
+    --border: 152 12% 14%;
+    --input: 152 12% 14%;
+    --ring: 152 76% 45%;
+    --chart-1: 152 76% 45%;
+    --chart-2: 160 60% 50%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
@@ -98,5 +152,24 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow-x: clip;
+  }
+
+  /* Android Chrome + iOS Safari auto-zoom into any focused form control
+     whose font-size is below 16px, then leave the layout zoomed-in
+     afterward — what users perceive as the page "distorting" after
+     tapping a field. Forcing 16px on small viewports kills the zoom
+     trigger. Desktop styles take over again at md+ via component
+     classes, so this is purely a mobile-only correction. Tailwind utility
+     classes (.text-xs, .text-sm) on form controls would normally win this
+     specificity battle, hence !important. */
+  @media (max-width: 767px) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    textarea,
+    select,
+    [role='combobox'],
+    [role='textbox'] {
+      font-size: 16px !important;
+    }
   }
 }

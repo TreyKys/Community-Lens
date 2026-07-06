@@ -83,46 +83,43 @@ export async function POST(request: Request) {
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
 
-    // Guard against double-credit from a concurrent webhook.
-    const { data: latest } = await supabaseAdmin
+    // Atomic credit slot claim. The squad_transactions row can be in either
+    // 'awaiting_payment' (verify won the race to the webhook — common, since
+    // Squad's redirect lands faster than its webhook) or 'pending' (webhook
+    // already saw the event and normalised the status). Either is fair
+    // game; we CAS to 'crediting' so only one caller — verify OR webhook —
+    // proceeds. If status is 'crediting' or 'completed' someone else
+    // claimed it; we report completed and bail.
+    const { data: claimed } = await supabaseAdmin
       .from('squad_transactions')
-      .select('status')
+      .update({ status: 'crediting', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
       .eq('transaction_ref', reference)
-      .single();
-    if (latest?.status === 'completed') {
+      .in('status', ['pending', 'awaiting_payment'])
+      .select('id')
+      .maybeSingle();
+
+    if (!claimed) {
       return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit });
     }
 
-    const { data: userData, error: userError } = await supabaseAdmin
-      .from('users')
-      .select('tngn_balance')
-      .eq('id', userId)
-      .single();
+    const { error: creditErr } = await supabaseAdmin.rpc('credit_user', {
+      p_user_id: userId,
+      p_tngn_delta: tNGNToCredit,
+      p_bonus_delta: 0,
+    });
 
-    if (userError || !userData) {
-      await supabaseAdmin
-        .from('squad_transactions')
-        .update({ status: 'failed_user_not_found' })
-        .eq('transaction_ref', reference);
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    const { error: updateErr } = await supabaseAdmin
-      .from('users')
-      .update({ tngn_balance: (userData.tngn_balance || 0) + tNGNToCredit })
-      .eq('id', userId);
-
-    if (updateErr) {
+    if (creditErr) {
       await supabaseAdmin
         .from('squad_transactions')
         .update({ status: 'failed_balance_update' })
         .eq('transaction_ref', reference);
-      return NextResponse.json({ error: 'Failed to credit balance' }, { status: 500 });
+      const code = (creditErr as any)?.code === 'P0002' ? 404 : 500;
+      return NextResponse.json({ error: 'Failed to credit balance' }, { status: code });
     }
 
     await supabaseAdmin
       .from('squad_transactions')
-      .update({ status: 'completed', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
+      .update({ status: 'completed' })
       .eq('transaction_ref', reference);
 
     await supabaseAdmin.from('treasury_movements').insert([
@@ -133,7 +130,55 @@ export async function POST(request: Request) {
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
     ]);
 
-    return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit });
+    // Deposit-landed notification. Sits after the CAS claim succeeded so
+    // only the caller that actually credited (verify OR webhook, never
+    // both) fires it — no duplicate.
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        type: 'deposit_credited',
+        message: `Deposit received — ₦${Math.round(tNGNToCredit).toLocaleString()} added to your wallet. Ready to predict.`,
+        amount: tNGNToCredit,
+      });
+    } catch { /* notification non-critical */ }
+
+    // Welcome Match grant. Webhook does the same thing; the RPC is
+    // idempotent per user (PK on launch_promo_grants.user_id) so it
+    // doesn't matter who calls it first. Previously this only ran from
+    // the webhook — but verify almost always wins the race (Squad's
+    // redirect lands ~1s before its webhook), and once verify flips the
+    // status to 'completed' the webhook short-circuits without granting
+    // the match. Net effect: first deposits silently missed the bonus.
+    //
+    // We pass the GROSS deposit (not post-spread) so the RPC's
+    // min-deposit threshold lines up with the WalletModal copy that
+    // says "Minimum deposit is ₦500" — depositing exactly ₦500 must
+    // qualify, even though the 1% spread leaves ₦495 in the wallet.
+    let welcomeCredit = 0;
+    try {
+      const { data: matchAmt } = await supabaseAdmin.rpc('claim_welcome_match', {
+        p_user_id: userId,
+        p_deposit_amount: amountInNGN,
+      });
+      welcomeCredit = Number(matchAmt || 0);
+      if (welcomeCredit > 0) {
+        await supabaseAdmin.from('treasury_log').insert([
+          { type: 'welcome_match', amount_tngn: welcomeCredit, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
+        ]);
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: userId,
+            type: 'welcome_match',
+            message: `🎉 Welcome bonus! ₦${welcomeCredit.toLocaleString()} matched on your first deposit. Spend it on your next prediction.`,
+            amount: welcomeCredit,
+          });
+        } catch { /* notification non-critical */ }
+      }
+    } catch (e: any) {
+      console.error('Welcome match grant failed (deposit still credited):', e?.message || e);
+    }
+
+    return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit, welcomeMatchCredit: welcomeCredit });
   } catch (e: any) {
     console.error('Squad verify error:', e);
     return NextResponse.json({ error: e?.message || 'Internal error' }, { status: 500 });

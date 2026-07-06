@@ -107,7 +107,7 @@ export async function initiateTransfer(params: {
     source: 'balance',
     amount: Math.round(params.amountNGN * 100), // convert to kobo
     recipient: params.recipientCode,
-    reason: params.reason || 'Odds.ng withdrawal',
+    reason: params.reason || 'NeuroDev Labs disbursement',
     reference: params.reference,
   });
 

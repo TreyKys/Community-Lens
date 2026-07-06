@@ -72,6 +72,14 @@ export function OnboardingIntercept() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [session, setSession] = useState<any>(null);
   const usernameTimer = useRef<any>(null);
+  // Tracks which user we've already prompted in THIS browser session.
+  // Without this, Chrome resuming from background fires
+  // onAuthStateChange (TOKEN_REFRESHED / INITIAL_SESSION), which would
+  // re-set session, which would re-check the DB and re-open the modal —
+  // so users with an incomplete profile got the popup every time they
+  // tabbed back from another app. Once checked, we don't ask again until
+  // the page is reloaded.
+  const checkedForUserId = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -81,11 +89,14 @@ export function OnboardingIntercept() {
 
   useEffect(() => {
     async function checkProfile() {
-      if (!session?.user?.id) return;
+      const uid = session?.user?.id;
+      if (!uid) return;
+      if (checkedForUserId.current === uid) return;
+      checkedForUserId.current = uid;
       const { data } = await supabase
         .from('users')
         .select('profile_complete, avatar_id')
-        .eq('id', session.user.id)
+        .eq('id', uid)
         .single();
       if (!data?.profile_complete) {
         if (data?.avatar_id !== undefined && data?.avatar_id !== null) {
@@ -139,7 +150,7 @@ export function OnboardingIntercept() {
       }
 
       toast({
-        title: 'Welcome to Odds.ng! 🎉',
+        title: 'Welcome to Opinions.ng! 🎉',
         description: `Your account is ready. Let's make some predictions, @${username}.`,
       });
       setIsOpen(false);
@@ -257,7 +268,7 @@ export function OnboardingIntercept() {
                 required
                 max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
               />
-              <p className="text-xs text-muted-foreground">You must be 18+ to use Odds.ng.</p>
+              <p className="text-xs text-muted-foreground">You must be 18+ to use Opinions.ng.</p>
             </div>
 
             <Button

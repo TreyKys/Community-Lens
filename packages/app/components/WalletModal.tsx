@@ -7,8 +7,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Wallet, Loader2, Shield, AlertTriangle } from 'lucide-react';
+import { APPROVED_BANKS } from '@/lib/banks';
 
 export function WalletModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -19,6 +21,7 @@ export function WalletModal() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
 
@@ -48,7 +51,7 @@ export function WalletModal() {
     }
   }, []);
 
-  const handleCardDeposit = async (gateway: 'paystack' | 'squad') => {
+  const handleCardDeposit = async () => {
     const amount = Number(depositAmount);
     if (!amount || amount < 500) {
       toast({ title: 'Minimum deposit is ₦500', variant: 'destructive' });
@@ -62,8 +65,8 @@ export function WalletModal() {
     try {
       const { data: { session: s } } = await supabase.auth.getSession();
       if (!s?.access_token) throw new Error('Sign in to deposit');
-      const path = gateway === 'paystack' ? '/api/paystack/initiate' : '/api/squad/initiate-card';
-      const res = await fetch(path, {
+      // Squad is the only active payment provider — Paystack scrapped per board decision.
+      const res = await fetch('/api/squad/initiate-card', {
         method: 'POST',
         headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
@@ -88,6 +91,10 @@ export function WalletModal() {
       toast({ title: 'Enter valid bank details', description: '10-digit NUBAN required', variant: 'destructive' });
       return;
     }
+    if (!accountName.trim()) {
+      toast({ title: 'Enter your account name', description: 'Exactly as it appears in your bank', variant: 'destructive' });
+      return;
+    }
     if (amount > balance) {
       toast({ title: 'Insufficient balance', variant: 'destructive' });
       return;
@@ -98,35 +105,26 @@ export function WalletModal() {
       const res = await fetch('/api/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token}` },
-        body: JSON.stringify({ amountTNGN: amount, bankCode, accountNumber }),
+        body: JSON.stringify({ amountTNGN: amount, bankCode, accountNumber, accountName: accountName.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Withdrawal failed');
-      if (data.status === 'under_review') {
-        toast({ title: 'Withdrawal under review', description: data.message });
-      } else {
-        toast({
-          title: 'Withdrawal initiated ✅',
-          description: `₦${data.nairaToReceive?.toLocaleString()} arriving in your bank within 2 hours.`,
-        });
-        if (session?.user?.id) fetchBalance(session.user.id);
-      }
+      toast({
+        title: 'Withdrawal received',
+        description: data.message || 'Withdrawals are reviewed within 24 hours.',
+      });
+      if (session?.user?.id) fetchBalance(session.user.id);
       setIsOpen(false);
       setWithdrawAmount('');
       setBankCode('');
       setAccountNumber('');
+      setAccountName('');
     } catch (err: any) {
       toast({ title: 'Withdrawal failed', description: err.message, variant: 'destructive' });
     } finally {
       setIsWithdrawLoading(false);
     }
   };
-
-  const dp = (() => {
-    const n = Number(depositAmount);
-    if (!n || n < 500) return null;
-    return { tNGN: (n * 0.99).toFixed(2) };
-  })();
 
   const wp = (() => {
     const n = Number(withdrawAmount);
@@ -139,12 +137,12 @@ export function WalletModal() {
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-2 bg-muted/50 border-muted hover:bg-muted">
           <Wallet className="h-4 w-4" />
-          {balance > 0 ? `₦${balance.toLocaleString()} tNGN` : 'Cashier'}
+          {balance > 0 ? `₦${balance.toLocaleString()} tNGN` : 'Wallet'}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[420px] border-muted">
+      <DialogContent className="sm:max-w-[420px] max-h-[92vh] overflow-y-auto border-muted">
         <DialogHeader>
-          <DialogTitle>Cashier</DialogTitle>
+          <DialogTitle>Wallet</DialogTitle>
           <DialogDescription>
             Balance: <strong>₦{balance.toLocaleString()} tNGN</strong>
             {bonusBalance > 0 && <span className="text-amber-400"> + ₦{bonusBalance.toLocaleString()} bonus</span>}
@@ -177,52 +175,45 @@ export function WalletModal() {
               </div>
             </div>
 
-            {dp && (
-              <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                <div className="flex justify-between"><span>You receive</span><span className="text-emerald-400">{dp.tNGN} tNGN</span></div>
-                <div className="flex justify-between text-[10px] pt-1 border-t border-border/40 mt-1.5">
-                  <span>Bet a lot, lose a lot? Get up to ₦5,000 back every Monday.</span>
-                </div>
+            {Number(depositAmount) >= 500 && (
+              <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg p-3 border border-border/50">
+                New here? Get up to ₦5,000 back in protection credits every Monday.
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Choose payment provider</Label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  onClick={() => handleCardDeposit('paystack')}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
-                  variant="outline"
-                  className="h-auto py-3 flex-col gap-1"
-                >
-                  <span className="font-semibold">Paystack</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
-                </Button>
-                <Button
-                  onClick={() => handleCardDeposit('squad')}
-                  disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
-                  variant="outline"
-                  className="h-auto py-3 flex-col gap-1"
-                >
-                  <span className="font-semibold">Squad</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">Card · Bank · USSD</span>
-                </Button>
-              </div>
-              {isDepositLoading && (
-                <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1 pt-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Redirecting to checkout…
-                </p>
+            <Button
+              onClick={handleCardDeposit}
+              disabled={isDepositLoading || !depositAmount || Number(depositAmount) < 500}
+              className="w-full h-12 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+            >
+              {isDepositLoading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Redirecting to checkout…
+                </span>
+              ) : (
+                <span>Continue to Secure Checkout</span>
               )}
-            </div>
+            </Button>
+            {isDepositLoading && (
+              <div className="h-1 bg-muted/50 rounded-full overflow-hidden">
+                <div className="h-full w-full progress-stripe" />
+              </div>
+            )}
 
             <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
-              <Shield className="w-3 h-3" /> Secured by Paystack &amp; Squad
+              <Shield className="w-3 h-3" /> Secured by Squad · Card · Bank · USSD
+            </p>
+            <p className="text-[11px] text-muted-foreground/80 text-center leading-relaxed border-t border-border/30 pt-3">
+              Trouble with your deposit? Email{' '}
+              <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">opng@neurodevlabs.cloud</a>
+              {' '}or{' '}
+              <a href="mailto:hello@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">hello@neurodevlabs.cloud</a>
             </p>
           </TabsContent>
 
           {/* ── WITHDRAW ────────────────────────────────────────────────── */}
           <TabsContent value="withdraw" className="space-y-4 py-4">
-            <p className="text-sm text-muted-foreground">Withdraw to any Nigerian bank. Arrives in 1-2 hours.</p>
+            <p className="text-sm text-muted-foreground">Withdraw to any approved Nigerian bank. Reviewed within 24 hours.</p>
             <div className="space-y-2">
               <Label>Amount (tNGN)</Label>
               <div className="relative">
@@ -238,32 +229,46 @@ export function WalletModal() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Bank Code</Label>
-                <Input
-                  type="text"
-                  placeholder="e.g. 058"
-                  value={bankCode}
-                  onChange={e => setBankCode(e.target.value.replace(/\D/g, ''))}
-                  maxLength={6}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Account Number</Label>
-                <Input
-                  type="text"
-                  placeholder="10-digit NUBAN"
-                  maxLength={10}
-                  value={accountNumber}
-                  onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>Bank</Label>
+              <Select value={bankCode} onValueChange={setBankCode}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select your bank" />
+                </SelectTrigger>
+                <SelectContent>
+                  {APPROVED_BANKS.map(b => (
+                    <SelectItem key={b.code} value={b.code}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+            <div className="space-y-2">
+              <Label>Account Number</Label>
+              <Input
+                type="text"
+                placeholder="10-digit NUBAN"
+                maxLength={10}
+                value={accountNumber}
+                onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Account Name</Label>
+              <Input
+                type="text"
+                placeholder="Exactly as it appears in your bank"
+                value={accountName}
+                onChange={e => setAccountName(e.target.value)}
+                autoComplete="off"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Double-check this — withdrawals to the wrong account can&apos;t be reversed.
+              </p>
+            </div>
+
             {wp && (
               <div className="text-xs text-muted-foreground space-y-1.5 bg-muted/30 rounded-lg p-3 border border-border/50">
-                <div className="flex justify-between"><span>Fees (1% spread + ₦50)</span><span>₦{wp.fees}</span></div>
-                <div className="flex justify-between font-semibold text-foreground border-t border-border/50 pt-1.5 mt-1.5">
+                <div className="flex justify-between font-semibold text-foreground">
                   <span>You receive</span><span className="text-emerald-400">₦{wp.naira}</span>
                 </div>
                 {Number(withdrawAmount) >= 500000 && (
@@ -276,12 +281,18 @@ export function WalletModal() {
             )}
             <Button
               onClick={handleWithdraw}
-              disabled={isWithdrawLoading || !withdrawAmount || !bankCode || accountNumber.length !== 10}
+              disabled={isWithdrawLoading || !withdrawAmount || !bankCode || accountNumber.length !== 10 || !accountName.trim()}
               variant="secondary"
               className="w-full"
             >
               {isWithdrawLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Processing...</> : 'Withdraw to Bank'}
             </Button>
+            <p className="text-[11px] text-muted-foreground/80 text-center leading-relaxed border-t border-border/30 pt-3">
+              Withdrawal stuck or missing? Email{' '}
+              <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">opng@neurodevlabs.cloud</a>
+              {' '}or{' '}
+              <a href="mailto:hello@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">hello@neurodevlabs.cloud</a>
+            </p>
           </TabsContent>
         </Tabs>
 

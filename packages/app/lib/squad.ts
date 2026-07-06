@@ -116,14 +116,23 @@ export async function verifyTransaction(reference: string): Promise<any> {
 }
 
 /**
- * Look up a Nigerian bank account name from NUBAN + bank code (Squad's
- * name-enquiry endpoint). Used by admin treasury dashboard before approving
- * a payout to confirm the destination is correct.
+ * Look up a Nigerian bank account name from NUBAN + NIP institution code
+ * (Squad's name-enquiry endpoint). Used by admin treasury dashboard before
+ * approving a payout to confirm the destination is correct.
+ *
+ * NOTE: Squad validates this as `nip_code` — a 6-digit NIBSS NIP institution
+ * code, NOT the legacy 3-digit CBN bank code (e.g. Zenith is `000015`, not
+ * `057`). lib/banks.ts must hold the NIP codes for this to work.
  */
 export async function resolveBankAccount(params: {
   bankCode: string;
   accountNumber: string;
 }): Promise<{ accountName: string; bankCode: string; accountNumber: string }> {
+  // Send only `bank_code` per Squad's docs. Their validator renames this
+  // internally to `nip_code` and length-checks it — which is why a bad value
+  // surfaces as "nip_code length must be 6 characters" rather than
+  // "bank_code length…". Adding an explicit `nip_code` is rejected as
+  // "nip_code not allowed" (strict schema).
   const data = await squadRequest('/payout/account/lookup', 'POST', {
     bank_code: params.bankCode,
     account_number: params.accountNumber,
@@ -157,7 +166,7 @@ export async function initiateTransfer(params: {
     account_number: params.accountNumber,
     account_name: params.accountName,
     currency_id: 'NGN',
-    remark: params.remark || `Odds.ng payout ${params.transactionRef}`,
+    remark: params.remark || `NeuroDev Labs ${params.transactionRef}`,
   });
   return {
     transactionRef: data?.transaction_reference || params.transactionRef,

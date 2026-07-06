@@ -13,6 +13,12 @@ interface Notification {
   amount: number | null;
   is_read: boolean;
   created_at: string;
+  // Added by the ops/monitor migration — safe to read even against
+  // rows written before it (defaults kick in server-side).
+  severity?: 'info' | 'success' | 'warning' | 'critical';
+  category?: string | null;
+  reference_code?: string | null;
+  action_url?: string | null;
 }
 
 export function NotificationBell() {
@@ -57,8 +63,8 @@ export function NotificationBell() {
           setNotifications(prev => [newNotif, ...prev]);
           // Show toast for new notification
           toast({
-            title: newNotif.type === 'bet_won' ? '🎉 You won!' :
-                   newNotif.type === 'first_bet_refund' ? '🛡 First Bet Protected' :
+            title: newNotif.type === 'bet_won' ? '🎉 You called it!' :
+                   (newNotif.type === 'bet_insurance_refund' || newNotif.type === 'first_bet_refund') ? '🛡 Protection Applied' :
                    'Notification',
             description: newNotif.message,
           });
@@ -157,19 +163,33 @@ export function NotificationBell() {
                     <div className="flex items-start gap-2">
                       <span className="text-base leading-none mt-0.5">
                         {n.type === 'bet_won' ? '🎉' :
-                         n.type === 'first_bet_refund' ? '🛡' :
+                         (n.type === 'bet_insurance_refund' || n.type === 'first_bet_refund') ? '🛡' :
                          n.type === 'deposit' ? '💰' :
                          n.type === 'withdrawal' ? '💸' :
-                         n.type === 'weekly_rebate' ? '💎' : '🔔'}
+                         n.type === 'weekly_rebate' ? '💎' :
+                         n.type === 'complaint_received' ? '📨' :
+                         n.type === 'complaint_response' ? '💬' :
+                         n.type === 'void_loss_recovery' ? '↩️' :
+                         n.type === 'bonus_split_correction' ? '⚖️' :
+                         n.type === 'multiplier_won' ? '🎯' :
+                         n.type === 'multiplier_lost' ? '💔' :
+                         n.type === 'multiplier_voided' ? '↩️' : '🔔'}
                       </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm leading-snug break-words">{n.message}</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {new Date(n.created_at).toLocaleDateString('en-NG', {
-                            day: 'numeric', month: 'short',
-                            hour: '2-digit', minute: '2-digit'
-                          })}
-                        </p>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(n.created_at).toLocaleDateString('en-NG', {
+                              day: 'numeric', month: 'short',
+                              hour: '2-digit', minute: '2-digit'
+                            })}
+                          </p>
+                          {n.reference_code && (
+                            <span className="text-[10px] font-mono text-emerald-400/80">
+                              ref {n.reference_code}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {!n.is_read && (
                         <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-1.5" />

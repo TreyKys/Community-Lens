@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Opinions.ng — Post 1: The Manifesto Drop
+  9:16 vertical · 1080 × 1920 · target duration ~11s @ 30fps
+
+  IMPORT:
+    1. Open Figma → File → New Design File.
+    2. Create a 1080 × 1920 frame (use the "Instagram Story" preset).
+    3. Drag this SVG onto the frame. Every <g id="…"> becomes a named
+       layer group in the Figma Layers panel.
+    4. Select the whole frame → Cmd/Ctrl+C → open Jitter → Cmd/Ctrl+V.
+       Jitter preserves the layer names — that's how you'll target
+       individual elements on the timeline.
+
+  ANIMATION (in Jitter, one keyframe per scene):
+    See marketing/post1-manifesto.brief.md alongside this file.
+
+  FONT NOTE:
+    SVG references "Saira Stencil" (the site face) with a system
+    fallback. Saira Stencil isn't a Google font Jitter ships, so when
+    you paste into Jitter, swap to "Saira Stencil One" (free on Google
+    Fonts) or a chunky display face: Anton, Bebas Neue, Druk, Cooper
+    Hewitt Heavy. Avoid thin/regular weights — the energy is in the
+    weight.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <!-- Top-left emerald sweep — same vibe as the in-app `opinions-bg` -->
+    <radialGradient id="sweepTL" cx="15%" cy="-5%" r="80%">
+      <stop offset="0%"  stop-color="#10b981" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#10b981" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Bottom-right emerald sweep, deeper saturation -->
+    <radialGradient id="sweepBR" cx="105%" cy="105%" r="85%">
+      <stop offset="0%"  stop-color="#059669" stop-opacity="0.45"/>
+      <stop offset="55%" stop-color="#059669" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Emerald text fill — used to highlight key words -->
+    <linearGradient id="emeraldText" x1="0%" y1="0%" x2="100%" y2="50%">
+      <stop offset="0%"   stop-color="#6ee7b7"/>
+      <stop offset="60%"  stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+
+    <!-- Soft emerald glow for the logo lockup -->
+    <filter id="emeraldGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ───────────────────────── BACKGROUND ───────────────────────── -->
+  <g id="01_BG">
+    <rect width="1080" height="1920" fill="#050A08"/>
+  </g>
+
+  <g id="02_Sweep_TL">
+    <rect width="1080" height="1920" fill="url(#sweepTL)"/>
+  </g>
+
+  <g id="03_Sweep_BR">
+    <rect width="1080" height="1920" fill="url(#sweepBR)"/>
+  </g>
+
+  <!-- ───────────────────── SCENE 1 — Smart money ─────────────────── -->
+  <!-- Centred on y≈920. Every text scene shares the same vertical
+       centre so swapping layers in Jitter doesn't shift the eye. -->
+  <g id="04_Scene1_SmartMoney">
+    <text x="540" y="880" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="110" fill="#FFFFFF"
+          letter-spacing="-3">SMART MONEY</text>
+    <text x="540" y="1000" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="110" fill="#FFFFFF"
+          letter-spacing="-3">DOESN'T GUESS.</text>
+  </g>
+
+  <!-- ──────────────────── SCENE 2 — Takes positions ──────────────── -->
+  <g id="05_Scene2_TakesPositions">
+    <text x="540" y="860" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="100" fill="#FFFFFF"
+          letter-spacing="-2">IT TAKES</text>
+    <text x="540" y="1020" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="160" fill="url(#emeraldText)"
+          letter-spacing="-5">POSITIONS.</text>
+  </g>
+
+  <!-- ────────────── SCENE 3 — Categories (staccato) ──────────────── -->
+  <!-- Four separate layers so you can swap them rapid-fire in Jitter
+       (0.35 s each). Each is centred at the same anchor so they cut
+       cleanly with no positional drift. -->
+  <g id="06_Scene3a_Football">
+    <text x="540" y="970" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="140" fill="#FFFFFF"
+          letter-spacing="-3">FOOTBALL.</text>
+  </g>
+
+  <g id="07_Scene3b_Politics">
+    <text x="540" y="970" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="140" fill="#FFFFFF"
+          letter-spacing="-3">POLITICS.</text>
+  </g>
+
+  <g id="08_Scene3c_PopCulture">
+    <text x="540" y="970" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="118" fill="#FFFFFF"
+          letter-spacing="-3">POP CULTURE.</text>
+  </g>
+
+  <g id="09_Scene3d_Economy">
+    <text x="540" y="970" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="130" fill="url(#emeraldText)"
+          letter-spacing="-3">THE ECONOMY.</text>
+  </g>
+
+  <!-- ───────────── SCENE 4 — Instant Naira settlement ────────────── -->
+  <g id="10_Scene4_InstantSettlement">
+    <text x="540" y="880" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="96" fill="#FFFFFF"
+          letter-spacing="-2">INSTANT NAIRA</text>
+    <text x="540" y="1000" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="120" fill="url(#emeraldText)"
+          letter-spacing="-3">SETTLEMENT.</text>
+  </g>
+
+  <!-- ──────────── SCENE 5 — Sealed on Polygon ────────────────────── -->
+  <g id="11_Scene5_SealedPolygon">
+    <text x="540" y="880" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="100" fill="#FFFFFF"
+          letter-spacing="-2">SEALED ON</text>
+    <text x="540" y="1010" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="140" fill="url(#emeraldText)"
+          letter-spacing="-4">POLYGON.</text>
+  </g>
+
+  <!-- ──────────────────────── SCENE 6 — LOGO ─────────────────────── -->
+  <g id="12_Scene6_Logo">
+    <!-- Diamond glyph echoing the app icon. Replace with your own
+         logo file once you have a vector version exported. -->
+    <g transform="translate(540 760)" filter="url(#emeraldGlow)">
+      <rect x="-70" y="-70" width="140" height="140" rx="32"
+            fill="url(#emeraldText)"/>
+      <text x="0" y="20" text-anchor="middle"
+            font-family="Saira Stencil, Impact, Anton, sans-serif"
+            font-weight="900" font-size="96" fill="#050A08">◈</text>
+    </g>
+
+    <text x="540" y="970" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="128" fill="#FFFFFF"
+          letter-spacing="-4">OPINIONS.NG</text>
+
+    <text x="540" y="1040" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="500" font-size="34" fill="#94a3b8"
+          letter-spacing="6">EVENT-PREDICTION MARKET · 🇳🇬</text>
+  </g>
+
+  <!-- ─────────────────────── SCENE 7 — LIVE pill ─────────────────── -->
+  <g id="13_Scene7_LiveBadge">
+    <rect x="395" y="1130" width="290" height="78" rx="39"
+          fill="url(#emeraldText)"/>
+    <circle cx="450" cy="1169" r="9" fill="#050A08">
+      <!-- A subtle pulse you can amplify in Jitter -->
+      <animate attributeName="opacity" values="1;0.4;1"
+               dur="1.4s" repeatCount="indefinite"/>
+    </circle>
+    <text x="555" y="1185" text-anchor="middle"
+          font-family="Saira Stencil, Impact, Anton, sans-serif"
+          font-weight="900" font-size="38" fill="#050A08"
+          letter-spacing="6">LIVE NOW</text>
+  </g>
+</svg>

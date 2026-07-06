@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, CheckCircle2, ChevronLeft, AlertTriangle } from 'lucide-react';
+import { Loader2, CheckCircle2, ChevronLeft, AlertTriangle, Check, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { DataTable, Column } from '@/components/admin/DataTable';
 
@@ -28,13 +29,64 @@ type MarketRow = {
   distribution: { option: string; count: number; stake: number; percentage: number }[];
 };
 
+// useSearchParams requires a Suspense boundary above it in the App
+// Router, even on a fully client-rendered page — the default export
+// just wraps the real page so a deep link (e.g. from /ops's "Resolve
+// now" action on a never_resolved finding) can pass ?marketId=X.
 export default function ResolvePage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}>
+      <ResolvePageInner />
+    </Suspense>
+  );
+}
+
+function ResolvePageInner() {
+  const searchParams = useSearchParams();
+  const deepLinkMarketId = searchParams.get('marketId');
   const [markets, setMarkets] = useState<MarketRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [confirmMarket, setConfirmMarket] = useState<MarketRow | null>(null);
-  const [confirmOutcome, setConfirmOutcome] = useState<string>('');
+  // Multi-select: usually exactly one outcome, but ties / "either counts"
+  // rulings need more than one marked correct. Empty until the admin picks.
+  const [confirmOutcomes, setConfirmOutcomes] = useState<number[]>([]);
   const [isResolving, setIsResolving] = useState(false);
+  const [deepLinkHandled, setDeepLinkHandled] = useState(false);
   const { toast } = useToast();
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+  const [adminInput, setAdminInput] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/admin/auth')
+      .then((res) => { if (res.ok) setIsAdmin(true); })
+      .finally(() => setIsChecking(false));
+  }, []);
+
+  const handleAdminLogin = async () => {
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret: adminInput }),
+      });
+      if (res.ok) {
+        setIsAdmin(true);
+        setAdminInput('');
+      } else {
+        setLoginError('Invalid admin secret');
+      }
+    } catch {
+      setLoginError('Network error');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const fetchMarkets = useCallback(async () => {
     setIsLoading(true);
@@ -51,23 +103,28 @@ export default function ResolvePage() {
       return;
     }
 
+    // user_bets is RLS-locked to own rows only (migration 20240621), so
+    // anon-client aggregation no longer works. Fetch distributions in one
+    // batch from the admin endpoint instead.
+    const ids = (raw as any[]).map(m => m.id);
+    const distRes = await fetch(`/api/admin/markets/distributions?ids=${ids.join(',')}`, {
+      headers: adminHeaders(),
+      credentials: 'include',
+    });
+    const distBody = distRes.ok ? await distRes.json() : { distributions: {} };
+    const distMap: Record<number, Record<number, { count: number; stake: number }>> = distBody.distributions || {};
+
     const enriched: MarketRow[] = [];
     for (const m of raw as any[]) {
-      const { data: bets } = await supabase
-        .from('user_bets')
-        .select('outcome_index, net_stake_tngn')
-        .eq('market_id', m.id)
-        .eq('status', 'active');
-
-      const total = bets?.reduce((s, b) => s + (b.net_stake_tngn || 0), 0) ?? 0;
+      const perOutcome = distMap[m.id] || {};
+      const total = Object.values(perOutcome).reduce((s: number, v: any) => s + (v?.stake || 0), 0);
       const distribution = (m.options as string[]).map((opt, i) => {
-        const forOption = (bets || []).filter((b) => b.outcome_index === i);
-        const stake = forOption.reduce((s, b) => s + (b.net_stake_tngn || 0), 0);
+        const cell = perOutcome[i] || { count: 0, stake: 0 };
         return {
           option: opt,
-          count: forOption.length,
-          stake,
-          percentage: total > 0 ? Math.round((stake / total) * 100) : 0,
+          count: cell.count,
+          stake: cell.stake,
+          percentage: total > 0 ? Math.round((cell.stake / total) * 100) : 0,
         };
       });
 
@@ -79,10 +136,33 @@ export default function ResolvePage() {
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchMarkets();
-  }, [fetchMarkets]);
+  }, [fetchMarkets, isAdmin]);
 
-  const performResolve = async (market: MarketRow, outcomeIndex: number) => {
+  // Deep link from /ops's "Resolve now" action on a never_resolved
+  // finding — once the market list loads, auto-open the confirm dialog
+  // for the requested market so the admin lands directly on the
+  // outcome picker instead of having to search the table. Only fires
+  // once per page load (deepLinkHandled) so closing the dialog doesn't
+  // immediately reopen it.
+  useEffect(() => {
+    if (deepLinkHandled || !deepLinkMarketId || markets.length === 0) return;
+    const target = markets.find(m => m.id === Number(deepLinkMarketId));
+    if (target) {
+      setConfirmMarket(target);
+      setConfirmOutcomes([]);
+    } else {
+      toast({
+        title: `Market #${deepLinkMarketId} not found`,
+        description: 'It may already be resolved, or is not open/locked.',
+        variant: 'destructive',
+      });
+    }
+    setDeepLinkHandled(true);
+  }, [deepLinkHandled, deepLinkMarketId, markets, toast]);
+
+  const performResolve = async (market: MarketRow, outcomeIndices: number[]) => {
     if (market.status === 'open') {
       const lockRes = await fetch('/api/markets/lock', {
         method: 'POST',
@@ -95,24 +175,38 @@ export default function ResolvePage() {
     const resolveRes = await fetch('/api/markets/resolve', {
       method: 'POST',
       headers: adminHeaders(),
-      body: JSON.stringify({ marketId: market.id, winningOutcomeIndex: outcomeIndex }),
+      body: JSON.stringify({ marketId: market.id, winningOutcomeIndices: outcomeIndices }),
     });
     const data = await resolveRes.json();
     if (!resolveRes.ok) throw new Error(data.error || 'Resolution failed');
     return data;
   };
 
+  const toggleOutcome = (index: number) => {
+    setConfirmOutcomes(prev =>
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index].sort((a, b) => a - b),
+    );
+  };
+
   const handleConfirmResolve = async () => {
-    if (!confirmMarket || confirmOutcome === '') return;
+    if (!confirmMarket || confirmOutcomes.length === 0) return;
     setIsResolving(true);
     try {
-      const result = await performResolve(confirmMarket, parseInt(confirmOutcome));
-      toast({
-        title: 'Market resolved',
-        description: `${result.winnersCount ?? 0} winner(s) paid out. Pool ₦${(result.totalPool || 0).toLocaleString()}.`,
-      });
-      setConfirmMarket(null);
-      setConfirmOutcome('');
+      const result = await performResolve(confirmMarket, confirmOutcomes);
+      if (result.partial) {
+        toast({
+          title: 'Only partially resolved',
+          description: `${result.failedBetIds?.length ?? 0} bet(s) failed to settle and are still active. Resolve again to retry — already-settled bets won't be touched.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Market resolved',
+          description: `${result.winnersCount ?? 0} winner(s) paid out. Pool ₦${(result.totalPool || 0).toLocaleString()}.`,
+        });
+        setConfirmMarket(null);
+        setConfirmOutcomes([]);
+      }
       fetchMarkets();
     } catch (err: any) {
       toast({ title: 'Resolve failed', description: err.message, variant: 'destructive' });
@@ -206,7 +300,7 @@ export default function ResolvePage() {
           onClick={(e) => {
             e.stopPropagation();
             setConfirmMarket(r);
-            setConfirmOutcome('');
+            setConfirmOutcomes([]);
           }}
         >
           <CheckCircle2 className="w-3 h-3" />
@@ -217,15 +311,46 @@ export default function ResolvePage() {
     },
   ];
 
-  const selectedDist = confirmMarket && confirmOutcome !== ''
-    ? confirmMarket.distribution[parseInt(confirmOutcome)]
-    : null;
-  const loserStake = confirmMarket && confirmOutcome !== ''
+  const winnerStake = confirmMarket
     ? confirmMarket.distribution
-        .filter((_, i) => i !== parseInt(confirmOutcome))
+        .filter((_, i) => confirmOutcomes.includes(i))
         .reduce((s, d) => s + d.stake, 0)
     : 0;
-  const winnerStake = selectedDist?.stake ?? 0;
+  const winnerCount = confirmMarket
+    ? confirmMarket.distribution
+        .filter((_, i) => confirmOutcomes.includes(i))
+        .reduce((s, d) => s + d.count, 0)
+    : 0;
+  const loserStake = confirmMarket
+    ? confirmMarket.distribution
+        .filter((_, i) => !confirmOutcomes.includes(i))
+        .reduce((s, d) => s + d.stake, 0)
+    : 0;
+
+  if (isChecking) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Card className="w-80">
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><Shield className="w-4 h-4" /> Admin Access</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <Input
+              type="password"
+              placeholder="Admin secret"
+              value={adminInput}
+              onChange={e => setAdminInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdminLogin()}
+            />
+            {loginError && <p className="text-xs text-destructive">{loginError}</p>}
+            <Button className="w-full" onClick={handleAdminLogin} disabled={isLoggingIn || !adminInput}>
+              {isLoggingIn ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Verifying…</> : 'Enter'}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-6">
@@ -274,26 +399,39 @@ export default function ResolvePage() {
                 <CardContent className="space-y-3">
                   <div>
                     <label className="text-xs uppercase tracking-wider text-muted-foreground mb-1 block">
-                      Winning outcome
+                      Winning outcome(s) — select one, or more for a tie
                     </label>
-                    <Select value={confirmOutcome} onValueChange={setConfirmOutcome}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select the outcome..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {confirmMarket.options.map((opt, i) => {
-                          const d = confirmMarket.distribution[i];
-                          return (
-                            <SelectItem key={i} value={i.toString()}>
-                              {opt} — {d.percentage}% ({d.count} bet{d.count !== 1 ? 's' : ''})
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-1.5">
+                      {confirmMarket.options.map((opt, i) => {
+                        const d = confirmMarket.distribution[i];
+                        const selected = confirmOutcomes.includes(i);
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => toggleOutcome(i)}
+                            className={`w-full flex items-center gap-2 text-left text-sm px-3 py-2 rounded-md border transition-colors ${
+                              selected
+                                ? 'border-emerald-500 bg-emerald-500/10'
+                                : 'border-muted hover:bg-muted/40'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
+                              selected ? 'bg-emerald-600 border-emerald-600' : 'border-muted-foreground/40'
+                            }`}>
+                              {selected && <Check className="w-3 h-3 text-white" />}
+                            </span>
+                            <span className="flex-1 truncate">{opt}</span>
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {d.percentage}% ({d.count} bet{d.count !== 1 ? 's' : ''})
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {confirmOutcome !== '' && selectedDist && (
+                  {confirmOutcomes.length > 0 && (
                     <div className="space-y-2 pt-2 border-t border-muted">
                       <div className="flex justify-between text-xs">
                         <span className="text-muted-foreground">Winning pool</span>
@@ -305,7 +443,7 @@ export default function ResolvePage() {
                       </div>
                       <div className="flex justify-between text-xs">
                         <span className="text-muted-foreground">Winners</span>
-                        <span className="font-medium">{selectedDist.count}</span>
+                        <span className="font-medium">{winnerCount}</span>
                       </div>
                       {winnerStake === 0 && loserStake === 0 && (
                         <div className="flex items-center gap-2 text-xs text-amber-400 mt-2">
@@ -313,10 +451,16 @@ export default function ResolvePage() {
                           No bets placed — market will be voided.
                         </div>
                       )}
-                      {(winnerStake === 0 || loserStake === 0) && (winnerStake + loserStake > 0) && (
+                      {winnerStake === 0 && loserStake > 0 && (
                         <div className="flex items-center gap-2 text-xs text-amber-400 mt-2">
                           <AlertTriangle className="w-3.5 h-3.5" />
-                          One-sided market — all bets will be refunded.
+                          Nobody picked the winning outcome — every bet loses, house keeps the pool.
+                        </div>
+                      )}
+                      {winnerStake > 0 && loserStake === 0 && (
+                        <div className="flex items-center gap-2 text-xs text-amber-400 mt-2">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          One-sided market — winners are paid the guaranteed floor rate; house tops up the difference.
                         </div>
                       )}
                     </div>
@@ -332,7 +476,7 @@ export default function ResolvePage() {
             </Button>
             <Button
               className="bg-emerald-600 hover:bg-emerald-500"
-              disabled={confirmOutcome === '' || isResolving}
+              disabled={confirmOutcomes.length === 0 || isResolving}
               onClick={handleConfirmResolve}
             >
               {isResolving ? (

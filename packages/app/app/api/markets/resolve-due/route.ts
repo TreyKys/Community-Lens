@@ -12,12 +12,21 @@ export async function POST(request: Request) {
   const supabaseAdmin = getSupabaseAdmin();
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
+  // A market only needs EITHER a fixture_id (football-data.org lookup)
+  // OR both team names (StatsAPI lookup by name — see
+  // lookupFootballResultStatsAPI in lib/oracle.ts). Requiring fixture_id
+  // unconditionally used to exclude every market from this cron entirely
+  // whenever it was null — which is every market created by the AI bulk
+  // generator (app/api/admin/generate-markets always sets fixture_id:
+  // null). Those markets have working team-name data and would resolve
+  // fine via the StatsAPI fallback that lookupMarketResult already has;
+  // they just never got a chance to try.
   const { data: markets } = await supabaseAdmin
     .from('markets')
     .select('id, title, fixture_id, sport, options, resolution_attempts, closes_at, home_team, away_team')
     .eq('status', 'locked')
     .eq('category', 'sports')
-    .not('fixture_id', 'is', null)
+    .or('fixture_id.not.is.null,and(home_team.not.is.null,away_team.not.is.null)')
     .lt('closes_at', twoHoursAgo)
     .limit(50);
 
@@ -68,9 +77,15 @@ export async function POST(request: Request) {
       body: JSON.stringify({ marketId: m.id, winningOutcomeIndex }),
     });
     const body = await resolveRes.json().catch(() => ({}));
+    // resolveRes.ok is true for 200 AND 207 (partial — market left
+    // claimed+locked for a retry, some bets/legs didn't settle). Next
+    // cron pass re-queries status='locked' markets so an incomplete
+    // one gets retried regardless, but the result log itself must not
+    // claim success for a run that didn't actually finish.
+    const fullySucceeded = resolveRes.ok && body?.partial !== true && body?.success !== false;
 
-    if (!resolveRes.ok) {
-      results.push({ marketId: m.id, success: false, error: body.error });
+    if (!fullySucceeded) {
+      results.push({ marketId: m.id, success: false, error: body.error || body.reason, partial: body?.partial === true });
     } else {
       results.push({ marketId: m.id, success: true, outcome: winningOutcomeIndex });
     }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { isAdminRequest } from '@/lib/adminAuth';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,11 +10,16 @@ const supabaseAdmin = createClient(
 // This endpoint is called weekly by the GitHub Actions cron-heartbeat workflow.
 // It publishes a heartbeat transaction to the EscapeHatch smart contract.
 // If this stops firing for 30 days, users can call emergencyWithdraw()
-// directly on the contract to reclaim their funds — bypassing Odds.ng.
+// directly on the contract to reclaim their funds — bypassing Opinions.ng.
+//
+// Accepts either the server-side CRON_SECRET (GitHub Actions) or the admin
+// cookie (the manual "fire heartbeat" button in /admin). The admin panel
+// no longer carries the cron secret client-side.
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
-    if (cronSecret !== process.env.CRON_SECRET) {
+    const isValidCron = cronSecret === process.env.CRON_SECRET;
+    if (!isValidCron && !isAdminRequest(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

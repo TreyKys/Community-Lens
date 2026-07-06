@@ -43,45 +43,61 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
     }
 
-    const { data: withdrawal, error: wdError } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*')
-      .eq('id', withdrawalId)
-      .single();
-
-    if (wdError || !withdrawal) {
-      return NextResponse.json({ error: 'Withdrawal not found' }, { status: 404 });
-    }
-
     if (action === 'reject') {
-      // Refund the user's balance
-      const { data: userData } = await supabaseAdmin
-        .from('users')
-        .select('tngn_balance')
-        .eq('id', withdrawal.user_id)
-        .single();
+      // Atomic CAS: only one admin can flip status from 'pending_admin_approval'
+      // to 'rejected'. Loser bails — prevents double-refund when two admins
+      // click reject simultaneously.
+      const { data: rejected } = await supabaseAdmin
+        .from('withdrawals')
+        .update({
+          status: 'rejected',
+          admin_note: reason || 'Rejected by admin',
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', withdrawalId)
+        .eq('status', 'pending_admin_approval')
+        .select('user_id, amount_tngn')
+        .maybeSingle();
 
-      if (userData) {
-        await supabaseAdmin
-          .from('users')
-          .update({ tngn_balance: (userData.tngn_balance || 0) + withdrawal.amount_tngn })
-          .eq('id', withdrawal.user_id);
+      if (!rejected) {
+        return NextResponse.json(
+          { error: 'Withdrawal not found or already processed' },
+          { status: 409 },
+        );
       }
 
-      await supabaseAdmin
-        .from('withdrawals')
-        .update({ status: 'rejected', admin_note: reason || 'Rejected by admin', processed_at: new Date().toISOString() })
-        .eq('id', withdrawalId);
+      const { error: refundErr } = await supabaseAdmin.rpc('credit_user', {
+        p_user_id: rejected.user_id,
+        p_tngn_delta: Number(rejected.amount_tngn),
+        p_bonus_delta: 0,
+      });
+      if (refundErr) {
+        console.error('Refund failed after reject — manual recovery needed:', { withdrawalId, refundErr });
+        return NextResponse.json({ error: 'Refund failed' }, { status: 500 });
+      }
 
       return NextResponse.json({ success: true, status: 'rejected' });
     }
 
     if (action === 'approve') {
-      // TODO: Trigger Paystack transfer here (same as standard withdrawal)
-      await supabaseAdmin
+      // Atomic CAS — only one admin can transition to approved_queued_for_paystack.
+      const { data: approved } = await supabaseAdmin
         .from('withdrawals')
-        .update({ status: 'approved_queued_for_paystack', processed_at: new Date().toISOString() })
-        .eq('id', withdrawalId);
+        .update({
+          status: 'approved_queued_for_paystack',
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', withdrawalId)
+        .eq('status', 'pending_admin_approval')
+        .select('id')
+        .maybeSingle();
+
+      if (!approved) {
+        return NextResponse.json(
+          { error: 'Withdrawal not found or already processed' },
+          { status: 409 },
+        );
+      }
 
       return NextResponse.json({ success: true, status: 'approved' });
     }

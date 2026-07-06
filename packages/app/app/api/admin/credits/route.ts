@@ -11,6 +11,27 @@ function supabaseAdmin() {
   );
 }
 
+// Recent manual_credit history for the admin Credits panel. Moved
+// server-side so we could lock down treasury_log with RLS without
+// breaking the panel — the table is no longer client-readable, but
+// service-role queries (this route) still see everything.
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from('treasury_log')
+    .select('amount_tngn, user_id, created_at, metadata')
+    .eq('type', 'manual_credit')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ history: data || [] });
+}
+
 export async function POST(request: Request) {
   try {
     if (!isAdminRequest(request)) {
@@ -40,13 +61,19 @@ export async function POST(request: Request) {
     if (userErr) return NextResponse.json({ error: userErr.message }, { status: 500 });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const newBonus = (user.bonus_balance || 0) + amt;
-
-    const { error: updateErr } = await db
-      .from('users')
-      .update({ bonus_balance: newBonus })
-      .eq('id', user.id);
+    // Credit atomically via credit_user (row-locked) instead of the old
+    // read-then-write, which raced with any concurrent credit on the
+    // same user (e.g. a bet settling at the same moment) and could drop
+    // one of the two deltas.
+    const { data: creditResult, error: updateErr } = await db
+      .rpc('credit_user', {
+        p_user_id: user.id,
+        p_tngn_delta: 0,
+        p_bonus_delta: amt,
+      })
+      .single<{ tngn_balance: number; bonus_balance: number }>();
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    const newBonus = Number(creditResult?.bonus_balance ?? (user.bonus_balance || 0) + amt);
 
     await db.from('treasury_log').insert({
       type: 'manual_credit',

@@ -51,8 +51,7 @@ digest of the raw body, keyed by `SQUAD_SECRET_KEY`.
 | Var | Notes |
 | --- | --- |
 | `ADMIN_SECRET` | Server-only. Validates the admin login form and admin Bearer tokens. The admin shell exchanges this for an httpOnly cookie via `/api/admin/auth`. **Do not** set as `NEXT_PUBLIC_*`. |
-| `CRON_SECRET` | Server-only. Sent as `x-cron-secret` from GitHub Actions and the in-app heartbeat trigger. |
-| `NEXT_PUBLIC_CRON_SECRET` | Only needed if you want the admin's "Fire heartbeat" button to work in the browser. Future work: move that call server-side too. |
+| `CRON_SECRET` | Server-only. Sent as `x-cron-secret` from GitHub Actions and the in-app heartbeat trigger. **Do not** set as `NEXT_PUBLIC_*` — the heartbeat button has been moved server-side and the public version would leak the secret to every browser visitor. |
 | `NEXT_PUBLIC_APP_URL` | Used by the daily seeder when calling its own internal admin endpoint. Set to your deployed URL. |
 
 ### Wallets / on-chain
