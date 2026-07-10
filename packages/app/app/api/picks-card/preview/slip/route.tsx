@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
 import { resolveTheme } from '@/lib/picksThemes';
 import { getSentimentPct } from '@/lib/sentiment';
+import { loadOgFonts } from '@/lib/ogFonts';
 
 // GET /api/picks-card/preview/slip?legs=mid:oi:odds,mid:oi:odds&stakeTngn=…&odds=…&handle=…&theme=…
 //
@@ -109,6 +110,7 @@ export async function GET(req: Request) {
   }
 
   const payout = combinedOdds > 0 ? Math.round(stakeTngn * combinedOdds) : stakeTngn;
+  const fonts = await loadOgFonts();
 
   return new ImageResponse(
     (
@@ -119,7 +121,7 @@ export async function GET(req: Request) {
           display: 'flex',
           flexDirection: 'column',
           background: `linear-gradient(160deg, ${theme.gradient[0]} 0%, ${theme.gradient[1]} 55%, ${theme.gradient[2]} 100%)`,
-          fontFamily: 'sans-serif',
+          fontFamily: 'Noto Sans',
           padding: '72px',
           position: 'relative',
         }}
@@ -272,6 +274,6 @@ export async function GET(req: Request) {
         </div>
       </div>
     ),
-    { ...CARD_SIZE },
+    { ...CARD_SIZE, fonts },
   );
 }

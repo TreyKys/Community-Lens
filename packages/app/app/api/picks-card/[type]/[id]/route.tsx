@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
 import { resolveTheme } from '@/lib/picksThemes';
 import { getSentimentPct } from '@/lib/sentiment';
+import { loadOgFonts } from '@/lib/ogFonts';
 
 // GET /api/picks-card/[type]/[id]?theme=violet
 //
@@ -207,6 +208,8 @@ export async function GET(
     };
   }
 
+  const fonts = await loadOgFonts();
+
   return new ImageResponse(
     (
       <div
@@ -216,7 +219,7 @@ export async function GET(
           display: 'flex',
           flexDirection: 'column',
           background: `linear-gradient(160deg, ${theme.gradient[0]} 0%, ${theme.gradient[1]} 55%, ${theme.gradient[2]} 100%)`,
-          fontFamily: 'sans-serif',
+          fontFamily: 'Noto Sans',
           padding: '72px',
           position: 'relative',
         }}
@@ -520,6 +523,6 @@ export async function GET(
         </div>
       </div>
     ),
-    { ...CARD_SIZE },
+    { ...CARD_SIZE, fonts },
   );
 }
