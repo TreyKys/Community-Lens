@@ -115,11 +115,12 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
               alignItems: 'center',
               justifyContent: 'center',
               color: '#050A08',
-              fontSize: 34,
+              fontSize: 18,
               fontWeight: 900,
+              letterSpacing: -1,
             }}
           >
-            ◈
+            O/N
           </div>
           <div style={{ display: 'flex', color: '#ffffff', fontSize: 32, fontWeight: 800, letterSpacing: 3 }}>
             OPINIONS.NG

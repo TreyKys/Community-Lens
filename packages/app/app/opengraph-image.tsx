@@ -41,11 +41,12 @@ export default function OpengraphImage() {
               alignItems: 'center',
               justifyContent: 'center',
               color: '#050A08',
-              fontSize: 30,
+              fontSize: 17,
               fontWeight: 900,
+              letterSpacing: -1,
             }}
           >
-            ◈
+            O/N
           </div>
           <div
             style={{
