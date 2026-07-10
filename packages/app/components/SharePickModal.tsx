@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Share2, Check, Link as LinkIcon, Sparkles } from 'lucide-react';
+import { Loader2, Share2, Check, Link as LinkIcon, Sparkles, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -16,6 +16,17 @@ import {
 // theme swatch row, the live OG card preview, and a native share button
 // with a clipboard fallback. The user's last theme pick is remembered in
 // localStorage so the second share opens on the same look.
+//
+// Sharing a bare URL via navigator.share only ever produces a rich
+// preview in chat/DM contexts that fetch OG tags (WhatsApp DM, X DM,
+// iMessage) — WhatsApp Status, Snapchat, and X's Story/status compose
+// surfaces do NOT fetch link previews at all; they need an actual image
+// FILE. So handleShare always fetches the real PNG from the card
+// endpoint first and, wherever the platform supports it (Web Share API
+// Level 2 — most mobile browsers), attaches it as a file. Where file
+// sharing isn't supported (desktop browsers mainly), a standalone
+// "Download image" button guarantees the PNG is always obtainable so
+// it can be attached by hand.
 
 const THEME_KEY = 'opx_picks_theme';
 const SITE_ORIGIN_FALLBACK = 'https://opinionsng.com';
@@ -33,6 +44,7 @@ export function SharePickModal({
   const [theme, setTheme] = useState<PicksThemeId>(DEFAULT_PICKS_THEME);
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -59,17 +71,47 @@ export function SharePickModal({
       : `${handle === '@'+handle.slice(1) ? handle : 'I'}'m calling it on Opinions.ng. Stake the same pick or make it yours →`;
   }, [defaultUsername, type]);
 
+  const cardFileName = `opinions-ng-${type}-${id}.png`;
+
+  const fetchCardBlob = async (): Promise<Blob> => {
+    const res = await fetch(cardUrl);
+    if (!res.ok) throw new Error(`Card image failed to load (${res.status})`);
+    return res.blob();
+  };
+
   const handleShare = async () => {
     setSharing(true);
-    const payload = { title: 'My OPx Picks · Opinions.ng', text: shareText, url: shareUrl };
     try {
+      // Try to attach the actual PNG first — this is the only way the
+      // card shows up as an image on WhatsApp Status, Snapchat, and X
+      // Story surfaces (they don't fetch link previews). Falls through
+      // to link-only sharing if the image can't be fetched or the
+      // platform doesn't support file sharing.
+      try {
+        const blob = await fetchCardBlob();
+        const file = new File([blob], cardFileName, { type: 'image/png' });
+        if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            title: 'My OPx Picks · Opinions.ng',
+            text: `${shareText}\n${shareUrl}`,
+            files: [file],
+          });
+          setSharing(false);
+          return;
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') { setSharing(false); return; } // user cancelled the share sheet
+        // image fetch failed or file-share unsupported — fall through
+      }
+
       if (typeof navigator !== 'undefined' && navigator.share) {
-        await navigator.share(payload);
+        await navigator.share({ title: 'My OPx Picks · Opinions.ng', text: shareText, url: shareUrl });
         setSharing(false);
         return;
       }
-    } catch {
-      // user cancelled — fall through to clipboard
+    } catch (e: any) {
+      if (e?.name === 'AbortError') { setSharing(false); return; }
+      // fall through to clipboard
     }
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -82,6 +124,29 @@ export function SharePickModal({
     setSharing(false);
   };
 
+  // Standalone, always-available path to the actual image — for
+  // desktop (no native share sheet) or anyone who'd rather attach the
+  // file by hand to a Status/Story than rely on the share sheet's app
+  // picker guessing right.
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const blob = await fetchCardBlob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = cardFileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      toast({ title: 'Image saved', description: 'Attach it to your Status, Snap, or post.' });
+    } catch {
+      toast({ title: 'Could not download image', variant: 'destructive' });
+    }
+    setDownloading(false);
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-md max-h-[92vh] overflow-y-auto">
@@ -91,7 +156,9 @@ export function SharePickModal({
             Share your OPx Pick
           </DialogTitle>
           <DialogDescription>
-            Pick a look, then drop the link on WhatsApp, X, or your status. Whoever taps it can stake the same call or make it theirs.
+            Pick a look, then share it. For WhatsApp Status, Snapchat, or an X post, use{' '}
+            <strong>Download image</strong> so the card actually appears — statuses and stories
+            don&rsquo;t render link previews, only attached images.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,6 +213,16 @@ export function SharePickModal({
               : copied ? <Check className="w-4 h-4 mr-2" />
               : <Share2 className="w-4 h-4 mr-2" />}
             {copied ? 'Copied!' : 'Share my pick'}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="w-full h-10 rounded-xl gap-2"
+          >
+            {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            Download image
           </Button>
           <Button
             type="button"
