@@ -61,6 +61,27 @@ export const MULT_MAX_PAYOUT_TNGN = 200_000;
 /** Minimum slip stake. Below TIER2_MIN_STAKE the slip is Tier 1. */
 export const MULT_MIN_SLIP_STAKE = 100;
 
+/**
+ * Reference stake used to price each LEG's odds — NOT the real slip
+ * stake. A parlay leg never has money enter its market's pool (a slip
+ * is house-vs-user, see the design note above), so there's nothing for
+ * a bigger stake to "fill" and no reason its odds should move with the
+ * slip size.
+ *
+ * Pricing legs with the full slip stake was a real bug: it ran full
+ * single-bet slippage through calculateLockedOdds N times — once per
+ * leg, each against the SAME total stake — so combined odds shrank
+ * roughly with stake^legCount while payout only grew linearly with
+ * stake. A big enough stake could pay LESS than a small one on
+ * identical legs (confirmed: a 5-leg slip at ₦2,000 paid under half of
+ * what the same legs paid at ₦200). Pricing every leg at this small
+ * fixed notional instead keeps each leg's odds close to the market's
+ * true price and payout strictly linear in stake — matching the
+ * "fixed odds, frozen at submit" design above. Must match
+ * c_leg_pricing_reference_stake in place_multiplier_slip exactly.
+ */
+export const MULT_LEG_PRICING_REFERENCE_STAKE = 100;
+
 // ─── Types ───────────────────────────────────────────────────────────
 
 /**
@@ -195,22 +216,22 @@ export function quoteSlip(legs: SlipLegInput[], slipStake: number): SlipQuote {
 
   const combinedOdds = round2(rawCombinedOdds(legs));
 
-  // Max-payout cap. If net × combined would exceed the ceiling, trim
-  // the effective combined so payout lands at-or-just-under the cap.
-  // We FLOOR the trimmed odds to 2dp (not round) so the resulting
-  // payout can never round back UP over the ceiling — the cap is a
-  // hard limit the house must never breach.
-  let effectiveCombinedOdds = combinedOdds;
-  let capBound = false;
+  // Max-payout cap. Payout is a DIRECT clamp on the uncapped amount —
+  // Math.min already guarantees it can never breach the ceiling, so
+  // there's no need to floor combinedOdds to a coarse 0.01 grid and
+  // multiply back through it. The original approach did exactly that,
+  // which meant payout could dip non-monotonically as stake grew across
+  // a grid boundary near the cap (e.g. ₦39 less at a bigger stake, on
+  // an otherwise-identical slip) — found while verifying the leg-pricing
+  // fix above, not a fabricated concern.
+  //
+  // effectiveCombinedOdds is derived FROM the (possibly capped) payout,
+  // not the other way around, so the displayed "effective multiplier"
+  // always agrees exactly with what's actually paid.
   const uncappedPayout = netSlipStake * combinedOdds;
-  if (uncappedPayout > MULT_MAX_PAYOUT_TNGN && netSlipStake > 0) {
-    effectiveCombinedOdds = Math.floor((MULT_MAX_PAYOUT_TNGN / netSlipStake) * 100) / 100;
-    capBound = true;
-  }
-
-  // Final clamp is belt-and-braces: even with floored odds, guarantee
-  // the integer payout is <= the cap.
-  const payoutTngn = Math.min(MULT_MAX_PAYOUT_TNGN, Math.round(netSlipStake * effectiveCombinedOdds));
+  const payoutTngn = Math.min(MULT_MAX_PAYOUT_TNGN, Math.round(uncappedPayout));
+  const capBound = netSlipStake > 0 && uncappedPayout > MULT_MAX_PAYOUT_TNGN;
+  const effectiveCombinedOdds = capBound ? round2(payoutTngn / netSlipStake) : combinedOdds;
 
   return {
     tier,

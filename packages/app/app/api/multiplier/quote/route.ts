@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
-import { validateSlip, quoteSlip, type SlipLegInput } from '@/lib/multiplier';
+import { validateSlip, quoteSlip, MULT_LEG_PRICING_REFERENCE_STAKE, type SlipLegInput } from '@/lib/multiplier';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,8 +12,10 @@ const supabaseAdmin = createClient(
 //
 // Live preview as the user builds a slip. Prices each leg with the
 // SAME calculateLockedOdds the placement RPC's SQL twin uses (parity-
-// tested), so the quote the user sees matches what gets placed. Does
-// NOT touch any balance, Boost, or pool — pure read + math.
+// tested), at the same FIXED reference stake the RPC uses (never the
+// real slip stake — see MULT_LEG_PRICING_REFERENCE_STAKE), so the
+// quote the user sees matches what gets placed. Does NOT touch any
+// balance, Boost, or pool — pure read + math.
 //
 // Body: { slipStake, legs: [{ marketId, outcomeIndex }] }
 export async function POST(request: Request) {
@@ -65,11 +67,14 @@ export async function POST(request: Request) {
       const seedPool = options.map((_, i) => Number(seedMap[String(i)] ?? 0));
       const realPool = options.map((_, i) => Number(poolMap[String(i)] ?? 0));
 
+      // Price at the FIXED reference stake, never the real slip stake
+      // — a parlay leg's odds must not depend on how much the user is
+      // staking on the slip (see MULT_LEG_PRICING_REFERENCE_STAKE).
       let calc;
       try {
         calc = calculateLockedOdds(
           { category: market.category, seedPool, realPool, vigPctOverride: market.vig_pct == null ? undefined : Number(market.vig_pct) },
-          slipStake,
+          MULT_LEG_PRICING_REFERENCE_STAKE,
           outcomeIndex,
           {},
           reserveCtx,
