@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Loader2, Sparkles, Share2, Download, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 import {
   PICKS_THEME_LIST,
   DEFAULT_PICKS_THEME,
@@ -13,10 +15,13 @@ import {
 // Pre-bet OPx Pick preview. Renders the same OG card art as the
 // post-bet share modal, but reads /api/picks-card/preview/bet (single
 // bet) or /api/picks-card/preview/slip (multiplier) — no DB row yet.
-// Lets the user pick a theme + see exactly what their card will look
-// like before they tap Lock Prediction / Place Multiplier. After the
-// bet/slip places, the real SharePickModal auto-opens with the actual
-// id.
+// Lets the user pick a theme, see exactly what the card looks like,
+// AND actually share or download it before ever placing the
+// prediction — calling a shot shouldn't require staking on it. There's
+// no public /p/[type]/[id] link yet (nothing's in the DB), so sharing
+// here always attaches the image itself rather than a URL; placing the
+// bet/slip afterwards still auto-opens the real SharePickModal, which
+// additionally carries a shareable link back to the real pick.
 
 const THEME_KEY = 'opx_picks_theme';
 
@@ -55,6 +60,10 @@ type Props = BetProps | SlipProps;
 
 export function PickPreviewModal(props: Props) {
   const [theme, setTheme] = useState<PicksThemeId>(DEFAULT_PICKS_THEME);
+  const [sharing, setSharing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
   const { open, onClose, stakeTngn, odds, handle } = props;
   const isSlip = props.mode === 'slip';
 
@@ -103,6 +112,61 @@ export function PickPreviewModal(props: Props) {
     });
     previewUrl = `/api/picks-card/preview/bet?${q.toString()}`;
   }
+
+  const cardFileName = 'opinions-ng-pick-preview.png';
+  const shareText = isSlip
+    ? `Calling it: a ${(props as SlipProps).legs.length}-leg Multiplier on Opinions.ng`
+    : 'Calling my pick on Opinions.ng';
+
+  const fetchPreviewBlob = async (): Promise<Blob> => {
+    const res = await fetch(previewUrl);
+    if (!res.ok) throw new Error(`Card image failed to load (${res.status})`);
+    return res.blob();
+  };
+
+  // No /p/[type]/[id] link exists yet — nothing's placed, so there's no
+  // DB row to link to. Sharing here always attaches the image itself;
+  // there's no link-only fallback the way the post-placement share has.
+  const handleShare = async () => {
+    setSharing(true);
+    try {
+      const blob = await fetchPreviewBlob();
+      const file = new File([blob], cardFileName, { type: 'image/png' });
+      if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: 'My OPx Pick · Opinions.ng', text: shareText, files: [file] });
+        setSharing(false);
+        return;
+      }
+      // File-sharing unsupported (mainly desktop) — download is the
+      // only thing that makes sense without a link to fall back to.
+      await handleDownload();
+    } catch (e: any) {
+      if (e?.name === 'AbortError') { setSharing(false); return; } // user cancelled the share sheet
+      toast({ title: 'Could not share', description: e.message, variant: 'destructive' });
+    }
+    setSharing(false);
+  };
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const blob = await fetchPreviewBlob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = cardFileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setCopied(true);
+      toast({ title: 'Image saved', description: 'Share it anywhere — no need to place the pick first.' });
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast({ title: 'Could not download image', variant: 'destructive' });
+    }
+    setDownloading(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -163,8 +227,31 @@ export function PickPreviewModal(props: Props) {
           )}
         </div>
 
+        {ready && (
+          <div className="flex flex-col gap-2">
+            <Button
+              onClick={handleShare}
+              disabled={sharing}
+              className="w-full h-11 rounded-xl font-semibold bg-emerald-500 hover:bg-emerald-400 text-black"
+            >
+              {sharing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Share2 className="w-4 h-4 mr-2" />}
+              Share this pick
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleDownload}
+              disabled={downloading}
+              className="w-full h-10 rounded-xl gap-2"
+            >
+              {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : copied ? <Check className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
+              Download image
+            </Button>
+          </div>
+        )}
+
         <p className="text-[10px] text-center text-muted-foreground">
-          We&rsquo;ll open the real share sheet right after you {isSlip ? 'place this Multiplier' : 'lock this prediction'}.
+          {isSlip ? 'Placing this Multiplier' : 'Locking this prediction'} afterwards also unlocks a shareable link back to the real pick.
         </p>
       </DialogContent>
     </Dialog>
