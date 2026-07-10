@@ -393,7 +393,17 @@ function computeVigSurcharges(
 
   // Large-stake surcharge. If this stake is a meaningful fraction of
   // the OPPOSING pool, it concentrates our liability. Extra vig on
-  // top of slippage. Threshold: stake > 50% of opposing effective.
+  // top of slippage — ramped smoothly from 0 at 50% of the opposing
+  // effective pool up to the full 0.01 by 100%, rather than a hard
+  // step at the 50% threshold.
+  //
+  // A hard step here was a real bug: total guaranteed payout could
+  // FALL as stake rose past the threshold (e.g. staking ₦501 instead
+  // of ₦500 paid strictly less, because the instantaneous +1% vig
+  // outweighed the extra ₦1 of stake). That's never correct for any
+  // pricing engine — a bigger stake must never buy less. The ramp
+  // keeps the same "starts mattering at 50%" threshold but makes the
+  // surcharge, and therefore payout, continuous in stake.
   const opposingEffective = market.seedPool.reduce((acc, s, i) => {
     if (i === outcomeIndex) return acc;
     const safeSeed = Number.isFinite(s) && s > 0 ? s : 0;
@@ -401,7 +411,8 @@ function computeVigSurcharges(
     const safeReal = Number.isFinite(real) && real > 0 ? real : 0;
     return acc + safeSeed + safeReal;
   }, 0);
-  const largeStake = opposingEffective > 0 && stake > opposingEffective * 0.5 ? 0.01 : 0;
+  const stakeRatio = opposingEffective > 0 ? stake / opposingEffective : 0;
+  const largeStake = 0.01 * Math.max(0, Math.min(1, (stakeRatio - 0.5) / 0.5));
 
   // Reserve-stress surcharge. The house protects itself before the
   // stake cap needs to tighten. Threshold: deployable < 60% of floor.
