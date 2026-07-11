@@ -83,56 +83,49 @@ export async function POST(request: Request) {
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
 
-    // Atomic credit slot claim. The squad_transactions row can be in either
-    // 'awaiting_payment' (verify won the race to the webhook — common, since
-    // Squad's redirect lands faster than its webhook) or 'pending' (webhook
-    // already saw the event and normalised the status). Either is fair
-    // game; we CAS to 'crediting' so only one caller — verify OR webhook —
-    // proceeds. If status is 'crediting' or 'completed' someone else
-    // claimed it; we report completed and bail.
-    const { data: claimed } = await supabaseAdmin
-      .from('squad_transactions')
-      .update({ status: 'crediting', tngn_credited: tNGNToCredit, spread_captured: spreadAmount })
-      .eq('transaction_ref', reference)
-      .in('status', ['pending', 'awaiting_payment'])
-      .select('id')
-      .maybeSingle();
-
-    if (!claimed) {
-      return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: tNGNToCredit });
-    }
-
-    const { error: creditErr } = await supabaseAdmin.rpc('credit_user', {
-      p_user_id: userId,
-      p_tngn_delta: tNGNToCredit,
-      p_bonus_delta: 0,
+    // Atomic credit. Everything money-critical — the credit, the
+    // treasury ledger, the status flip — happens inside settle_squad_deposit
+    // in ONE transaction under a row lock, so it can't leave a half-done
+    // 'crediting' state or double-credit under the verify-vs-webhook race.
+    // See migration 20260712000000.
+    const { data: settleRows, error: settleErr } = await supabaseAdmin.rpc('settle_squad_deposit', {
+      p_transaction_ref: reference,
+      p_amount_ngn: amountInNGN,
     });
-
-    if (creditErr) {
-      await supabaseAdmin
-        .from('squad_transactions')
-        .update({ status: 'failed_balance_update' })
-        .eq('transaction_ref', reference);
-      const code = (creditErr as any)?.code === 'P0002' ? 404 : 500;
-      return NextResponse.json({ error: 'Failed to credit balance' }, { status: code });
+    if (settleErr) {
+      // A transient failure here leaves the row provably uncredited (the
+      // whole RPC rolled back). Return 502 so the callback poller retries
+      // and the reconciliation cron can also pick it up — we do NOT tell
+      // the user "completed" on a failure the way the old code wrongly did.
+      console.error('settle_squad_deposit failed:', settleErr);
+      const code = (settleErr as any)?.code === 'P0002' ? 404 : 502;
+      return NextResponse.json({ status: 'processing', error: 'Crediting your deposit — refresh in a moment.' }, { status: code });
     }
+    const settle = Array.isArray(settleRows) ? settleRows[0] : settleRows;
+    const outcome = settle?.outcome as string | undefined;
 
-    await supabaseAdmin
-      .from('squad_transactions')
-      .update({ status: 'completed' })
-      .eq('transaction_ref', reference);
+    if (outcome === 'not_found') {
+      return NextResponse.json({ error: 'Deposit not found' }, { status: 404 });
+    }
+    if (outcome === 'needs_review') {
+      // Legacy ambiguous 'crediting' row — flagged for manual review, not
+      // auto-credited. Don't claim success.
+      console.error('settle_squad_deposit: needs manual review', { reference });
+      return NextResponse.json({ status: 'processing', message: 'Deposit is being confirmed. If it doesn’t reflect shortly, contact support.' });
+    }
+    if (outcome === 'already_credited') {
+      return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: Number(settle?.tngn_credited ?? tNGNToCredit) });
+    }
+    // outcome === 'credited' — a fresh credit just happened. Only now do
+    // the non-critical extras, so a re-verify (already_credited) never
+    // duplicates the legacy log / notification / bonus.
 
-    await supabaseAdmin.from('treasury_movements').insert([
-      { user_id: userId, type: 'deposit', gateway: 'squad', direction: 'in', amount_ngn: amountInNGN, reference },
-      { user_id: userId, type: 'spread', gateway: 'squad', direction: 'in', amount_ngn: spreadAmount, reference },
-    ]);
     await supabaseAdmin.from('treasury_log').insert([
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad_card', transaction_ref: reference } },
     ]);
 
-    // Deposit-landed notification. Sits after the CAS claim succeeded so
-    // only the caller that actually credited (verify OR webhook, never
-    // both) fires it — no duplicate.
+    // Deposit-landed notification. Only fires on a fresh credit, so the
+    // user never gets two "deposit received" pings for the same top-up.
     try {
       await supabaseAdmin.from('notifications').insert({
         user_id: userId,
