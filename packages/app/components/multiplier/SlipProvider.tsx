@@ -35,6 +35,12 @@ interface SlipContextValue {
    *  it. ₦0 / null = nothing to prefill. */
   prefillStakeNgn: number | null;
   setPrefillStakeNgn: (v: number | null) => void;
+  /** The shared slip id this slip was built from (OPx Picks "stake as
+   *  is" / "make it yours"). Sent to the server at placement so it can
+   *  notify the original sharer. Cleared when the slip empties or is
+   *  cleared, so a freshly-built slip never mis-attributes. */
+  fromShareId: string | null;
+  setFromShareId: (v: string | null) => void;
 }
 
 const SlipContext = createContext<SlipContextValue | null>(null);
@@ -45,6 +51,7 @@ export function SlipProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [prefillStakeNgn, setPrefillStakeNgn] = useState<number | null>(null);
+  const [fromShareId, setFromShareId] = useState<string | null>(null);
 
   // Hydrate once from localStorage so the slip survives navigation /
   // reloads while the user shops for legs across markets.
@@ -72,10 +79,15 @@ export function SlipProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const removeLeg = useCallback((marketId: number) => {
-    setLegs(prev => prev.filter(l => l.marketId !== marketId));
+    setLegs(prev => {
+      const next = prev.filter(l => l.marketId !== marketId);
+      // Emptying the slip means any share attribution no longer applies.
+      if (next.length === 0) setFromShareId(null);
+      return next;
+    });
   }, []);
 
-  const clear = useCallback(() => setLegs([]), []);
+  const clear = useCallback(() => { setLegs([]); setFromShareId(null); }, []);
 
   const replaceLegs = useCallback((next: SlipLeg[]) => {
     setLegs(next);
@@ -93,7 +105,7 @@ export function SlipProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <SlipContext.Provider value={{ legs, addLeg, removeLeg, clear, replaceLegs, hasLeg, hasMarket, isOpen, setOpen, prefillStakeNgn, setPrefillStakeNgn }}>
+    <SlipContext.Provider value={{ legs, addLeg, removeLeg, clear, replaceLegs, hasLeg, hasMarket, isOpen, setOpen, prefillStakeNgn, setPrefillStakeNgn, fromShareId, setFromShareId }}>
       {children}
     </SlipContext.Provider>
   );

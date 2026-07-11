@@ -52,6 +52,9 @@ interface MarketCardProps {
   prefillStakeTngn?: number;
   /** When true the stake input opens blank (Make-It-Yours flow). */
   prefillEditStake?: boolean;
+  /** The shared bet/slip id this stake originated from, so the server can
+   *  notify the original sharer. Passed straight through to the API. */
+  prefillFromShareId?: string;
   /** Auto-open the bet drawer on mount. */
   autoOpen?: boolean;
 }
@@ -76,6 +79,7 @@ function BettingInterface({
   onCancel,
   prefillOutcomeIndex,
   prefillStakeTngn,
+  prefillFromShareId,
 }: {
   market: Market;
   session: any;
@@ -84,6 +88,9 @@ function BettingInterface({
   /** OPx Picks "Stake as is" / "Make It Yours" prefill */
   prefillOutcomeIndex?: number;
   prefillStakeTngn?: number;
+  /** Shared bet/slip id this stake came from — threaded to /api/bet so
+   *  the server can notify the original sharer. */
+  prefillFromShareId?: string;
 }) {
   const [selectedOption, setSelectedOption] = useState(
     prefillOutcomeIndex !== undefined ? String(prefillOutcomeIndex) : '',
@@ -257,6 +264,10 @@ function BettingInterface({
           marketId: market.id,
           outcomeIndex: parseInt(selectedOption),
           stakeAmount: Number(amount),
+          // Present only when this stake came from someone's shared pick,
+          // so the server can notify the sharer. Server re-resolves the
+          // true owner from this id — it's never trusted as an identity.
+          fromShareId: prefillFromShareId,
         }),
       });
 
@@ -639,6 +650,7 @@ function MarketCard({
   prefillOutcomeIndex,
   prefillStakeTngn,
   prefillEditStake = false,
+  prefillFromShareId,
   autoOpen = false,
 }: MarketCardProps) {
   const router = useRouter();
@@ -793,6 +805,7 @@ function MarketCard({
               onCancel={() => setIsExpanded(false)}
               prefillOutcomeIndex={prefillOutcomeIndex}
               prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
+              prefillFromShareId={prefillFromShareId}
             />
           </div>
         )}
@@ -854,6 +867,7 @@ function MarketCard({
                       }}
                       prefillOutcomeIndex={prefillOutcomeIndex}
                       prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
+                      prefillFromShareId={prefillFromShareId}
                     />
                   </div>
                   <DrawerFooter className="shrink-0 pb-6">
@@ -1072,6 +1086,10 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
             })).filter((l: any) => Number.isFinite(l.marketId) && Number.isFinite(l.outcomeIndex));
             if (slipLegs.length === 0) return;
             slip.replaceLegs(slipLegs);
+            // Remember which shared slip this came from so the server can
+            // notify the sharer when this slip is placed (whether staked
+            // as-is or after edits).
+            slip.setFromShareId(String(parsed.fromShareId || '') || null);
             if (!parsed.editStake && Number(parsed.stakeTngn) > 0) {
               slip.setPrefillStakeNgn(Number(parsed.stakeTngn));
             }
@@ -1332,6 +1350,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
             prefillStakeTngn={isPickTarget ? stakeIntent!.stakeTngn : undefined}
             prefillEditStake={isPickTarget ? stakeIntent!.editStake : undefined}
+            prefillFromShareId={isPickTarget ? stakeIntent!.fromShareId : undefined}
             autoOpen={isPickTarget}
           />
         );

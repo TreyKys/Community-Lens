@@ -65,6 +65,7 @@ export function NotificationBell() {
           toast({
             title: newNotif.type === 'bet_won' ? '🎉 You called it!' :
                    (newNotif.type === 'bet_insurance_refund' || newNotif.type === 'first_bet_refund') ? '🛡 Protection Applied' :
+                   newNotif.type === 'share_staked' ? '🔥 Your pick is spreading!' :
                    'Notification',
             description: newNotif.message,
           });
@@ -173,7 +174,10 @@ export function NotificationBell() {
                          n.type === 'bonus_split_correction' ? '⚖️' :
                          n.type === 'multiplier_won' ? '🎯' :
                          n.type === 'multiplier_lost' ? '💔' :
-                         n.type === 'multiplier_voided' ? '↩️' : '🔔'}
+                         n.type === 'multiplier_voided' ? '↩️' :
+                         n.type === 'share_staked' ? '🔥' :
+                         n.type === 'deposit_credited' ? '💰' :
+                         n.type === 'welcome_match' ? '🎁' : '🔔'}
                       </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm leading-snug break-words">{n.message}</p>
