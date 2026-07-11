@@ -208,6 +208,15 @@ export async function GET(req: Request) {
         </div>
       </div>
     ),
-    { ...CARD_SIZE, fonts },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // Deterministic given the query string (same marketId/outcome/
+      // stake/theme always renders the same card), so this is safe to
+      // cache — and doing so is what makes switching between themes in
+      // the preview modal feel instant instead of re-rendering from
+      // scratch on every click.
+      headers: { 'cache-control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300' },
+    },
   );
 }

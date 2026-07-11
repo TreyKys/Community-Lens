@@ -274,6 +274,13 @@ export async function GET(req: Request) {
         </div>
       </div>
     ),
-    { ...CARD_SIZE, fonts },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // Same reasoning as preview/bet — deterministic given the query
+      // string, so cache it. Per-leg sentiment % can drift as more
+      // people bet, hence the modest window rather than caching long.
+      headers: { 'cache-control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300' },
+    },
   );
 }

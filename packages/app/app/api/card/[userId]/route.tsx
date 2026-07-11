@@ -189,6 +189,12 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
         </div>
       </div>
     ),
-    { ...CARD_SIZE, fonts },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // Accuracy stats move as bets settle, but not fast enough to
+      // justify re-rendering on every request.
+      headers: { 'cache-control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600' },
+    },
   );
 }

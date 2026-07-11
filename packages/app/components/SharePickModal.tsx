@@ -45,6 +45,8 @@ export function SharePickModal({
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [displayedUrl, setDisplayedUrl] = useState('');
+  const [imgLoading, setImgLoading] = useState(true);
 
   useEffect(() => {
     if (!open) return;
@@ -63,6 +65,36 @@ export function SharePickModal({
     : SITE_ORIGIN_FALLBACK;
   const shareUrl = `${origin}/p/${type}/${id}?theme=${theme}`;
   const cardUrl = `/api/picks-card/${type}/${id}?theme=${theme}`;
+
+  // Smooth theme swap — preload the new theme's PNG before swapping the
+  // visible <img>, so switching never blanks/flashes while the new
+  // render arrives. Combined with the route's Cache-Control (added
+  // alongside this), a theme already viewed this session resolves from
+  // cache almost immediately.
+  useEffect(() => {
+    let cancelled = false;
+    setImgLoading(true);
+    const img = new Image();
+    const settle = () => { if (!cancelled) { setDisplayedUrl(cardUrl); setImgLoading(false); } };
+    img.onload = settle;
+    img.onerror = settle; // still swap so a real failure surfaces instead of freezing on a stale theme
+    img.src = cardUrl;
+    return () => { cancelled = true; };
+  }, [cardUrl]);
+
+  // Preload every theme's card the moment the modal opens. This is the
+  // actual fix for "switching themes is stubborn and slow" — without
+  // this, every single swatch click (even re-clicking one already
+  // viewed) triggered a full fresh render with nothing cached anywhere.
+  useEffect(() => {
+    if (!open) return;
+    const preloaders = PICKS_THEME_LIST.map(t => {
+      const img = new Image();
+      img.src = `/api/picks-card/${type}/${id}?theme=${t.id}`;
+      return img;
+    });
+    return () => { preloaders.forEach(img => { img.onload = null; img.onerror = null; }); };
+  }, [open, type, id]);
 
   const shareText = useMemo(() => {
     const handle = defaultUsername ? `@${defaultUsername.replace(/\s+/g, '').slice(0, 18)}` : 'I';
@@ -196,10 +228,18 @@ export function SharePickModal({
           </div>
         </div>
 
-        {/* Live preview */}
-        <div className="rounded-xl border border-border/50 overflow-hidden bg-card/30">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={cardUrl} alt="Card preview" className="w-full block" />
+        {/* Live preview — keeps showing the last-loaded theme while the
+            next one loads in the background, so switching never blanks. */}
+        <div className="relative rounded-xl border border-border/50 overflow-hidden bg-card/30 min-h-[200px]">
+          {displayedUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={displayedUrl} alt="Card preview" className="w-full block" />
+          )}
+          {imgLoading && (
+            <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm rounded-full p-1.5">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            </div>
+          )}
         </div>
 
         {/* Actions */}

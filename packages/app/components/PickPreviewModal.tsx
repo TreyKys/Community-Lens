@@ -63,6 +63,8 @@ export function PickPreviewModal(props: Props) {
   const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [displayedUrl, setDisplayedUrl] = useState('');
+  const [imgLoading, setImgLoading] = useState(true);
   const { toast } = useToast();
   const { open, onClose, stakeTngn, odds, handle } = props;
   const isSlip = props.mode === 'slip';
@@ -80,7 +82,7 @@ export function PickPreviewModal(props: Props) {
   }, [theme]);
 
   let ready = false;
-  let previewUrl = '';
+  let baseParams = new URLSearchParams();
 
   if (isSlip) {
     const slip = props as SlipProps;
@@ -88,30 +90,61 @@ export function PickPreviewModal(props: Props) {
     const legsParam = slip.legs
       .map(l => `${l.marketId}:${l.outcomeIndex}${l.lockedOdds ? `:${l.lockedOdds.toFixed(2)}` : ''}`)
       .join(',');
-    const q = new URLSearchParams({
+    baseParams = new URLSearchParams({
       legs: legsParam,
       stakeTngn: String(Math.round(stakeTngn || 0)),
       odds: String(odds || 0),
       handle: String(handle || 'predictor'),
-      theme,
     });
-    previewUrl = `/api/picks-card/preview/slip?${q.toString()}`;
   } else {
     const bet = props as BetProps;
     ready =
       bet.marketId !== null && bet.marketId !== '' &&
       bet.outcomeIndex !== null && Number.isFinite(bet.outcomeIndex) &&
       bet.stakeTngn > 0;
-    const q = new URLSearchParams({
+    baseParams = new URLSearchParams({
       marketId: String(bet.marketId ?? ''),
       outcomeIndex: String(bet.outcomeIndex ?? ''),
       stakeTngn: String(Math.round(stakeTngn || 0)),
       odds: String(odds || 0),
       handle: String(handle || 'predictor'),
-      theme,
     });
-    previewUrl = `/api/picks-card/preview/bet?${q.toString()}`;
   }
+
+  const previewBasePath = isSlip ? '/api/picks-card/preview/slip' : '/api/picks-card/preview/bet';
+  const baseQuery = baseParams.toString();
+  const previewUrl = `${previewBasePath}?${baseQuery}&theme=${theme}`;
+
+  // Smooth swap — preload the target image before showing it, so the
+  // preview never blanks/flashes as the theme (or the underlying stake/
+  // picks) changes.
+  useEffect(() => {
+    if (!ready) { setDisplayedUrl(''); return; }
+    let cancelled = false;
+    setImgLoading(true);
+    const img = new Image();
+    const settle = () => { if (!cancelled) { setDisplayedUrl(previewUrl); setImgLoading(false); } };
+    img.onload = settle;
+    img.onerror = settle; // still swap so a real failure surfaces instead of freezing on a stale frame
+    img.src = previewUrl;
+    return () => { cancelled = true; };
+  }, [previewUrl, ready]);
+
+  // Preload every theme's variant of the current pick shape once the
+  // inputs settle (debounced so typing a stake doesn't fire 6 requests
+  // per keystroke). This is what actually fixes "switching themes is
+  // stubborn and slow" — without it, every swatch click re-ran the full
+  // render with nothing cached anywhere.
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => {
+      PICKS_THEME_LIST.forEach(th => {
+        const img = new Image();
+        img.src = `${previewBasePath}?${baseQuery}&theme=${th.id}`;
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [ready, previewBasePath, baseQuery]);
 
   const cardFileName = 'opinions-ng-pick-preview.png';
   const shareText = isSlip
@@ -213,10 +246,17 @@ export function PickPreviewModal(props: Props) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-border/50 overflow-hidden bg-card/30 min-h-[200px] flex items-center justify-center">
-          {ready ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="Pick preview" className="w-full block" />
+        <div className="relative rounded-xl border border-border/50 overflow-hidden bg-card/30 min-h-[200px] flex items-center justify-center">
+          {ready && displayedUrl ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={displayedUrl} alt="Pick preview" className="w-full block" />
+              {imgLoading && (
+                <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm rounded-full p-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                </div>
+              )}
+            </>
           ) : (
             <div className="flex items-center justify-center py-10 text-sm text-muted-foreground gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />

@@ -181,6 +181,12 @@ export async function GET(_req: Request, { params }: { params: { code: string } 
         </div>
       </div>
     ),
-    { ...CARD_SIZE, fonts },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // Referral code metadata (VIP status, signup bonus) barely
+      // changes — safe to cache longer than the pick cards.
+      headers: { 'cache-control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400' },
+    },
   );
 }

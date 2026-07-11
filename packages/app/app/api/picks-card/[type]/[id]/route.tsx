@@ -523,6 +523,16 @@ export async function GET(
         </div>
       </div>
     ),
-    { ...CARD_SIZE, fonts },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // No caching at all was the actual reason theme-switching in the
+      // share modal felt "stubborn and slow" — every click (including
+      // re-clicking a theme already viewed) re-ran the full Supabase
+      // lookup + Satori render + PNG encode from scratch. Status can
+      // still change (live → won/lost), so keep the window modest
+      // rather than caching indefinitely.
+      headers: { 'cache-control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300' },
+    },
   );
 }
