@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyTransaction } from '@/lib/squad';
+import { settleSquadDeposit } from '@/lib/settleSquadDeposit';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,12 +88,9 @@ export async function POST(request: Request) {
       }
 
       if (isSuccessful(squadData)) {
-        const { data: settleRows, error: settleErr } = await supabaseAdmin.rpc('settle_squad_deposit', {
-          p_transaction_ref: row.transaction_ref,
-          p_amount_ngn: row.amount_ngn,
-        });
-        if (settleErr) { results.errored += 1; continue; }
-        const outcome = (Array.isArray(settleRows) ? settleRows[0] : settleRows)?.outcome;
+        const settle = await settleSquadDeposit(supabaseAdmin, row.transaction_ref, row.amount_ngn);
+        if (settle.error) { results.errored += 1; continue; }
+        const outcome = settle.outcome;
         if (outcome === 'credited') {
           results.credited += 1;
           // Fresh credit via the sweep — notify the user, mirroring the

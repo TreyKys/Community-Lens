@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { settleSquadDeposit } from '@/lib/settleSquadDeposit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -129,27 +130,24 @@ export async function POST(req: Request) {
         .eq('id', pending.id);
     }
 
-    // Atomic credit — one transaction, row-locked, idempotent, recovery-
-    // safe. Handles the verify-vs-webhook race and any stuck state without
-    // double-crediting. See migration 20260712000000.
-    const { data: settleRows, error: settleErr } = await supabaseAdmin.rpc('settle_squad_deposit', {
-      p_transaction_ref: transactionRef,
-      p_amount_ngn: amountInNGN,
-    });
-    if (settleErr) {
-      // Return non-2xx so Squad RETRIES the webhook — the row is provably
-      // uncredited (the RPC rolled back). This is the retry backstop.
-      console.error('settle_squad_deposit (webhook) failed:', settleErr);
-      const code = (settleErr as any)?.code === 'P0002' ? 404 : 500;
-      return NextResponse.json({ error: 'Failed to credit balance' }, { status: code });
-    }
-    const settle = Array.isArray(settleRows) ? settleRows[0] : settleRows;
-    const outcome = settle?.outcome as string | undefined;
+    // Atomic credit via the RPC (idempotent, recovery-safe, handles the
+    // verify-vs-webhook race). Falls back to an idempotent inline credit
+    // if the migration isn't applied yet, so a webhook never fails a
+    // deposit purely because the DB migration is pending.
+    const settle = await settleSquadDeposit(supabaseAdmin, transactionRef, amountInNGN);
+    const outcome = settle.outcome;
 
+    if (settle.error || outcome === 'pending') {
+      // Return non-2xx so Squad RETRIES the webhook — the row is provably
+      // uncredited and retriable. This is the retry backstop.
+      console.error('settleSquadDeposit (webhook) not settled:', settle.error || outcome, { transactionRef });
+      const code = settle.error === 'P0002' ? 404 : 500;
+      return NextResponse.json({ error: 'Crediting — will retry' }, { status: code });
+    }
     if (outcome === 'needs_review') {
-      // Legacy ambiguous row — do not auto-credit; a 200 stops Squad
+      // Ambiguous legacy row — do not auto-credit; a 200 stops Squad
       // retrying into the same ambiguity. Admin review handles it.
-      console.error('settle_squad_deposit (webhook): needs manual review', { transactionRef });
+      console.error('settleSquadDeposit (webhook): needs manual review', { transactionRef });
       return NextResponse.json({ status: 'needs_review' }, { status: 200 });
     }
     if (outcome !== 'credited') {

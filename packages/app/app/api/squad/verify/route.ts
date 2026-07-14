@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyTransaction } from '@/lib/squad';
+import { settleSquadDeposit } from '@/lib/settleSquadDeposit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -83,38 +84,34 @@ export async function POST(request: Request) {
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
 
-    // Atomic credit. Everything money-critical — the credit, the
-    // treasury ledger, the status flip — happens inside settle_squad_deposit
-    // in ONE transaction under a row lock, so it can't leave a half-done
-    // 'crediting' state or double-credit under the verify-vs-webhook race.
-    // See migration 20260712000000.
-    const { data: settleRows, error: settleErr } = await supabaseAdmin.rpc('settle_squad_deposit', {
-      p_transaction_ref: reference,
-      p_amount_ngn: amountInNGN,
-    });
-    if (settleErr) {
-      // A transient failure here leaves the row provably uncredited (the
-      // whole RPC rolled back). Return 502 so the callback poller retries
-      // and the reconciliation cron can also pick it up — we do NOT tell
-      // the user "completed" on a failure the way the old code wrongly did.
-      console.error('settle_squad_deposit failed:', settleErr);
-      const code = (settleErr as any)?.code === 'P0002' ? 404 : 502;
+    // Atomic credit via the settle_squad_deposit RPC (one transaction,
+    // row-locked — can't leave a half-done state or double-credit under
+    // the verify-vs-webhook race). The helper falls back to an idempotent
+    // inline credit if that migration isn't applied yet, so a deposit is
+    // never lost just because the DB migration is pending.
+    const settle = await settleSquadDeposit(supabaseAdmin, reference, amountInNGN);
+    const outcome = settle.outcome;
+
+    if (settle.error) {
+      // A transient/real error left the row provably uncredited and
+      // retriable. Return non-2xx so the callback poller retries and the
+      // reconciliation cron can also pick it up — we do NOT falsely tell
+      // the user "completed" the way the old code did.
+      console.error('settleSquadDeposit failed:', settle.error, { reference });
+      const code = settle.error === 'P0002' ? 404 : 502;
       return NextResponse.json({ status: 'processing', error: 'Crediting your deposit — refresh in a moment.' }, { status: code });
     }
-    const settle = Array.isArray(settleRows) ? settleRows[0] : settleRows;
-    const outcome = settle?.outcome as string | undefined;
-
     if (outcome === 'not_found') {
       return NextResponse.json({ error: 'Deposit not found' }, { status: 404 });
     }
-    if (outcome === 'needs_review') {
-      // Legacy ambiguous 'crediting' row — flagged for manual review, not
+    if (outcome === 'needs_review' || outcome === 'pending') {
+      // Ambiguous/in-flight — flagged for manual review or a retry, not
       // auto-credited. Don't claim success.
-      console.error('settle_squad_deposit: needs manual review', { reference });
+      console.error('settleSquadDeposit: not settled', { reference, outcome });
       return NextResponse.json({ status: 'processing', message: 'Deposit is being confirmed. If it doesn’t reflect shortly, contact support.' });
     }
     if (outcome === 'already_credited') {
-      return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: Number(settle?.tngn_credited ?? tNGNToCredit) });
+      return NextResponse.json({ status: 'completed', amount: amountInNGN, tngn_credited: settle.tngnCredited });
     }
     // outcome === 'credited' — a fresh credit just happened. Only now do
     // the non-critical extras, so a re-verify (already_credited) never

@@ -44,13 +44,13 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
--- The RETURNS TABLE output columns (amount_ngn/tngn_credited/
--- spread_captured/user_id) share names with squad_transactions columns.
--- Force bare references inside queries to mean the COLUMN, never the OUT
--- variable, so there's no dependence on the server's default
--- variable_conflict setting. (All our reads are v_row.*/v_*-qualified
--- anyway; this is belt-and-suspenders.)
 #variable_conflict use_column
+-- The directive above MUST be the first line of the function body. The
+-- RETURNS TABLE output columns (amount_ngn/tngn_credited/spread_captured/
+-- user_id) share names with squad_transactions columns; forcing bare
+-- references inside queries to mean the COLUMN removes any dependence on
+-- the server's default variable_conflict setting. (All our reads are
+-- v_row.*/v_*-qualified anyway; this is belt-and-suspenders.)
 DECLARE
   c_spread_pct constant numeric := 0.01;   -- MUST match CONVERSION_SPREAD in the routes
   v_row     record;
