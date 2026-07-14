@@ -82,18 +82,29 @@ export function SharePickModal({
     return () => { cancelled = true; };
   }, [cardUrl]);
 
-  // Preload every theme's card the moment the modal opens. This is the
-  // actual fix for "switching themes is stubborn and slow" — without
-  // this, every single swatch click (even re-clicking one already
-  // viewed) triggered a full fresh render with nothing cached anywhere.
+  // Warm the cache for the OTHER themes so switching is instant — but
+  // gently: start ~700ms after open (so the visible card's own render
+  // isn't queued behind the preloads and left "stuck"), and load them
+  // one at a time rather than firing all six at once, which used to
+  // starve the request the user is actually waiting on.
   useEffect(() => {
     if (!open) return;
-    const preloaders = PICKS_THEME_LIST.map(t => {
-      const img = new Image();
-      img.src = `/api/picks-card/${type}/${id}?theme=${t.id}`;
-      return img;
-    });
-    return () => { preloaders.forEach(img => { img.onload = null; img.onerror = null; }); };
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      let i = 0;
+      const next = () => {
+        if (cancelled || i >= PICKS_THEME_LIST.length) return;
+        const img = new Image();
+        const advance = () => { i += 1; next(); };
+        img.onload = advance;
+        img.onerror = advance;
+        // The currently-shown theme is already cached from the smooth-swap
+        // above, so re-requesting it just hits cache.
+        img.src = `/api/picks-card/${type}/${id}?theme=${PICKS_THEME_LIST[i].id}`;
+      };
+      next();
+    }, 700);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [open, type, id]);
 
   const shareText = useMemo(() => {

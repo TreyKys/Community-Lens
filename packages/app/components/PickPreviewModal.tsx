@@ -130,20 +130,26 @@ export function PickPreviewModal(props: Props) {
     return () => { cancelled = true; };
   }, [previewUrl, ready]);
 
-  // Preload every theme's variant of the current pick shape once the
-  // inputs settle (debounced so typing a stake doesn't fire 6 requests
-  // per keystroke). This is what actually fixes "switching themes is
-  // stubborn and slow" — without it, every swatch click re-ran the full
-  // render with nothing cached anywhere.
+  // Warm the cache for other themes once the inputs settle — debounced
+  // (so typing a stake doesn't fire requests per keystroke) AND loaded
+  // one at a time, so the preloads never starve the visible card the
+  // user is waiting on (firing all six at once used to leave it stuck).
   useEffect(() => {
     if (!ready) return;
+    let cancelled = false;
     const t = setTimeout(() => {
-      PICKS_THEME_LIST.forEach(th => {
+      let i = 0;
+      const next = () => {
+        if (cancelled || i >= PICKS_THEME_LIST.length) return;
         const img = new Image();
-        img.src = `${previewBasePath}?${baseQuery}&theme=${th.id}`;
-      });
-    }, 400);
-    return () => clearTimeout(t);
+        const advance = () => { i += 1; next(); };
+        img.onload = advance;
+        img.onerror = advance;
+        img.src = `${previewBasePath}?${baseQuery}&theme=${PICKS_THEME_LIST[i].id}`;
+      };
+      next();
+    }, 700);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [ready, previewBasePath, baseQuery]);
 
   const cardFileName = 'opinions-ng-pick-preview.png';
