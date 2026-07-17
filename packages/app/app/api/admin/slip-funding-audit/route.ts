@@ -21,12 +21,20 @@ const supabaseAdmin = createClient(
 //        no per-user balance snapshot is recorded at placement — so this
 //        is decision-support, not a certainty.
 //
-// POST — apply the correction: set bonus_proportion = 1.0 (treat as
-//        fully bonus-funded, the house-conservative default) on selected
-//        slips. ONLY ACTIVE (unresolved) slips — an already-settled slip
-//        already paid out, so changing its recorded proportion would just
-//        make the record disagree with the money. Supports dryRun and
-//        logs every correction to treasury_log.
+// POST — apply the correction (treat as fully bonus-funded, proportion = 1.0,
+//        the house-conservative default). Two mechanisms by slip status:
+//          * ACTIVE  — nothing has moved yet, so just flip the recorded
+//                      bonus_proportion; settlement later does the split.
+//          * SETTLED (won / voided) — the money ALREADY paid out 100% to
+//                      cash, so flipping the record alone would make it lie.
+//                      We call reclaim_slip_bonus_split, which MOVES money:
+//                      claws the over-paid cash back into bonus (atomic,
+//                      idempotent, clamped to the wallet — if the user
+//                      already withdrew it, the unrecoverable part is
+//                      reported as `shortfall` and no bonus is fabricated).
+//          * LOST    — moved no payout, so proportion has no monetary
+//                      effect; skipped.
+//        Supports dryRun and logs every correction to treasury_log.
 
 const BONUS_GRANT_TYPES = ['welcome_match', 'admin_credit', 'weekly_rebate', 'bonus_grant', 'vip_referral_bonus', 'referral_signup_bonus'];
 
@@ -65,7 +73,7 @@ export async function GET(request: Request) {
   const statuses = includeSettled ? ['active', 'won', 'lost', 'voided'] : ['active'];
   let q = supabaseAdmin
     .from('multiplier_slips')
-    .select('id, user_id, slip_stake_tngn, net_slip_stake_tngn, payout_tngn, status, bonus_proportion, created_at')
+    .select('id, user_id, slip_stake_tngn, net_slip_stake_tngn, payout_tngn, final_payout_tngn, status, bonus_proportion, created_at')
     .in('user_id', Array.from(bonusUserIds))
     .in('status', statuses)
     .or('bonus_proportion.is.null,bonus_proportion.eq.0')
@@ -105,14 +113,30 @@ export async function GET(request: Request) {
 
   const candidates = (slips || []).map(s => {
     const ctx = contextByUser[s.user_id] || {};
+    const status = s.status;
+    // A settled won/voided slip already paid out 100% to cash; correcting it to
+    // 100% bonus means clawing ~90% of the credited amount back into bonus. This
+    // is the INTENDED move BEFORE the wallet clamp — the exact figure (and any
+    // shortfall if the cash was already withdrawn) is computed at apply time by
+    // reclaim_slip_bonus_split. `won` uses the paid payout; `voided` the refund
+    // (= net stake). Estimate only, for triage.
+    const finalPayout = Number(s.final_payout_tngn || 0);
+    const estimatedReclaim =
+      status === 'won' ? Math.round(finalPayout * 0.90) :
+      status === 'voided' ? Math.round(finalPayout) :
+      0;
     return {
       slipId: s.id,
       userId: s.user_id,
       handle: ctx.handle ?? 'user',
-      status: s.status,
+      status,
       slipStakeTngn: Number(s.slip_stake_tngn || 0),
       netSlipStakeTngn: Number(s.net_slip_stake_tngn || 0),
       payoutTngn: Number(s.payout_tngn || 0),
+      finalPayoutTngn: finalPayout,
+      // Money that would move cash -> bonus if corrected (settled slips only,
+      // pre-clamp estimate). 0 for active (no money moved yet) and lost.
+      estimatedReclaimTngn: estimatedReclaim,
       placedAt: s.created_at,
       currentTngnBalance: ctx.currentTngn ?? null,
       currentBonusBalance: ctx.currentBonus ?? null,
@@ -120,7 +144,9 @@ export async function GET(request: Request) {
       // Best-effort signal only — NOT a certainty. True if the user has
       // any bonus footprint at all.
       likelyBonusFunded: (ctx.currentBonus ?? 0) > 0 || (ctx.lifetimeBonusGranted ?? 0) > 0,
-      fixable: s.status === 'active',
+      // Correctable: active (flip the record) or settled won/voided (reclaim
+      // money). A lost slip moved no payout, so there is nothing to correct.
+      fixable: status === 'active' || status === 'won' || status === 'voided',
     };
   });
 
@@ -128,7 +154,8 @@ export async function GET(request: Request) {
     total: candidates.length,
     active: candidates.filter(c => c.status === 'active').length,
     settled: candidates.filter(c => c.status !== 'active').length,
-    note: 'proportion=0 is ambiguous (also legit for all-cash slips). Exact split is not reconstructable — treat as review candidates. Only ACTIVE slips are fixable before resolution.',
+    fixable: candidates.filter(c => c.fixable).length,
+    note: 'proportion=0 is ambiguous (also legit for all-cash slips). Exact split is not reconstructable — treat as review candidates. Active slips flip the record before resolution; settled won/voided slips reclaim over-paid cash back to bonus (clamped to the wallet — already-withdrawn cash cannot be recovered).',
   };
 
   return NextResponse.json({ candidates, summary }, { headers: { 'Cache-Control': 'no-store' } });
@@ -149,9 +176,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Provide slipIds' }, { status: 400 });
   }
 
-  // Load the targeted slips and classify. Only ACTIVE slips can be
-  // corrected — a settled slip already moved money, so rewriting its
-  // proportion now would only desync the record from reality.
+  // Load the targeted slips and classify by status. Active slips are fixed by
+  // flipping the record; settled won/voided slips by reclaiming money; lost
+  // slips have no payout to correct.
   const { data: slips, error } = await supabaseAdmin
     .from('multiplier_slips')
     .select('id, user_id, status, bonus_proportion, slip_stake_tngn')
@@ -160,37 +187,57 @@ export async function POST(request: Request) {
 
   const found = new Set((slips || []).map(s => s.id));
   const notFound = slipIds.filter(id => !found.has(id));
-  const settledSkipped = (slips || []).filter(s => s.status !== 'active').map(s => ({ slipId: s.id, status: s.status }));
-  const eligible = (slips || []).filter(s => s.status === 'active');
-  const alreadyCorrect = eligible.filter(s => Number(s.bonus_proportion ?? 0) === 1);
-  const toApply = eligible.filter(s => Number(s.bonus_proportion ?? 0) !== 1);
 
-  const preview = {
-    willUpdate: toApply.map(s => ({ slipId: s.id, userId: s.user_id, fromProportion: Number(s.bonus_proportion ?? 0), toProportion: 1.0 })),
-    settledSkipped,
-    notFound,
-    alreadyFullBonus: alreadyCorrect.map(s => s.id),
-  };
+  const activeSlips = (slips || []).filter(s => s.status === 'active');
+  const settledPaid = (slips || []).filter(s => s.status === 'won' || s.status === 'voided');
+  const lostSkipped = (slips || []).filter(s => s.status === 'lost').map(s => ({ slipId: s.id, status: s.status }));
 
+  const activeAlreadyFull = activeSlips.filter(s => Number(s.bonus_proportion ?? 0) === 1);
+  const activeToFlip = activeSlips.filter(s => Number(s.bonus_proportion ?? 0) !== 1);
+
+  // ── DRY RUN ──────────────────────────────────────────────────────────────
+  // Active slips: a straight record flip. Settled slips: ask the reclaim RPC
+  // (dry_run = true) for the exact cash it would move and any shortfall.
   if (dryRun) {
-    return NextResponse.json({ dryRun: true, ...preview });
+    const willReclaim: any[] = [];
+    for (const s of settledPaid) {
+      const { data, error: rpcErr } = await supabaseAdmin
+        .rpc('reclaim_slip_bonus_split', { p_slip_id: s.id, p_target_proportion: 1.0, p_dry_run: true });
+      const row = Array.isArray(data) ? data[0] : data;
+      willReclaim.push({
+        slipId: s.id,
+        userId: s.user_id,
+        status: s.status,
+        reason: rpcErr ? rpcErr.message : row?.reason,
+        cashToMove: Number(row?.cash_moved ?? 0),
+        bonusToAdd: Number(row?.bonus_added ?? 0),
+        shortfall: Number(row?.shortfall ?? 0),
+      });
+    }
+    return NextResponse.json({
+      dryRun: true,
+      willUpdate: activeToFlip.map(s => ({ slipId: s.id, userId: s.user_id, fromProportion: Number(s.bonus_proportion ?? 0), toProportion: 1.0 })),
+      willReclaim,
+      lostSkipped,
+      notFound,
+      alreadyFullBonus: activeAlreadyFull.map(s => s.id),
+    });
   }
 
-  // Apply: set bonus_proportion = 1.0 on the eligible active slips, only
-  // where status is STILL active (guards a concurrent resolution).
-  const applied: string[] = [];
-  for (const s of toApply) {
+  // ── APPLY ────────────────────────────────────────────────────────────────
+  // 1) Active slips: flip bonus_proportion, re-checking status under the write
+  //    so a slip that settles concurrently is never silently touched.
+  const flipped: string[] = [];
+  for (const s of activeToFlip) {
     const { data: upd, error: updErr } = await supabaseAdmin
       .from('multiplier_slips')
       .update({ bonus_proportion: 1.0 })
       .eq('id', s.id)
-      .eq('status', 'active')      // re-check under write — never touch a now-settled slip
+      .eq('status', 'active')
       .select('id')
       .maybeSingle();
     if (updErr || !upd) continue;
-    applied.push(s.id);
-    // Audit trail (amount 0 — this moves no money itself, only fixes the
-    // funding record so SETTLEMENT splits correctly).
+    flipped.push(s.id);
     await supabaseAdmin.from('treasury_log').insert({
       type: 'slip_bonus_proportion_correction',
       amount_tngn: 0,
@@ -204,12 +251,39 @@ export async function POST(request: Request) {
     }).then(() => undefined, () => undefined);
   }
 
+  // 2) Settled won/voided slips: reclaim the over-paid cash into bonus. The RPC
+  //    is atomic + idempotent (a re-run returns reason 'already_reclaimed') and
+  //    clamps to the wallet, so already-withdrawn cash surfaces as shortfall.
+  const reclaimed: any[] = [];
+  for (const s of settledPaid) {
+    const { data, error: rpcErr } = await supabaseAdmin
+      .rpc('reclaim_slip_bonus_split', { p_slip_id: s.id, p_target_proportion: 1.0, p_dry_run: false });
+    const row = Array.isArray(data) ? data[0] : data;
+    reclaimed.push({
+      slipId: s.id,
+      userId: s.user_id,
+      status: s.status,
+      applied: rpcErr ? false : !!row?.applied,
+      reason: rpcErr ? rpcErr.message : row?.reason,
+      cashMoved: Number(row?.cash_moved ?? 0),
+      bonusAdded: Number(row?.bonus_added ?? 0),
+      shortfall: Number(row?.shortfall ?? 0),
+    });
+  }
+
+  const reclaimApplied = reclaimed.filter(r => r.applied);
   return NextResponse.json({
     dryRun: false,
-    applied,
-    appliedCount: applied.length,
-    settledSkipped,
+    flipped,
+    flippedCount: flipped.length,
+    reclaimed,
+    reclaimedCount: reclaimApplied.length,
+    totalCashReclaimed: Math.round(reclaimApplied.reduce((a, r) => a + r.cashMoved, 0)),
+    totalShortfall: Math.round(reclaimApplied.reduce((a, r) => a + r.shortfall, 0)),
+    // Back-compat aggregate for the UI toast.
+    appliedCount: flipped.length + reclaimApplied.length,
+    lostSkipped,
     notFound,
-    alreadyFullBonus: alreadyCorrect.map(s => s.id),
+    alreadyFullBonus: activeAlreadyFull.map(s => s.id),
   }, { headers: { 'Cache-Control': 'no-store' } });
 }

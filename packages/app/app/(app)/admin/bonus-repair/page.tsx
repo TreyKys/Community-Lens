@@ -14,11 +14,16 @@ import Link from 'next/link';
 // 20260710010000 stamped bonus_proportion = 0 on Multiplier slips placed
 // while the bonus-unaware place_multiplier_slip was live). Lists at-risk
 // slips with the funding context needed to ascertain the source, and
-// applies a "treat as 100% bonus" correction to selected ACTIVE slips
-// BEFORE they're resolved, so settlement splits winnings/refunds to
-// bonus instead of paying it all as withdrawable cash.
+// applies a "treat as 100% bonus" correction.
 //
-// Only active slips are correctable — a settled slip already moved money.
+// Two mechanisms, chosen by the server per slip status:
+//   * ACTIVE slip  — money hasn't moved; flip the recorded proportion so
+//                    settlement later splits winnings/refunds to bonus.
+//   * SETTLED slip — money already paid out 100% to cash; reclaim ~90% of
+//                    it back into bonus (clamped to the wallet, so cash the
+//                    user already withdrew surfaces as an un-recoverable
+//                    shortfall — never fabricated).
+//   * LOST slip    — no payout moved; nothing to correct.
 
 function adminHeaders() {
   return { 'Content-Type': 'application/json' };
@@ -31,6 +36,8 @@ type Candidate = {
   status: string;
   slipStakeTngn: number;
   payoutTngn: number;
+  finalPayoutTngn: number;
+  estimatedReclaimTngn: number;
   placedAt: string;
   currentTngnBalance: number | null;
   currentBonusBalance: number | null;
@@ -105,17 +112,27 @@ export default function BonusRepairPage() {
     } catch (e: any) { toast({ title: 'Preview failed', description: e.message, variant: 'destructive' }); }
   };
 
+  const previewCount = preview ? (preview.willUpdate || []).length + (preview.willReclaim || []).filter((r: any) => r.reason === 'dry_run').length : 0;
+
   const apply = async () => {
-    if (!preview || (preview.willUpdate || []).length === 0) return;
+    if (!preview) return;
+    const flipIds = (preview.willUpdate || []).map((w: any) => w.slipId);
+    const reclaimIds = (preview.willReclaim || []).filter((r: any) => r.reason === 'dry_run').map((r: any) => r.slipId);
+    const slipIds = [...flipIds, ...reclaimIds];
+    if (slipIds.length === 0) return;
     setApplying(true);
     try {
       const r = await fetch('/api/admin/slip-funding-audit', {
         method: 'POST', headers: adminHeaders(), credentials: 'include',
-        body: JSON.stringify({ slipIds: (preview.willUpdate || []).map((w: any) => w.slipId), dryRun: false }),
+        body: JSON.stringify({ slipIds, dryRun: false }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      toast({ title: `Corrected ${d.appliedCount} slip(s) to 100% bonus`, description: (d.settledSkipped || []).length ? `${d.settledSkipped.length} skipped (already settled).` : undefined });
+      const parts: string[] = [];
+      if (d.flippedCount) parts.push(`${d.flippedCount} active flipped`);
+      if (d.reclaimedCount) parts.push(`${d.reclaimedCount} settled reclaimed (₦${Math.round(d.totalCashReclaimed || 0).toLocaleString()} moved to bonus)`);
+      if (d.totalShortfall) parts.push(`₦${Math.round(d.totalShortfall).toLocaleString()} unrecoverable (already withdrawn)`);
+      toast({ title: `Corrected ${d.appliedCount} slip(s)`, description: parts.join(' · ') || undefined });
       setPreview(null);
       load();
     } catch (e: any) { toast({ title: 'Apply failed', description: e.message, variant: 'destructive' }); }
@@ -154,8 +171,9 @@ export default function BonusRepairPage() {
         <CardContent className="p-3 text-xs text-amber-200/90 flex gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <p>These slips recorded <strong>0% bonus</strong> due to a placement regression, so at settlement they&rsquo;d pay 100% to withdrawable cash. Setting a slip to <strong>100% bonus</strong> makes settlement pay 10% cash / 90% bonus instead.</p>
-            <p>Only <strong>active</strong> (unresolved) slips can be fixed — settled slips already moved money. The exact original split isn&rsquo;t recoverable; this is a deliberate house-conservative default, so review before applying (a slip that truly used mostly real money would get bonus treatment on the whole payout).</p>
+            <p>These slips recorded <strong>0% bonus</strong> due to a placement regression, so winnings/refunds were (or would be) paid 100% to withdrawable cash. Correcting a slip to <strong>100% bonus</strong> makes the split 10% cash / 90% bonus.</p>
+            <p><strong>Active</strong> slips just flip the record (settlement does the split later). <strong>Settled</strong> won/voided slips already paid out, so the fix <strong>moves money</strong> — it claws ~90% of the payout back from cash into bonus. If the user already withdrew that cash it can&rsquo;t be recovered; the gap shows as <strong>shortfall</strong> and no bonus is fabricated. <strong>Lost</strong> slips moved no payout and can&rsquo;t be selected.</p>
+            <p>The exact original split isn&rsquo;t recoverable — this is a deliberate house-conservative default, so review before applying (a slip that truly used mostly real money would get bonus treatment on the whole payout).</p>
           </div>
         </CardContent>
       </Card>
@@ -173,7 +191,7 @@ export default function BonusRepairPage() {
 
       {summary && (
         <p className="text-xs text-muted-foreground">
-          {summary.total} candidate slip(s) · {summary.active} active (fixable) · {summary.settled} settled. {summary.note}
+          {summary.total} candidate slip(s) · {summary.active} active · {summary.settled} settled · {summary.fixable ?? '—'} fixable. {summary.note}
         </p>
       )}
 
@@ -200,6 +218,7 @@ export default function BonusRepairPage() {
                     <th className="p-2 text-left">Status</th>
                     <th className="p-2 text-right">Stake</th>
                     <th className="p-2 text-right">Payout</th>
+                    <th className="p-2 text-right">Reclaim est.</th>
                     <th className="p-2 text-right">Cur. bonus</th>
                     <th className="p-2 text-right">Bonus granted</th>
                     <th className="p-2 text-left">Placed</th>
@@ -223,6 +242,7 @@ export default function BonusRepairPage() {
                       </td>
                       <td className="p-2 text-right tabular-nums">{ngn(c.slipStakeTngn)}</td>
                       <td className="p-2 text-right tabular-nums">{ngn(c.payoutTngn)}</td>
+                      <td className="p-2 text-right tabular-nums">{c.status === 'active' ? <span className="text-muted-foreground">—</span> : c.estimatedReclaimTngn > 0 ? <span className="text-amber-300">{ngn(c.estimatedReclaimTngn)}</span> : '—'}</td>
                       <td className="p-2 text-right tabular-nums">{ngn(c.currentBonusBalance)}</td>
                       <td className="p-2 text-right tabular-nums">{ngn(c.lifetimeBonusGranted)}</td>
                       <td className="p-2 text-muted-foreground">{new Date(c.placedAt).toLocaleString()}</td>
@@ -235,20 +255,37 @@ export default function BonusRepairPage() {
         </CardContent>
       </Card>
 
-      {preview && (
+      {preview && (() => {
+        const reclaimable = (preview.willReclaim || []).filter((r: any) => r.reason === 'dry_run');
+        const reclaimBlocked = (preview.willReclaim || []).filter((r: any) => r.reason !== 'dry_run');
+        const totalCash = reclaimable.reduce((a: number, r: any) => a + Number(r.cashToMove || 0), 0);
+        const totalShort = reclaimable.reduce((a: number, r: any) => a + Number(r.shortfall || 0), 0);
+        return (
         <Card className="border-emerald-500/30">
           <CardHeader className="pb-2"><CardTitle className="text-sm">Preview</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-xs">
-            <p><strong>{(preview.willUpdate || []).length}</strong> slip(s) will be set to 100% bonus.</p>
-            {(preview.settledSkipped || []).length > 0 && <p className="text-amber-300">{preview.settledSkipped.length} skipped — already settled (money already moved).</p>}
+            {(preview.willUpdate || []).length > 0 && (
+              <p><strong>{(preview.willUpdate || []).length}</strong> active slip(s) → record flipped to 100% bonus (no money moves now).</p>
+            )}
+            {reclaimable.length > 0 && (
+              <div className="space-y-1">
+                <p><strong>{reclaimable.length}</strong> settled slip(s) → reclaim <strong className="text-amber-300">₦{Math.round(totalCash).toLocaleString()}</strong> from cash into bonus.</p>
+                {totalShort > 0 && <p className="text-amber-400">⚠ ₦{Math.round(totalShort).toLocaleString()} can&rsquo;t be recovered (already withdrawn/spent) — will be recorded as shortfall, not fabricated.</p>}
+              </div>
+            )}
+            {reclaimBlocked.length > 0 && (
+              <p className="text-muted-foreground">{reclaimBlocked.length} settled slip(s) skipped: {Array.from(new Set(reclaimBlocked.map((r: any) => r.reason))).join(', ')}.</p>
+            )}
+            {(preview.lostSkipped || []).length > 0 && <p className="text-muted-foreground">{preview.lostSkipped.length} lost slip(s) skipped (no payout to correct).</p>}
             {(preview.alreadyFullBonus || []).length > 0 && <p className="text-muted-foreground">{preview.alreadyFullBonus.length} already at 100% bonus.</p>}
             {(preview.notFound || []).length > 0 && <p className="text-muted-foreground">{preview.notFound.length} not found.</p>}
-            <Button className="mt-2 bg-emerald-600 hover:bg-emerald-500" disabled={applying || (preview.willUpdate || []).length === 0} onClick={apply}>
-              {applying ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Applying…</> : `Apply 100% bonus to ${(preview.willUpdate || []).length} slip(s)`}
+            <Button className="mt-2 bg-emerald-600 hover:bg-emerald-500" disabled={applying || previewCount === 0} onClick={apply}>
+              {applying ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Applying…</> : `Apply to ${previewCount} slip(s)`}
             </Button>
           </CardContent>
         </Card>
-      )}
+        );
+      })()}
     </div>
   );
 }
