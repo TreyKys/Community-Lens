@@ -77,13 +77,18 @@ export async function settleSquadDeposit(
     return { outcome: 'already_credited', tngnCredited: credit, spread };
   }
 
-  // 2. CAS-claim so only one caller credits. Provably-uncredited states
-  //    only; 'crediting' is deliberately excluded (ambiguous).
+  // 2. CAS-claim so only one caller credits. Mirror the atomic RPC's
+  //    claimable set: anything NOT already 'completed' and NOT mid-flight
+  //    'crediting'. This deliberately includes the transient `failed_*`
+  //    states (e.g. 'failed_pending') a racing verify may have stamped — the
+  //    caller has already confirmed the payment succeeded, so those are
+  //    provably-uncredited and safe to credit. 'crediting' stays excluded
+  //    (the one ambiguous half-state); 'completed' short-circuits above.
   const { data: claimed } = await db
     .from('squad_transactions')
     .update({ status: 'crediting', tngn_credited: credit, spread_captured: spread })
     .eq('transaction_ref', transactionRef)
-    .in('status', ['awaiting_payment', 'pending', 'failed_balance_update'])
+    .not('status', 'in', '("completed","crediting")')
     .select('user_id')
     .maybeSingle();
 

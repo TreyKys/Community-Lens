@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Wallet, Loader2, Shield, AlertTriangle } from 'lucide-react';
+import { Wallet, Loader2, Shield, AlertTriangle, RefreshCw } from 'lucide-react';
 import { APPROVED_BANKS } from '@/lib/banks';
 
 export function WalletModal() {
@@ -24,6 +24,7 @@ export function WalletModal() {
   const [accountName, setAccountName] = useState('');
   const [isDepositLoading, setIsDepositLoading] = useState(false);
   const [isWithdrawLoading, setIsWithdrawLoading] = useState(false);
+  const [isRefreshingDeposit, setIsRefreshingDeposit] = useState(false);
 
   const { toast } = useToast();
 
@@ -78,6 +79,44 @@ export function WalletModal() {
     } catch (e: any) {
       toast({ title: 'Payment failed to start', description: e.message, variant: 'destructive' });
       setIsDepositLoading(false);
+    }
+  };
+
+  // Manual re-check for a deposit that paid but hasn't shown up yet. Hits the
+  // owner-gated /api/squad/refresh, which re-verifies with Squad and credits
+  // if confirmed — the user's own lever to un-stick a lagging deposit instead
+  // of waiting for the reconcile sweep.
+  const handleRefreshDeposit = async () => {
+    if (!session?.user) {
+      toast({ title: 'Please sign in first', variant: 'destructive' });
+      return;
+    }
+    setIsRefreshingDeposit(true);
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (!s?.access_token) throw new Error('Sign in to continue');
+      const res = await fetch('/api/squad/refresh', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}), // no ref → most recent still-open deposit
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 404 || body?.status === 'not_found') {
+        toast({ title: 'No pending deposit', description: 'Nothing waiting to be credited.' });
+      } else if (body?.status === 'completed') {
+        toast({ title: 'Deposit credited', description: body.tngn_credited ? `₦${Math.round(Number(body.tngn_credited)).toLocaleString()} is in your wallet.` : 'Your wallet has been updated.' });
+        if (session?.user?.id) fetchBalance(session.user.id);
+      } else if (body?.status === 'failed') {
+        toast({ title: 'Payment did not complete', description: body.message || 'No charge stands.', variant: 'destructive' });
+      } else if (body?.status === 'needs_review') {
+        toast({ title: 'Needs review', description: 'Support will confirm this deposit shortly.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Still processing', description: body.message || 'Check back in a moment.' });
+      }
+    } catch (e: any) {
+      toast({ title: 'Could not refresh', description: e.message, variant: 'destructive' });
+    } finally {
+      setIsRefreshingDeposit(false);
     }
   };
 
@@ -203,6 +242,20 @@ export function WalletModal() {
             <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-1">
               <Shield className="w-3 h-3" /> Secured by Squad · Card · Bank · USSD
             </p>
+
+            {/* Paid but not showing? Let the user force a re-check + credit. */}
+            <Button
+              variant="ghost"
+              onClick={handleRefreshDeposit}
+              disabled={isRefreshingDeposit}
+              className="w-full h-9 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {isRefreshingDeposit ? (
+                <span className="flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking your last deposit…</span>
+              ) : (
+                <span className="flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5" /> Paid but not showing? Re-check my deposit</span>
+              )}
+            </Button>
             <p className="text-[11px] text-muted-foreground/80 text-center leading-relaxed border-t border-border/30 pt-3">
               Trouble with your deposit? Email{' '}
               <a href="mailto:opng@neurodevlabs.cloud" className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">opng@neurodevlabs.cloud</a>

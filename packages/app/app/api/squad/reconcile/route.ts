@@ -42,7 +42,21 @@ const BATCH = 50;
 // the old flow (see migration 20260712000000). 'crediting' is
 // deliberately EXCLUDED — it's the one ambiguous state, handled as
 // needs_review by the RPC and surfaced for manual admin review instead.
-const RECOVERABLE_STATES = ['awaiting_payment', 'pending', 'failed_balance_update'];
+//
+// We sweep every open row EXCEPT the three we must not touch: 'completed'
+// (done), 'abandoned' (retired), and 'crediting' (the one ambiguous
+// half-state — handled as needs_review, never auto-credited). Everything
+// else — awaiting_payment, pending, failed_balance_update, AND any
+// `failed_<transient>` a racing verify may have stamped — is provably
+// uncredited and re-checkable. Widening to include the `failed_*` states is
+// the fix for the stranding bug: those rows were invisible to the old
+// allowlist. Re-verifying them is safe — settle only credits when Squad's own
+// verify NOW returns successful, so a genuinely failed charge is never
+// credited, just retired (abandoned) once it ages out.
+//
+// (A denylist, not a LIKE filter: inside PostgREST `.or()` the LIKE wildcard
+// is `*` not `%`, an easy footgun — this sidesteps it entirely.)
+const EXCLUDED_STATES = '("completed","abandoned","crediting")';
 
 function isSuccessful(squadData: any): boolean {
   const s = String(
@@ -63,7 +77,7 @@ export async function POST(request: Request) {
   const { data: stuck, error } = await supabaseAdmin
     .from('squad_transactions')
     .select('transaction_ref, user_id, amount_ngn, status, created_at')
-    .in('status', RECOVERABLE_STATES)
+    .not('status', 'in', EXCLUDED_STATES)
     .gte('created_at', notBefore)
     .lte('created_at', notAfter)
     .order('created_at', { ascending: true })
@@ -115,13 +129,19 @@ export async function POST(request: Request) {
         // Squad says not successful. If it's been sitting unpaid long
         // enough, mark it abandoned so we stop re-checking; otherwise
         // leave it — the user may still be completing payment.
+        //
+        // EXCEPTION: never abandon 'failed_balance_update'. That state means
+        // Squad DID confirm the payment but our credit step failed — it must
+        // keep retrying until credited, even if a transient verify blip now
+        // reports non-success.
         const ageHours = (now - new Date(row.created_at).getTime()) / (1000 * 60 * 60);
-        if (row.status === 'awaiting_payment' && ageHours >= ABANDON_AFTER_HOURS) {
+        const retirable = row.status !== 'failed_balance_update';
+        if (retirable && ageHours >= ABANDON_AFTER_HOURS) {
           await supabaseAdmin
             .from('squad_transactions')
             .update({ status: 'abandoned' })
             .eq('transaction_ref', row.transaction_ref)
-            .eq('status', 'awaiting_payment'); // don't clobber a concurrent credit
+            .eq('status', row.status); // CAS: don't clobber a concurrent credit
           results.abandoned += 1;
         } else {
           results.stillPending += 1;

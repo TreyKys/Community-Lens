@@ -53,22 +53,51 @@ export async function POST(request: Request) {
     }
 
     // Squad returns transaction_status or gateway_response depending on endpoint version.
-    const txStatus: string =
+    const txStatusRaw: string =
       squadData?.transaction_status ||
       squadData?.gateway_response ||
       squadData?.status ||
       '';
+    const txStatus = txStatusRaw.toLowerCase();
+    const isSuccess = txStatus === 'successful' || txStatus === 'success';
 
-    if (txStatus.toLowerCase() !== 'successful' && txStatus.toLowerCase() !== 'success') {
-      if (row) {
-        await supabaseAdmin
-          .from('squad_transactions')
-          .update({ status: `failed_${txStatus || 'unknown'}` })
-          .eq('transaction_ref', reference);
+    if (!isSuccess) {
+      // Distinguish a TERMINAL failure (a real decline/reversal that will
+      // NEVER become successful) from a TRANSIENT not-yet-final status. The
+      // Squad redirect routinely lands ~1s before Squad marks the charge
+      // 'successful' server-side, so this first verify frequently sees
+      // 'pending'/'in_progress'/'' for a deposit that IS about to succeed.
+      //
+      // The old code stamped ANY non-success as `failed_<status>`. That
+      // STRANDED genuinely-paid deposits: the reconcile sweep only re-checks
+      // recoverable states, so a `failed_pending` row whose webhook also
+      // missed (routine on mobile card/USSD) was never healed — money in,
+      // never credited. Root cause of the "stuck deposit".
+      const TERMINAL_FAILURES = ['failed', 'declined', 'decline', 'reversed', 'reversal', 'cancelled', 'canceled', 'expired', 'abandoned', 'void', 'voided', 'reverted', 'rejected'];
+      const isTerminal = TERMINAL_FAILURES.some(t => txStatus.includes(t));
+
+      if (isTerminal) {
+        if (row) {
+          await supabaseAdmin
+            .from('squad_transactions')
+            .update({ status: `failed_${txStatus || 'unknown'}` })
+            .eq('transaction_ref', reference)
+            // Never clobber a row another caller already credited/is crediting.
+            .not('status', 'in', '("completed","crediting")');
+        }
+        return NextResponse.json({
+          status: `failed_${txStatus || 'unknown'}`,
+          message: 'Payment did not complete.',
+        });
       }
+
+      // Transient / unknown — do NOT stamp failed_*. Leave the row in its
+      // recoverable state so BOTH the callback poller (next attempt) and the
+      // reconcile cron can still credit it once Squad confirms. Tell the
+      // client we're processing, not failed.
       return NextResponse.json({
-        status: txStatus || 'failed',
-        message: 'Payment did not complete.',
+        status: 'processing',
+        message: 'Payment is still being confirmed. Your balance will update shortly.',
       });
     }
 
