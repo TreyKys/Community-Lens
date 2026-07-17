@@ -1,0 +1,3 @@
+## 2024-07-17 - Prevent Unnecessary Re-renders in MarketList
+**Learning:** React maps inside `MarketList` render many `MarketCard` components. When state changes in `MarketList` (like `autoSharePick` or other parent state), all `MarketCard`s re-render unless memoized. Since `MarketCard` instances receive primitive or stable props (with functions like `onBetPlaced` easily stabilized), `React.memo` can eliminate an immense amount of unnecessary DOM diffing when lists grow large.
+**Action:** Wrap `MarketCard` with `React.memo()` in `packages/app/components/MarketList.tsx`, and stabilize callbacks to ensure the memoization works.
