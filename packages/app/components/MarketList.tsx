@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -641,7 +641,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+const MarketCard = memo(function MarketCard({
   market,
   session,
   onBetPlaced,
@@ -903,7 +903,7 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+});
 
 type CategoryFilter = {
   category: string | null;
@@ -1019,7 +1019,7 @@ interface MarketListProps {
   sport?: string;
 }
 
-export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport }: MarketListProps) {
+export const MarketList = memo(function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport }: MarketListProps) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'trending';
   const subcategory = searchParams.get('subcategory') || null;
@@ -1143,6 +1143,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     if (session?.user?.id) fetchStakedMarkets(session.user.id);
     else setStakedMarketIds(new Set());
   }, [session, fetchStakedMarkets]);
+
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    // Silent refetch (no skeleton) + re-anchor to the card the user
+    // just bet on so they stay in context. Without the scrollIntoView
+    // the silent refetch reorders cards (pool changed) and users
+    // would be looking at a different market at the same scrollY.
+    await fetchMarkets({ silent: true });
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [session?.user?.id, fetchStakedMarkets, fetchMarkets, setAutoSharePick]);
 
   const fetchMarkets = useCallback(async (opts?: { silent?: boolean }) => {
     // `silent` background refreshes don't toggle the loading skeleton.
@@ -1330,21 +1346,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
@@ -1370,4 +1372,8 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       )}
     </div>
   );
-}
+});
+
+// Since we changed MarketList from `export function MarketList` to `export const MarketList = memo(...)`,
+// we need to set the displayName for React DevTools (optional but good practice).
+MarketList.displayName = 'MarketList';
