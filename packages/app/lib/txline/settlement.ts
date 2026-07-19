@@ -16,6 +16,7 @@ import {
   type StatValidationProof,
 } from './client';
 import { txlineConfig, STAT_KEY, GAME_FINALISED_ACTION } from './config';
+import { verifyOutcomeOnChain } from './verify';
 
 export type FinalOutcome = {
   p1Goals: number;
@@ -100,10 +101,13 @@ export async function buildProof(fixtureId: number, outcome: FinalOutcome): Prom
   let epochDay: number | null = null;
   let minTimestamp: number | null = null;
 
+  let verified: boolean | null = null;
   try {
     proof = await statValidation(fixtureId, outcome.seq, statKeys);
     minTimestamp = proof?.summary?.updateStats?.minTimestamp ?? null;
     if (minTimestamp != null) epochDay = Math.floor(minTimestamp / 86_400_000);
+    // Best-effort on-chain re-verification (no-op unless TXLINE_ONCHAIN_VERIFY).
+    if (proof) verified = await verifyOutcomeOnChain(proof, outcome.proposedOutcome);
   } catch (err) {
     console.warn(`[txline] proof fetch failed for fixture ${fixtureId} seq ${outcome.seq}:`, err);
   }
@@ -120,7 +124,7 @@ export async function buildProof(fixtureId: number, outcome: FinalOutcome): Prom
     programId: txlineConfig.programId,
     epochDay,
     minTimestamp,
-    verified: null,
+    verified,
     proof,
     fetchedAt: Date.now(),
   };

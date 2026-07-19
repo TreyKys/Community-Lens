@@ -1,6 +1,7 @@
 import { MarketList } from "@/components/MarketList";
 import { EventChart } from "@/components/EventChart";
 import { UserStakeBanner } from "@/components/UserStakeBanner";
+import TxlineProofPanel from "@/components/TxlineProofPanel";
 import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -105,6 +106,11 @@ export default function EventPage({ params }: { params: { eventId: string } }) {
               <MarketList filterExactMarketId={eventId} />
             </Suspense>
           </div>
+
+          {/* TxLINE settlement proof — renders only for proof-backed markets */}
+          <Suspense fallback={null}>
+            <TxlineProofPanel marketId={eventId} />
+          </Suspense>
 
           <div>
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
