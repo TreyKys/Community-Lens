@@ -1,0 +1,3 @@
+## 2024-05-18 - [Memoize list item components handling new object references]
+**Learning:** Supabase queries dynamically reconstruct object instances, yielding entirely new memory references for properties mapped into arrays. Without React memoization alongside deep comparison of properties (and stabilization of any callbacks), React's shallow comparison forces re-renders for every single item component rendered from a mapped state array every time the parent re-fetches or modifies a background list view.
+**Action:** Always wrap repeating list-item components (like MarketCard inside MarketList) with React.memo utilizing a deep comparison equality checker, and wrap associated callback actions in useCallback when relying on frequent data fetching hooks.

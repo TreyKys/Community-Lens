@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -905,6 +905,47 @@ function MarketCard({
   );
 }
 
+const marketPropsAreEqual = (prev: MarketCardProps, next: MarketCardProps) => {
+  // Compare scalar properties of market
+  if (
+    prev.market.id !== next.market.id ||
+    prev.market.title !== next.market.title ||
+    prev.market.question !== next.market.question ||
+    prev.market.category !== next.market.category ||
+    prev.market.status !== next.market.status ||
+    prev.market.closes_at !== next.market.closes_at ||
+    prev.market.total_pool !== next.market.total_pool ||
+    prev.market.resolved_outcome !== next.market.resolved_outcome ||
+    prev.market.parent_market_id !== next.market.parent_market_id ||
+    prev.market.on_chain_market_id !== next.market.on_chain_market_id ||
+    prev.market.merkle_root !== next.market.merkle_root ||
+    prev.market.description !== next.market.description ||
+    prev.market.resolved_at !== next.market.resolved_at ||
+    prev.market.is_trending !== next.market.is_trending ||
+    prev.market.trending_rank !== next.market.trending_rank ||
+    prev.market.is_locked_odds !== next.market.is_locked_odds ||
+    prev.market.published_at !== next.market.published_at
+  ) return false;
+
+  // Compare arrays
+  if (prev.market.options.length !== next.market.options.length) return false;
+  for (let i = 0; i < prev.market.options.length; i++) {
+    if (prev.market.options[i] !== next.market.options[i]) return false;
+  }
+
+  // Compare rest of props
+  return prev.hideViewMore === next.hideViewMore &&
+    prev.isStaked === next.isStaked &&
+    prev.prefillOutcomeIndex === next.prefillOutcomeIndex &&
+    prev.prefillStakeTngn === next.prefillStakeTngn &&
+    prev.prefillEditStake === next.prefillEditStake &&
+    prev.prefillFromShareId === next.prefillFromShareId &&
+    prev.autoOpen === next.autoOpen &&
+    prev.session?.user?.id === next.session?.user?.id;
+};
+
+const MemoizedMarketCard = memo(MarketCard, marketPropsAreEqual);
+
 type CategoryFilter = {
   category: string | null;
   sport: string | null;
@@ -1294,6 +1335,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     };
   }, [scrollKey]);
 
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    // Silent refetch (no skeleton) + re-anchor to the card the user
+    // just bet on so they stay in context. Without the scrollIntoView
+    // the silent refetch reorders cards (pool changed) and users
+    // would be looking at a different market at the same scrollY.
+    await fetchMarkets({ silent: true });
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [fetchMarkets, fetchStakedMarkets, session?.user?.id, setAutoSharePick]);
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -1326,25 +1383,11 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       {markets.map((market) => {
         const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
         return (
-          <MarketCard
+          <MemoizedMarketCard
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
