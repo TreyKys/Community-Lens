@@ -76,7 +76,11 @@ export async function POST(request: Request) {
       .not('txline_fixture_id', 'is', null)
       .in('status', ['open', 'locked'])
       .lte('closes_at', new Date().toISOString())
-      .order('closes_at', { ascending: true })
+      // Most-recent-kickoff first: TxLINE's historical scores endpoint only
+      // covers roughly the last two weeks, so the oldest group-stage matches
+      // are the LEAST likely to have a retrievable game_finalised record.
+      // Scanning newest-first finds the demo-able (recent) results first.
+      .order('closes_at', { ascending: false })
       .limit(limit);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     markets = data || [];
