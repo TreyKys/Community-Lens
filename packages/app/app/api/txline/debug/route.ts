@@ -46,7 +46,9 @@ export async function GET(request: Request) {
   const supabaseAdmin = getSupabaseAdmin();
   const { data: market, error } = await supabaseAdmin
     .from('markets')
-    .select('id, question, txline_fixture_id, status, closes_at')
+    .select(
+      'id, question, txline_fixture_id, status, closes_at, resolved_outcome, resolution_source, override_reason, resolved_by'
+    )
     .eq('id', marketId)
     .single();
   if (error || !market) return NextResponse.json({ error: 'Market not found' }, { status: 404 });
@@ -73,7 +75,16 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    market: { id: market.id, question: market.question, status: market.status, closes_at: market.closes_at },
+    market: {
+      id: market.id,
+      question: market.question,
+      status: market.status,
+      closes_at: market.closes_at,
+      resolved_outcome: market.resolved_outcome,
+      resolution_source: market.resolution_source,
+      override_reason: market.override_reason,
+      resolved_by: market.resolved_by,
+    },
     fixtureId,
     historical,
     snapshot,

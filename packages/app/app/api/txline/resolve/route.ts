@@ -93,17 +93,37 @@ export async function POST(request: Request) {
 
   // Delegate the actual payout to the existing resolver via the cron secret
   // (a server-side self-call has no admin cookie, but the resolver also
-  // accepts x-cron-secret).
-  const res = await fetch(`${getBaseUrl()}/api/markets/resolve`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-cron-secret': process.env.CRON_SECRET || '' },
-    body: JSON.stringify({ marketId, winningOutcomeIndex }),
-  });
+  // accepts x-cron-secret). Prefer the incoming request's own origin over
+  // NEXT_PUBLIC_APP_URL — on a branch/preview deploy that env var may be
+  // scoped to Production only and fall back to localhost, which a serverless
+  // function can never reach. request.url always reflects where we're
+  // actually running.
+  let selfOrigin = getBaseUrl();
+  try {
+    selfOrigin = new URL(request.url).origin;
+  } catch { /* keep the getBaseUrl() fallback */ }
+
+  let res: Response;
+  try {
+    res = await fetch(`${selfOrigin}/api/markets/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-cron-secret': process.env.CRON_SECRET || '' },
+      body: JSON.stringify({ marketId, winningOutcomeIndex }),
+    });
+  } catch (err: any) {
+    // Provenance (resolution_source/override_reason) is already committed
+    // above even though payout never ran — surface that clearly instead of
+    // crashing, so the caller knows the market is staged, not resolved.
+    return NextResponse.json(
+      { ok: false, stage: 'resolve', error: `Could not reach resolver at ${selfOrigin}: ${err?.message || err}`, provenanceWritten: true },
+      { status: 502 }
+    );
+  }
   const resolveBody = await res.json().catch(() => ({}));
 
   if (!res.ok) {
     return NextResponse.json(
-      { ok: false, stage: 'resolve', status: res.status, error: resolveBody?.error || 'resolve failed' },
+      { ok: false, stage: 'resolve', status: res.status, error: resolveBody?.error || 'resolve failed', provenanceWritten: true },
       { status: res.status }
     );
   }
