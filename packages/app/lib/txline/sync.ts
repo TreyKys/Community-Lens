@@ -6,8 +6,15 @@
 // path — TxLINE owns resolution for these markets.
 
 import { getSupabaseAdmin } from '@/lib/oracle';
-import { listFixtures, type TxLineFixture } from './client';
+import { listFixtures, epochDay, type TxLineFixture } from './client';
 import { txlineConfig } from './config';
+
+// The fixtures endpoint filters to fixtures on/after startEpochDay. Left
+// unset, an empty/omitted value appears to default to "today" server-side —
+// which returns nothing once the tournament has finished. We always pass an
+// explicit day well before kickoff so a sync run gets the full competition
+// regardless of when it's run relative to the tournament.
+const WORLD_CUP_START_EPOCH_DAY = epochDay(new Date('2026-06-01T00:00:00Z').getTime());
 
 export type SyncResult = {
   fetched: number;
@@ -75,7 +82,7 @@ async function upsertFixtureMarket(f: TxLineFixture): Promise<'created' | 'skipp
 export async function syncWorldCupFixtures(limit?: number): Promise<SyncResult> {
   const result: SyncResult = { fetched: 0, created: 0, skipped: 0, errors: [] };
 
-  const fixtures = await listFixtures(txlineConfig.competitionId);
+  const fixtures = await listFixtures(txlineConfig.competitionId, WORLD_CUP_START_EPOCH_DAY);
   result.fetched = fixtures.length;
 
   // Sort by kickoff ascending so a limited run keeps the soonest fixtures.
