@@ -45,6 +45,59 @@ GitHub secret**, update **one Squad webhook URL**.
 
 ---
 
+## 1b. AWS account setup (do before provisioning)
+
+### Billing plan — the one that can take the site down
+
+New AWS accounts may default to a **Free Plan**, which can be **suspended once
+the signup credits are exhausted**. For a platform holding user funds that is
+the worst failure mode we have: account suspended → site down → Squad webhooks
+fail → deposits strand past the 3-day reconcile window (§5).
+
+**Move the account to a Paid Plan with a valid card.** Credits still offset the
+bill to ~zero while they last; you just remove the automated-shutoff risk.
+
+### Credits
+
+Check Billing → Credits for the real amount **and the expiry date** (typically
+~12 months from signup). At ~$10–12/mo this covers roughly a year.
+
+Two rules:
+- Put the expiry in a calendar reminder **60 days ahead**, so the first real
+  invoice is never a surprise.
+- **Do not let free credits choose the architecture.** Amplify/Fargate look free
+  while credits last, then cost multiples of a small instance forever after —
+  and switching later means a second migration. Build the $10/mo steady state
+  now; treat credits as buffer.
+
+### Budget alarm — do this first
+
+Set it before launching anything. (Creating a budget is also one of the
+activities that earns additional signup credit.)
+
+Billing → Budgets → Create budget → Cost budget, monthly, e.g. **$20**, with
+alerts at 50% / 80% / 100% to your email. This is the difference between
+noticing an unexpected charge in hours versus at the end of the month.
+
+### Root account hygiene
+
+Non-negotiable for an account that will hold production infrastructure for a
+money app:
+1. **Enable MFA on the root user.**
+2. **Create an IAM admin user** and use that for daily work — never root.
+3. Never generate root access keys.
+
+### Region
+
+Nigerian traffic mostly reaches AWS via European landing points, so the lowest
+practical latency is usually **eu-west-1 (Ireland)** or **eu-west-2 (London)**.
+`af-south-1` (Cape Town) is geographically closer but is often pricier, has
+narrower service coverage, and submarine-cable routing frequently makes it no
+faster from Lagos. Pick one and keep everything in it — cross-region traffic
+costs money and adds latency for no benefit here.
+
+---
+
 ## 2. Provision (~20 min)
 
 **Lightsail 2GB ($10/mo flat, 3TB transfer included)** — recommended for cost
