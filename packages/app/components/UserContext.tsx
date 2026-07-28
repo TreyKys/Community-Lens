@@ -4,6 +4,28 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { supabase } from '@/lib/supabase';
 import { useAccount } from 'wagmi';
 
+/**
+ * Cryptographically secure id for a new non-custodial profile.
+ *
+ * Prefers crypto.randomUUID, then a getRandomValues-built UUIDv4. Never uses
+ * Math.random(): it's a predictable PRNG, so ids derived from it can be guessed
+ * from previously observed ones — unacceptable for a user identifier.
+ */
+function randomId(): string {
+  const c: Crypto | undefined = typeof globalThis !== 'undefined' ? (globalThis as any).crypto : undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  if (c?.getRandomValues) {
+    const b = new Uint8Array(16);
+    c.getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+    const hex = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  // No WebCrypto at all — refuse rather than mint a guessable id.
+  throw new Error('Secure random source unavailable; cannot create a profile id.');
+}
+
 export interface UserState {
   id: string;
   wallet_address: string;
@@ -73,7 +95,12 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
       // If Web3 user connects for the first time, auto-create a non-custodial profile
       if (!dbUser) {
-          const newId = window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+          // Math.random() is NOT cryptographically secure — its output is
+          // predictable from prior draws, so a fallback built on it could let
+          // an attacker guess the id of a freshly-created wallet profile.
+          // Use crypto.getRandomValues (available wherever crypto.randomUUID
+          // isn't) and only fall back further if there is no WebCrypto at all.
+          const newId = randomId();
           const { data, error } = await supabase.from('users').insert({
               id: newId,
               wallet_address: address.toLowerCase(),

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyTransaction } from '@/lib/squad';
 import { settleSquadDeposit } from '@/lib/settleSquadDeposit';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +67,7 @@ function isSuccessful(squadData: any): boolean {
 }
 
 export async function POST(request: Request) {
-  if (request.headers.get('x-cron-secret') !== process.env.CRON_SECRET) {
+  if (!safeSecretMatch(request.headers.get('x-cron-secret'), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

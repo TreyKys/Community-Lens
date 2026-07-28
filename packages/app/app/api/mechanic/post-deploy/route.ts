@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runMechanicScan } from '@/lib/mechanic/scans';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -27,8 +28,8 @@ export async function POST(request: Request) {
   const cron = request.headers.get('x-cron-secret');
   const deploy = request.headers.get('x-netlify-deploy-secret');
   const okAuth =
-    (cron && cron === process.env.CRON_SECRET) ||
-    (deploy && deploy === process.env.NETLIFY_DEPLOY_SECRET);
+    safeSecretMatch(cron, process.env.CRON_SECRET) ||
+    safeSecretMatch(deploy, process.env.NETLIFY_DEPLOY_SECRET);
   if (!okAuth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const startedAt = Date.now();

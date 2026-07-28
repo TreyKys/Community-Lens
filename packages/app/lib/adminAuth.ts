@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { safeEqual } from './safeCompare';
 
 export const ADMIN_COOKIE = 'odds_admin';
 
@@ -14,12 +15,15 @@ export function isAdminRequest(request: Request): boolean {
   const expected = process.env.ADMIN_SECRET;
   if (!expected) return false;
 
+  // Constant-time comparisons — a plain === leaks how many leading bytes of
+  // the guess were correct via response timing, which is a byte-at-a-time
+  // oracle for the admin secret.
   const auth = request.headers.get('Authorization');
-  if (auth === `Bearer ${expected}`) return true;
+  if (safeEqual(auth, `Bearer ${expected}`)) return true;
 
   try {
     const cookie = cookies().get(ADMIN_COOKIE)?.value;
-    if (cookie && cookie === expected) return true;
+    if (safeEqual(cookie, expected)) return true;
   } catch {
     // cookies() can throw outside a request scope — ignore
   }

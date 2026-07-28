@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,7 +38,7 @@ const MIN_DISTINCT_DAYS = 3;        // anti-dumping — must spread bets across 
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
-    const isValidCron = cronSecret === process.env.CRON_SECRET;
+    const isValidCron = safeSecretMatch(cronSecret, process.env.CRON_SECRET);
     const isValidAdmin = isAdminRequest(request);
     if (!isValidCron && !isValidAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

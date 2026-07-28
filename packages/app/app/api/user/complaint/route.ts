@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { triageComplaint } from '@/lib/mechanic/triage';
 import { attemptComplaintAutoFix } from '@/lib/mechanic/complaintAutoFix';
+import { getAuthUser } from '@/lib/getAuthUser';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -15,14 +16,6 @@ const supabaseAdmin = createClient(
 const VALID_TYPES = ['bet_stuck', 'deposit_missing', 'withdrawal_delayed', 'balance_wrong', 'other'];
 const MAX_PER_USER_PER_HOUR = 5;
 
-async function getAuthUser(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader) return null;
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !user) return null;
-  return user;
-}
 
 // POST /api/user/complaint
 //
@@ -42,7 +35,7 @@ async function getAuthUser(request: Request) {
 // fixed it, please refresh." If not, they get "we're looking into it."
 export async function POST(request: Request) {
   try {
-    const user = await getAuthUser(request);
+    const user = await getAuthUser(supabaseAdmin, request);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     let body: any;
@@ -239,7 +232,7 @@ export async function POST(request: Request) {
 
 // GET /api/user/complaint — user's own complaint history
 export async function GET(request: Request) {
-  const user = await getAuthUser(request);
+  const user = await getAuthUser(supabaseAdmin, request);
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { data, error } = await supabaseAdmin
     .from('user_complaints')

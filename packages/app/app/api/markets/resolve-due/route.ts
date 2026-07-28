@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, getBaseUrl, cronHeaders, lookupMarketResult } from '@/lib/oracle';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const cronSecret = request.headers.get('x-cron-secret');
-  if (cronSecret !== process.env.CRON_SECRET) {
+  if (!safeSecretMatch(cronSecret, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

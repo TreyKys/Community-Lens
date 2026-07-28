@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runMechanicScan } from '@/lib/mechanic/scans';
 import { runFixForFinding, isCircuitBreakerTripped, AUTO_TIER_ISSUE_TYPES } from '@/lib/mechanic/fixers';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,7 @@ const supabaseAdmin = createClient(
 // audit trail is complete no matter which surface invoked which fix.
 export async function POST(request: Request) {
   const cronSecret = request.headers.get('x-cron-secret');
-  if (cronSecret !== process.env.CRON_SECRET) {
+  if (!safeSecretMatch(cronSecret, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

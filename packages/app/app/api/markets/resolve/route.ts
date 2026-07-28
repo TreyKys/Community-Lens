@@ -7,6 +7,7 @@ import {
   type MarketResolution,
 } from '@/lib/lockedSettlement';
 import { displayFloorPayout } from '@/lib/displayMultiplier';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -485,10 +486,15 @@ async function resolveLockedOddsMarket(args: {
     });
   }
 
+  // Index the locked bets once. These loops previously did an O(n) Array.find
+  // per bet, making settlement O(n²) — noticeable on a market with thousands
+  // of bets. Same lookups, one hash each.
+  const lockedBetById = new Map(lockedBets.map(b => [b.id, b]));
+
   // Pay winners + award win points.
   for (const p of summary.perBet) {
     if (!p.won) continue;
-    const lb = lockedBets.find(x => x.id === p.betId)!;
+    const lb = lockedBetById.get(p.betId)!;
     try {
       const { tngn: winTngn, bonus: winBonus } = applyBonusSplit(p.payoutTngn, bonusPropByBetId[lb.id] ?? 0);
       // Atomic + idempotent: credits the user AND flips the bet to
@@ -545,7 +551,7 @@ async function resolveLockedOddsMarket(args: {
   // misleading: silence on a loss reads as "still pending".
   for (const p of summary.perBet) {
     if (p.won) continue;
-    const lb = lockedBets.find(x => x.id === p.betId)!;
+    const lb = lockedBetById.get(p.betId)!;
     try {
       const { data: applied } = await supabaseAdmin.rpc('settle_bet_outcome', {
         p_bet_id: lb.id,
@@ -589,10 +595,10 @@ async function resolveLockedOddsMarket(args: {
       });
       await supabaseAdmin.from('vip_referral_earnings').insert({
         vip_user_id: cut.vipReferrerId,
-        referred_user_id: lockedBets.find(b => b.id === cut.betId)!.userId,
+        referred_user_id: lockedBetById.get(cut.betId)!.userId,
         bet_id: cut.betId,
         market_id: marketId,
-        rake_share_pct: lockedBets.find(b => b.id === cut.betId)!.vipRakeSharePct,
+        rake_share_pct: lockedBetById.get(cut.betId)!.vipRakeSharePct,
         rake_share_amount: cut.amountTngn,
         metadata: { basis: cut.basis },
       });
@@ -693,7 +699,7 @@ async function resolveLockedOddsMarket(args: {
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
-    const isValidCron = cronSecret === process.env.CRON_SECRET;
+    const isValidCron = safeSecretMatch(cronSecret, process.env.CRON_SECRET);
     const isValidAdmin = isAdminRequest(request);
     if (!isValidCron && !isValidAdmin) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
