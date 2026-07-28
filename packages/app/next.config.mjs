@@ -1,5 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Emit a self-contained server bundle (.next/standalone) with only the
+  // node_modules actually reachable at runtime. Required for the container
+  // image: it turns a ~1GB node_modules install into a ~150MB image and lets
+  // the final stage run `node server.js` with no npm install at all.
+  // Harmless on any other host — nothing reads it unless we containerise.
+  output: 'standalone',
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'js.paystack.co' },

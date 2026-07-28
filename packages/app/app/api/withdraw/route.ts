@@ -121,7 +121,7 @@ export async function POST(request: Request) {
               ? '⚠️ Large withdrawal — review carefully before sending. Confirm user identity if anything looks off.'
               : 'Open the admin dashboard to mark this as paid once you\'ve sent the transfer.'}
           </p>
-          <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://truthmarket.netlify.app'}/admin?tab=withdrawals"
+          <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://opinions.ng'}/admin?tab=withdrawals"
              style="display:inline-block;margin-top:8px;padding:10px 16px;background:#059669;color:white;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px">
             Open Admin Dashboard
           </a>
