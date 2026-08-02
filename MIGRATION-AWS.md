@@ -152,10 +152,25 @@ free -h   # confirm swap is present
 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-plugin git
 sudo usermod -aG docker $USER && newgrp docker
 
-git clone <your-repo> ~/app && cd ~/app
+# ── Clone. If the repo is PRIVATE (it is), plain https will prompt for a
+# password and fail — GitHub removed password auth. Use a read-only deploy key:
+ssh-keygen -t ed25519 -C "lightsail-deploy" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+#   → copy that line, then in GitHub:
+#     repo → Settings → Deploy keys → Add deploy key
+#     title "lightsail", paste, leave "Allow write access" UNCHECKED
+ssh -o StrictHostKeyChecking=accept-new -T git@github.com   # expect "successfully authenticated"
+
+git clone git@github.com:TreyKys/Community-Lens.git ~/app && cd ~/app
+git checkout claude/odds-ng-codebase-review-6QJdZ    # branch with the Docker setup
+
 cp .env.production.example .env.production   # paste values from step 0
 chmod 600 .env.production
 ```
+
+A deploy key (not a personal access token) keeps this server's access scoped to
+this one repo and read-only — if the box is ever compromised, the blast radius
+is "someone read this repo", not "someone pushed to all your repos".
 
 Edit `Caddyfile` → replace `opinions.ng` with your real domain.
 
