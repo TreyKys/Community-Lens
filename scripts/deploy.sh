@@ -17,8 +17,9 @@ HEALTH_DELAY=4
 
 cd "$(dirname "$0")/.."
 
-if [[ ! -f .env.production ]]; then
-  echo "FATAL: .env.production missing. Copy .env.production.example and fill it in." >&2
+if [[ ! -f .env ]]; then
+  echo "FATAL: .env missing. Copy .env.production.example to .env and fill it in." >&2
+  echo "       (Compose reads build-arg substitution ONLY from a file named .env)" >&2
   exit 1
 fi
 

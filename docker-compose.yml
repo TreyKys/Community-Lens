@@ -28,8 +28,14 @@ services:
         NEXT_PUBLIC_TRUTH_MARKET_ADDRESS: ${NEXT_PUBLIC_TRUTH_MARKET_ADDRESS}
         NEXT_PUBLIC_PAYMASTER_URL: ${NEXT_PUBLIC_PAYMASTER_URL}
     # Server-side secrets are injected at RUNTIME only — never baked into the image.
+    #
+    # This MUST be `.env`, not `.env.production`. Compose substitutes ${VAR} in
+    # the build.args block above from your shell or from a file named exactly
+    # `.env` — `env_file` is NOT consulted for that substitution, it only sets
+    # variables inside the running container. Pointing this at any other name
+    # silently builds the client bundle with blank NEXT_PUBLIC_* values.
     env_file:
-      - .env.production
+      - .env
     restart: unless-stopped
     expose:
       - "3000"

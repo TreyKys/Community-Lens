@@ -6,6 +6,13 @@ const nextConfig = {
   // the final stage run `node server.js` with no npm install at all.
   // Harmless on any other host — nothing reads it unless we containerise.
   output: 'standalone',
+  // Next spawns one build worker per CPU, each with its own V8 heap. On a small
+  // instance (2 vCPU / 2 GB) that OOMs and the worker dies with SIGABRT. Set
+  // NEXT_BUILD_CPUS=1 in constrained environments to serialise the work; unset
+  // everywhere else so normal builds keep full parallelism.
+  ...(process.env.NEXT_BUILD_CPUS
+    ? { experimental: { cpus: Number(process.env.NEXT_BUILD_CPUS) } }
+    : {}),
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'js.paystack.co' },

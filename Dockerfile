@@ -56,6 +56,17 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
 ENV SUPABASE_SERVICE_ROLE_KEY=build_time_placeholder \
     ADMIN_SECRET=build_time_placeholder
 
+# Memory ceiling for the build. On a 2 vCPU / 2 GB box Next spawns one build
+# worker per core, each with its own V8 heap, and they collectively exceed RAM
+# before swap can absorb it — the worker dies with SIGABRT ("build worker
+# exited with code: null and signal: SIGABRT").
+#
+# Capping the old-space forces V8 to GC harder instead of growing, which keeps
+# peak usage inside what 2 GB + swap can serve. Costs some build time; the
+# alternative is a build that reliably fails.
+ENV NODE_OPTIONS="--max-old-space-size=1536" \
+    NEXT_BUILD_CPUS=1
+
 RUN npm run build --workspace app
 
 # ── runner: minimal runtime image ──────────────────────────────────────────
