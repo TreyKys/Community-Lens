@@ -5,7 +5,7 @@
 # IMPORTANT: DNS for this domain must already point at the instance before you
 # start Caddy, or the ACME challenge fails and no certificate is issued.
 
-opinions.ng, www.opinions.ng {
+opinionsng.com {
 	encode zstd gzip
 
 	# Security headers. next.config.mjs already sets nosniff/DENY on /api/*;
@@ -38,4 +38,19 @@ opinions.ng, www.opinions.ng {
 			roll_keep 3
 		}
 	}
+}
+
+# www → apex redirect, so there is exactly ONE canonical origin.
+#
+# This matters beyond SEO: NEXT_PUBLIC_APP_URL is a single value, and Squad
+# builds its payment callback URL from it. If a user browsed on www but the
+# callback returns them to the apex (or vice versa), they land on a different
+# origin than the one holding their session — which reads to them as "I paid
+# and got logged out". Redirecting up front means everyone is always on the
+# same host by the time they reach checkout.
+#
+# DNS: www must ALSO have an A record pointing at this server, otherwise Caddy
+# can't complete the ACME challenge and won't issue a certificate for it.
+www.opinionsng.com {
+	redir https://opinionsng.com{uri} permanent
 }
