@@ -26,7 +26,9 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # NOTE: github.repository is "TreyKys/Community-Lens" — mixed case. Docker
+  # rejects any tag whose repository part isn't lowercase, so it is lowercased
+  # in the meta step below rather than used directly.
 
 jobs:
   # ── Gate: don't ship a red build ─────────────────────────────────────────
@@ -57,7 +59,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: meta
-        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          # ${VAR,,} lowercases in bash — keeps this correct if the repo or
+          # owner is ever renamed, instead of hardcoding the current name.
+          echo "image=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -77,8 +83,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.image }}:latest
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}
           # NEXT_PUBLIC_* are inlined into the client bundle at build time, so
           # CI must supply the same values production uses. These end up in
           # JS served to browsers — they are public by design, but keeping
