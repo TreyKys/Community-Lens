@@ -1,0 +1,26 @@
+name: Cron — Social Plan
+
+# Builds the day's post queue from live markets. Runs at 05:00 UTC
+# (06:00 WAT) so the queue is ready before the first 07:00 UTC slot.
+#
+# Costs nothing against the X budget — planning only touches Supabase
+# and Gemini. Publishing is a separate workflow on purpose.
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-social-plan
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build today's social queue
+        run: |
+          curl -sSf --max-time 290 -X POST "${{ secrets.API_BASE_URL }}/api/social/plan" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
