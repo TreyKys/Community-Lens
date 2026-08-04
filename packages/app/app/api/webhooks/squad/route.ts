@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { settleSquadDeposit } from '@/lib/settleSquadDeposit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -93,23 +94,15 @@ export async function POST(req: Request) {
     const spreadAmount = amountInNGN * CONVERSION_SPREAD;
     const tNGNToCredit = amountInNGN - spreadAmount;
 
-    // Update the pending row (or insert one if this came in via the legacy path).
-    if (pending) {
-      const { error: updateTxErr } = await supabaseAdmin
-        .from('squad_transactions')
-        .update({
-          amount_ngn: amountInNGN,
-          tngn_credited: tNGNToCredit,
-          spread_captured: spreadAmount,
-          status: 'pending',
-          raw_payload: payload,
-        })
-        .eq('id', pending.id);
-      if (updateTxErr) {
-        console.error('Failed to update pending squad transaction:', updateTxErr);
-        return NextResponse.json({ error: 'Database error' }, { status: 500 });
-      }
-    } else {
+    // Ensure a squad_transactions row exists for this ref so
+    // settle_squad_deposit has a row to lock. For the live hosted-checkout
+    // path the row already exists (created at initiate); for the legacy VA
+    // path it may not, so insert one in a not-yet-credited state. We do
+    // NOT reset an existing row's status here — the old unguarded
+    // reset-to-'pending' could clobber an in-flight verify credit and
+    // cause a double credit; settle_squad_deposit is the single source of
+    // truth for state transitions now.
+    if (!pending) {
       const { error: insertError } = await supabaseAdmin
         .from('squad_transactions')
         .insert({
@@ -118,63 +111,53 @@ export async function POST(req: Request) {
           amount_ngn: amountInNGN,
           tngn_credited: tNGNToCredit,
           spread_captured: spreadAmount,
-          status: 'pending',
+          status: 'awaiting_payment',
           raw_payload: payload,
         });
       if (insertError) {
-        // Race: another webhook delivery beat us to this ref. Treat as already processed.
-        if ((insertError as any)?.code === '23505') {
-          return NextResponse.json({ status: 'already processed' }, { status: 200 });
+        // Race: another webhook delivery beat us to this ref. The row now
+        // exists; fall through to settle it idempotently.
+        if ((insertError as any)?.code !== '23505') {
+          console.error('Failed to insert squad transaction:', insertError);
+          return NextResponse.json({ error: 'Database error' }, { status: 500 });
         }
-        console.error('Failed to insert squad transaction:', insertError);
-        return NextResponse.json({ error: 'Database error' }, { status: 500 });
       }
+    } else {
+      // Keep the raw payload for audit, but never touch status.
+      await supabaseAdmin
+        .from('squad_transactions')
+        .update({ raw_payload: payload })
+        .eq('id', pending.id);
     }
 
-    // Atomic credit slot claim — the verify endpoint and this webhook can
-    // both fire for the same ref (user redirects back while Squad pushes
-    // its own webhook), and a previous version read-then-wrote the
-    // balance which double-credited under that race. Flip status from
-    // 'pending' to 'crediting' as a compare-and-swap; only the winner
-    // proceeds. Loser returns "already processed" — safe.
-    const { data: claimed } = await supabaseAdmin
-      .from('squad_transactions')
-      .update({ status: 'crediting' })
-      .eq('transaction_ref', transactionRef)
-      .eq('status', 'pending')
-      .select('id')
-      .maybeSingle();
+    // Atomic credit via the RPC (idempotent, recovery-safe, handles the
+    // verify-vs-webhook race). Falls back to an idempotent inline credit
+    // if the migration isn't applied yet, so a webhook never fails a
+    // deposit purely because the DB migration is pending.
+    const settle = await settleSquadDeposit(supabaseAdmin, transactionRef, amountInNGN);
+    const outcome = settle.outcome;
 
-    if (!claimed) {
+    if (settle.error || outcome === 'pending') {
+      // Return non-2xx so Squad RETRIES the webhook — the row is provably
+      // uncredited and retriable. This is the retry backstop.
+      console.error('settleSquadDeposit (webhook) not settled:', settle.error || outcome, { transactionRef });
+      const code = settle.error === 'P0002' ? 404 : 500;
+      return NextResponse.json({ error: 'Crediting — will retry' }, { status: code });
+    }
+    if (outcome === 'needs_review') {
+      // Ambiguous legacy row — do not auto-credit; a 200 stops Squad
+      // retrying into the same ambiguity. Admin review handles it.
+      console.error('settleSquadDeposit (webhook): needs manual review', { transactionRef });
+      return NextResponse.json({ status: 'needs_review' }, { status: 200 });
+    }
+    if (outcome !== 'credited') {
+      // 'already_credited' or 'not_found' — nothing more to do. Ack so
+      // Squad stops retrying.
       return NextResponse.json({ status: 'already processed' }, { status: 200 });
     }
 
-    const { error: creditError } = await supabaseAdmin.rpc('credit_user', {
-      p_user_id: userId,
-      p_tngn_delta: tNGNToCredit,
-      p_bonus_delta: 0,
-    });
-
-    if (creditError) {
-      await supabaseAdmin
-        .from('squad_transactions')
-        .update({ status: 'failed_balance_update' })
-        .eq('transaction_ref', transactionRef);
-      const code = (creditError as any)?.code === 'P0002' ? 404 : 500;
-      return NextResponse.json({ error: 'Failed to credit balance' }, { status: code });
-    }
-
-    await supabaseAdmin
-      .from('squad_transactions')
-      .update({ status: 'completed' })
-      .eq('transaction_ref', transactionRef);
-
-    // Treasury ledger — gateway-tagged inflow + spread.
-    await supabaseAdmin.from('treasury_movements').insert([
-      { user_id: userId, type: 'deposit', gateway: 'squad', direction: 'in', amount_ngn: amountInNGN, reference: transactionRef },
-      { user_id: userId, type: 'spread', gateway: 'squad', direction: 'in', amount_ngn: spreadAmount, reference: transactionRef },
-    ]);
-    // Backwards-compatible legacy log
+    // outcome === 'credited' — fresh credit. Non-critical extras follow,
+    // gated so a webhook redelivery after crediting never duplicates them.
     await supabaseAdmin.from('treasury_log').insert([
       { type: 'deposit_spread', amount_tngn: spreadAmount, user_id: userId, metadata: { source: 'squad', transaction_ref: transactionRef } },
     ]);

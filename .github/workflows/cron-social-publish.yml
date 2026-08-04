@@ -1,0 +1,28 @@
+name: Cron — Social Publish
+
+# Hourly. Publishes whatever the planner scheduled for this hour.
+#
+# Hourly rather than at the four exact slots because a slot-timed cron
+# that misses its window (GitHub Actions schedules are best-effort and
+# routinely run minutes late under load) drops the post entirely. Hourly
+# ticks pick up anything due; the route itself caps at 2 posts per run
+# and skips anything more than 3 hours stale.
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-social-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish due posts
+        run: |
+          curl -sSf --max-time 290 -X POST "${{ secrets.API_BASE_URL }}/api/social/publish" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

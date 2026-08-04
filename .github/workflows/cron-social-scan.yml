@@ -1,0 +1,37 @@
+name: Cron — Social Reply Scan
+
+# Reads monitored accounts and pushes reply drafts to Telegram.
+#
+# TWO scans a day, timed so the drafts are waiting when you actually
+# have a phone in your hand:
+#   11:00 UTC = 12:00 WAT — lunch break
+#   17:30 UTC = 18:30 WAT — after work, into the evening peak
+#
+# Two and not three because this is the metered-read side and the
+# greedy one: each billable target poll costs $0.025 (X's 5-result
+# floor), so a third daily scan is roughly $4.50/month on its own —
+# most of a ₦10k budget. Add it back only after raising
+# SOCIAL_MONTHLY_BUDGET_USD.
+#
+# The route also caps reads per run and stops entirely once spend
+# crosses 65% of the monthly budget, so publishing keeps its reserve.
+
+on:
+  schedule:
+    - cron: '0 11 * * *'
+    - cron: '30 17 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-social-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan targets and draft replies
+        run: |
+          curl -sSf --max-time 290 -X POST "${{ secrets.API_BASE_URL }}/api/social/scan" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

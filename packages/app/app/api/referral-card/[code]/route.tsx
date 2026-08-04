@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
+import { loadOgFonts } from '@/lib/ogFonts';
 
 // GET /api/referral-card/[code] → 1200×630 PNG link-unfurl card.
 //
@@ -54,6 +55,7 @@ export async function GET(_req: Request, { params }: { params: { code: string } 
 
   const accent = isVip ? '#fbbf24' : '#34d399';
   const accentGlow = isVip ? 'rgba(251,191,36,0.30)' : 'rgba(52,211,153,0.28)';
+  const fonts = await loadOgFonts();
 
   return new ImageResponse(
     (
@@ -65,7 +67,7 @@ export async function GET(_req: Request, { params }: { params: { code: string } 
           flexDirection: 'column',
           justifyContent: 'space-between',
           background: 'linear-gradient(135deg, #050A08 0%, #07231A 55%, #0A3A2C 100%)',
-          fontFamily: 'sans-serif',
+          fontFamily: 'Noto Sans',
           padding: '64px 72px',
           position: 'relative',
         }}
@@ -179,6 +181,12 @@ export async function GET(_req: Request, { params }: { params: { code: string } 
         </div>
       </div>
     ),
-    { ...CARD_SIZE },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // Referral code metadata (VIP status, signup bonus) barely
+      // changes — safe to cache longer than the pick cards.
+      headers: { 'cache-control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400' },
+    },
   );
 }

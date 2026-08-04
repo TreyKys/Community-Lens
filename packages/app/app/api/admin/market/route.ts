@@ -220,6 +220,20 @@ export async function POST(request: Request) {
   }
 }
 
+// Fields that must NEVER be settable through this raw PATCH. Flipping
+// is_locked_odds (or its seed/vig config) outside the guarded
+// convertToLockedOdds path in /api/admin/markets/[id] skips every
+// safety check that path enforces — not-already-locked, status='open',
+// zero existing bets, reserve fit. On a market that already has
+// parimutuel bets, setting is_locked_odds=true here would either
+// deadlock resolution (pre-existing bets have no locked_odds, tripping
+// the malformed-bet gate) or silently mis-price odds quoted to new
+// bettors against a pool that already contains untracked stakes. Use
+// /api/admin/markets/[id]'s convertToLockedOdds instead.
+const PATCH_DENYLIST = new Set([
+  'is_locked_odds', 'seed_pool', 'seed_probability', 'vig_pct', 'is_paused',
+]);
+
 export async function PATCH(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization');
@@ -229,6 +243,12 @@ export async function PATCH(request: Request) {
     const { marketId, updates } = await request.json();
     if (!marketId || !updates) {
       return NextResponse.json({ error: 'Missing marketId or updates' }, { status: 400 });
+    }
+    const blocked = Object.keys(updates).filter(k => PATCH_DENYLIST.has(k));
+    if (blocked.length > 0) {
+      return NextResponse.json({
+        error: `Cannot set ${blocked.join(', ')} through this endpoint — use POST /api/admin/markets/${marketId} with convertToLockedOdds, which enforces the zero-bets/open/reserve gates this raw PATCH does not.`,
+      }, { status: 400 });
     }
     const { error } = await supabaseAdmin.from('markets').update(updates).eq('id', marketId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

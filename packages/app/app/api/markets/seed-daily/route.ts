@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { safeSecretMatch } from '@/lib/safeCompare';
 import {
   FOOTBALL_LEAGUES,
   BASKETBALL_LEAGUES,
@@ -23,7 +24,7 @@ function bump(stat: SourceStat, r: { success?: boolean; skipped?: boolean; error
 
 export async function POST(request: Request) {
   const cronSecret = request.headers.get('x-cron-secret');
-  if (cronSecret !== process.env.CRON_SECRET) {
+  if (!safeSecretMatch(cronSecret, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

@@ -4627,10 +4627,12 @@ function VIPPanel() {
               <p className="text-[10px] text-muted-foreground">Credited to NEW users when they redeem this code.</p>
             </div>
           </div>
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-200/90">
-            <strong className="text-amber-300">VIP withdrawal gate:</strong> VIPs cannot withdraw until they&apos;ve
-            personally wagered ₦10,000 lifetime. Stops bonus → win → cash-out without
-            skin-in-the-game. Threshold enforced server-side in <code className="bg-amber-500/10 px-1 rounded">/api/withdraw</code>.
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-[11px] text-emerald-200/90">
+            <strong className="text-emerald-300">VIP withdrawals:</strong> VIP earnings are credited to
+            <code className="bg-emerald-500/10 px-1 rounded">bonus_balance</code>, which is never directly
+            withdrawable. VIPs can freely withdraw their own deposits and prediction winnings
+            (<code className="bg-emerald-500/10 px-1 rounded">tngn_balance</code>) — the old ₦10,000 lifetime-stake
+            gate was removed because it only ever blocked money legitimately won from predictions.
           </div>
           <Button
             onClick={handleCreate}

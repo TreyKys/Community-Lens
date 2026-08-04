@@ -1,0 +1,5 @@
+Keeps public/ present in git.
+
+The Dockerfile COPYs packages/app/public into the runtime image; Docker's COPY
+hard-fails on a missing source, so this directory must exist even when empty.
+Drop static assets (favicon, og images, robots overrides) here as usual.

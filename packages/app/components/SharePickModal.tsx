@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Share2, Check, Link as LinkIcon, Sparkles } from 'lucide-react';
+import { Loader2, Share2, Check, Link as LinkIcon, Sparkles, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -16,6 +16,17 @@ import {
 // theme swatch row, the live OG card preview, and a native share button
 // with a clipboard fallback. The user's last theme pick is remembered in
 // localStorage so the second share opens on the same look.
+//
+// Sharing a bare URL via navigator.share only ever produces a rich
+// preview in chat/DM contexts that fetch OG tags (WhatsApp DM, X DM,
+// iMessage) — WhatsApp Status, Snapchat, and X's Story/status compose
+// surfaces do NOT fetch link previews at all; they need an actual image
+// FILE. So handleShare always fetches the real PNG from the card
+// endpoint first and, wherever the platform supports it (Web Share API
+// Level 2 — most mobile browsers), attaches it as a file. Where file
+// sharing isn't supported (desktop browsers mainly), a standalone
+// "Download image" button guarantees the PNG is always obtainable so
+// it can be attached by hand.
 
 const THEME_KEY = 'opx_picks_theme';
 const SITE_ORIGIN_FALLBACK = 'https://opinionsng.com';
@@ -33,6 +44,9 @@ export function SharePickModal({
   const [theme, setTheme] = useState<PicksThemeId>(DEFAULT_PICKS_THEME);
   const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [displayedUrl, setDisplayedUrl] = useState('');
+  const [imgLoading, setImgLoading] = useState(true);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +66,47 @@ export function SharePickModal({
   const shareUrl = `${origin}/p/${type}/${id}?theme=${theme}`;
   const cardUrl = `/api/picks-card/${type}/${id}?theme=${theme}`;
 
+  // Smooth theme swap — preload the new theme's PNG before swapping the
+  // visible <img>, so switching never blanks/flashes while the new
+  // render arrives. Combined with the route's Cache-Control (added
+  // alongside this), a theme already viewed this session resolves from
+  // cache almost immediately.
+  useEffect(() => {
+    let cancelled = false;
+    setImgLoading(true);
+    const img = new Image();
+    const settle = () => { if (!cancelled) { setDisplayedUrl(cardUrl); setImgLoading(false); } };
+    img.onload = settle;
+    img.onerror = settle; // still swap so a real failure surfaces instead of freezing on a stale theme
+    img.src = cardUrl;
+    return () => { cancelled = true; };
+  }, [cardUrl]);
+
+  // Warm the cache for the OTHER themes so switching is instant — but
+  // gently: start ~700ms after open (so the visible card's own render
+  // isn't queued behind the preloads and left "stuck"), and load them
+  // one at a time rather than firing all six at once, which used to
+  // starve the request the user is actually waiting on.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      let i = 0;
+      const next = () => {
+        if (cancelled || i >= PICKS_THEME_LIST.length) return;
+        const img = new Image();
+        const advance = () => { i += 1; next(); };
+        img.onload = advance;
+        img.onerror = advance;
+        // The currently-shown theme is already cached from the smooth-swap
+        // above, so re-requesting it just hits cache.
+        img.src = `/api/picks-card/${type}/${id}?theme=${PICKS_THEME_LIST[i].id}`;
+      };
+      next();
+    }, 700);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [open, type, id]);
+
   const shareText = useMemo(() => {
     const handle = defaultUsername ? `@${defaultUsername.replace(/\s+/g, '').slice(0, 18)}` : 'I';
     return type === 'slip'
@@ -59,17 +114,47 @@ export function SharePickModal({
       : `${handle === '@'+handle.slice(1) ? handle : 'I'}'m calling it on Opinions.ng. Stake the same pick or make it yours →`;
   }, [defaultUsername, type]);
 
+  const cardFileName = `opinions-ng-${type}-${id}.png`;
+
+  const fetchCardBlob = async (): Promise<Blob> => {
+    const res = await fetch(cardUrl);
+    if (!res.ok) throw new Error(`Card image failed to load (${res.status})`);
+    return res.blob();
+  };
+
   const handleShare = async () => {
     setSharing(true);
-    const payload = { title: 'My OPx Picks · Opinions.ng', text: shareText, url: shareUrl };
     try {
+      // Try to attach the actual PNG first — this is the only way the
+      // card shows up as an image on WhatsApp Status, Snapchat, and X
+      // Story surfaces (they don't fetch link previews). Falls through
+      // to link-only sharing if the image can't be fetched or the
+      // platform doesn't support file sharing.
+      try {
+        const blob = await fetchCardBlob();
+        const file = new File([blob], cardFileName, { type: 'image/png' });
+        if (typeof navigator !== 'undefined' && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            title: 'My OPx Picks · Opinions.ng',
+            text: `${shareText}\n${shareUrl}`,
+            files: [file],
+          });
+          setSharing(false);
+          return;
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') { setSharing(false); return; } // user cancelled the share sheet
+        // image fetch failed or file-share unsupported — fall through
+      }
+
       if (typeof navigator !== 'undefined' && navigator.share) {
-        await navigator.share(payload);
+        await navigator.share({ title: 'My OPx Picks · Opinions.ng', text: shareText, url: shareUrl });
         setSharing(false);
         return;
       }
-    } catch {
-      // user cancelled — fall through to clipboard
+    } catch (e: any) {
+      if (e?.name === 'AbortError') { setSharing(false); return; }
+      // fall through to clipboard
     }
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -82,6 +167,29 @@ export function SharePickModal({
     setSharing(false);
   };
 
+  // Standalone, always-available path to the actual image — for
+  // desktop (no native share sheet) or anyone who'd rather attach the
+  // file by hand to a Status/Story than rely on the share sheet's app
+  // picker guessing right.
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const blob = await fetchCardBlob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = cardFileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      toast({ title: 'Image saved', description: 'Attach it to your Status, Snap, or post.' });
+    } catch {
+      toast({ title: 'Could not download image', variant: 'destructive' });
+    }
+    setDownloading(false);
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-md max-h-[92vh] overflow-y-auto">
@@ -91,7 +199,9 @@ export function SharePickModal({
             Share your OPx Pick
           </DialogTitle>
           <DialogDescription>
-            Pick a look, then drop the link on WhatsApp, X, or your status. Whoever taps it can stake the same call or make it theirs.
+            Pick a look, then share it. For WhatsApp Status, Snapchat, or an X post, use{' '}
+            <strong>Download image</strong> so the card actually appears — statuses and stories
+            don&rsquo;t render link previews, only attached images.
           </DialogDescription>
         </DialogHeader>
 
@@ -129,10 +239,18 @@ export function SharePickModal({
           </div>
         </div>
 
-        {/* Live preview */}
-        <div className="rounded-xl border border-border/50 overflow-hidden bg-card/30">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={cardUrl} alt="Card preview" className="w-full block" />
+        {/* Live preview — keeps showing the last-loaded theme while the
+            next one loads in the background, so switching never blanks. */}
+        <div className="relative rounded-xl border border-border/50 overflow-hidden bg-card/30 min-h-[200px]">
+          {displayedUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={displayedUrl} alt="Card preview" className="w-full block" />
+          )}
+          {imgLoading && (
+            <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm rounded-full p-1.5">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -146,6 +264,16 @@ export function SharePickModal({
               : copied ? <Check className="w-4 h-4 mr-2" />
               : <Share2 className="w-4 h-4 mr-2" />}
             {copied ? 'Copied!' : 'Share my pick'}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="w-full h-10 rounded-xl gap-2"
+          >
+            {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            Download image
           </Button>
           <Button
             type="button"

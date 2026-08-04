@@ -1,24 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getAuthUser } from '@/lib/getAuthUser';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function getAuthUser(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader) return null;
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !user) return null;
-  return user;
-}
 
 // GET /api/user/profile — full profile + stats
 export async function GET(request: Request) {
   try {
-    const user = await getAuthUser(request);
+    const user = await getAuthUser(supabaseAdmin, request);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { data: profile, error: profileError } = await supabaseAdmin
@@ -96,7 +89,7 @@ export async function GET(request: Request) {
 // PATCH /api/user/profile — update username, avatar, display name
 export async function PATCH(request: Request) {
   try {
-    const user = await getAuthUser(request);
+    const user = await getAuthUser(supabaseAdmin, request);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();

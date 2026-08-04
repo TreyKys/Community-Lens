@@ -1,5 +1,6 @@
 import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
+import { loadOgFonts } from '@/lib/ogFonts';
 
 // GET /api/card/[userId] → 1080×1350 PNG "accuracy card".
 //
@@ -71,6 +72,7 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   }
 
   const tier = tierFor(accuracy, resolved);
+  const fonts = await loadOgFonts();
 
   return new ImageResponse(
     (
@@ -81,7 +83,7 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
           display: 'flex',
           flexDirection: 'column',
           background: 'linear-gradient(160deg, #050A08 0%, #07231A 55%, #0A3A2C 100%)',
-          fontFamily: 'sans-serif',
+          fontFamily: 'Noto Sans',
           padding: '72px',
           position: 'relative',
         }}
@@ -113,11 +115,12 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
               alignItems: 'center',
               justifyContent: 'center',
               color: '#050A08',
-              fontSize: 34,
+              fontSize: 18,
               fontWeight: 900,
+              letterSpacing: -1,
             }}
           >
-            ◈
+            O/N
           </div>
           <div style={{ display: 'flex', color: '#ffffff', fontSize: 32, fontWeight: 800, letterSpacing: 3 }}>
             OPINIONS.NG
@@ -186,6 +189,12 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
         </div>
       </div>
     ),
-    { ...CARD_SIZE },
+    {
+      ...CARD_SIZE,
+      fonts,
+      // Accuracy stats move as bets settle, but not fast enough to
+      // justify re-rendering on every request.
+      headers: { 'cache-control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600' },
+    },
   );
 }

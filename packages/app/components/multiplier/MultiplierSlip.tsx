@@ -35,7 +35,7 @@ const REASON_COPY: Record<string, string> = {
 };
 
 export function MultiplierSlip() {
-  const { legs, removeLeg, clear, isOpen, setOpen, prefillStakeNgn, setPrefillStakeNgn } = useSlip();
+  const { legs, removeLeg, clear, isOpen, setOpen, prefillStakeNgn, setPrefillStakeNgn, fromShareId } = useSlip();
   const { toast } = useToast();
 
   const [stake, setStake] = useState('');
@@ -139,7 +139,14 @@ export function MultiplierSlip() {
       const res = await fetch('/api/multiplier/slip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ slipStake: stakeNum, legs: legs.map(l => ({ marketId: l.marketId, outcomeIndex: l.outcomeIndex })) }),
+        body: JSON.stringify({
+          slipStake: stakeNum,
+          legs: legs.map(l => ({ marketId: l.marketId, outcomeIndex: l.outcomeIndex })),
+          // Present when this slip was built from a shared pick, so the
+          // server can notify the sharer. Server re-resolves the true
+          // owner from this id — never trusts it as an identity.
+          fromShareId,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not place Multiplier');

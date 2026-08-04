@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getAuthUser } from '@/lib/getAuthUser';
 
 // No caching AT ALL on this endpoint — this is the direct-from-DB
 // truth-source the bets page relies on to show correct settlement
@@ -14,14 +15,6 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function getAuthUser(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader) return null;
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !user) return null;
-  return user;
-}
 
 // GET /api/user/picks — single bets + multiplier slips for the current user
 //
@@ -35,7 +28,7 @@ async function getAuthUser(request: Request) {
 // puts the raw DB truth on the wire.
 export async function GET(request: Request) {
   try {
-    const user = await getAuthUser(request);
+    const user = await getAuthUser(supabaseAdmin, request);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const [betsRes, slipsRes] = await Promise.all([

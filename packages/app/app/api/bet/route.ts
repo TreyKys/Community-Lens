@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { notifyShareStake } from '@/lib/notifyShareStake';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Malformed request body' }, { status: 400 });
     }
 
-    const { marketId, outcomeIndex, stakeAmount } = body || {};
+    const { marketId, outcomeIndex, stakeAmount, fromShareId } = body || {};
 
     if (
       marketId === undefined || marketId === null ||
@@ -182,6 +183,8 @@ export async function POST(request: Request) {
           if (!pmData) {
             return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
           }
+          // If this stake came from a shared pick, notify the sharer.
+          await notifyShareStake(supabaseAdmin, { fromShareId, stakerUserId: user.id });
           // Frontend shape matches the parimutuel branch below.
           return NextResponse.json({
             success: true,
@@ -217,6 +220,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
       }
 
+      // If this stake came from a shared pick, notify the sharer.
+      await notifyShareStake(supabaseAdmin, { fromShareId, stakerUserId: user.id });
       // The locked-odds response carries extra fields the modal needs
       // for the confirmation receipt. The tier is NOT exposed to the
       // user-facing UI — it's there for analytics/debugging only.
@@ -265,6 +270,9 @@ export async function POST(request: Request) {
       console.error('place_bet returned no row');
       return NextResponse.json({ error: 'Failed to place bet' }, { status: 500 });
     }
+
+    // If this stake came from a shared pick, notify the sharer.
+    await notifyShareStake(supabaseAdmin, { fromShareId, stakerUserId: user.id });
 
     return NextResponse.json({
       success: true,

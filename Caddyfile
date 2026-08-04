@@ -1,0 +1,56 @@
+# Caddy handles TLS certificate issuance and renewal automatically — no certbot,
+# no cron, no expiry outage. Replace the domain below with yours before the
+# first `docker compose up`.
+#
+# IMPORTANT: DNS for this domain must already point at the instance before you
+# start Caddy, or the ACME challenge fails and no certificate is issued.
+
+opinionsng.com {
+	encode zstd gzip
+
+	# Security headers. next.config.mjs already sets nosniff/DENY on /api/*;
+	# these apply site-wide, including static assets and HTML.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy app:3000 {
+		# Long-running settlement endpoints: cron-oracle-resolve calls
+		# /api/markets/resolve-due with --max-time 280, and daily-seed with 290.
+		# A shorter proxy timeout here would cut settlement off MID-RUN, which
+		# is exactly the kind of half-finished money operation we must avoid.
+		transport http {
+			read_timeout  300s
+			write_timeout 300s
+		}
+		health_uri      /api/status
+		health_interval 30s
+		health_timeout  5s
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}
+
+# www → apex redirect, so there is exactly ONE canonical origin.
+#
+# This matters beyond SEO: NEXT_PUBLIC_APP_URL is a single value, and Squad
+# builds its payment callback URL from it. If a user browsed on www but the
+# callback returns them to the apex (or vice versa), they land on a different
+# origin than the one holding their session — which reads to them as "I paid
+# and got logged out". Redirecting up front means everyone is always on the
+# same host by the time they reach checkout.
+#
+# DNS: www must ALSO have an A record pointing at this server, otherwise Caddy
+# can't complete the ACME challenge and won't issue a certificate for it.
+www.opinionsng.com {
+	redir https://opinionsng.com{uri} permanent
+}

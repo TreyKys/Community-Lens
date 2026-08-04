@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,7 +19,7 @@ const supabaseAdmin = createClient(
 export async function POST(request: Request) {
   try {
     const cronSecret = request.headers.get('x-cron-secret');
-    const isValidCron = cronSecret === process.env.CRON_SECRET;
+    const isValidCron = safeSecretMatch(cronSecret, process.env.CRON_SECRET);
     if (!isValidCron && !isAdminRequest(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -29,20 +30,12 @@ export async function POST(request: Request) {
       polygon_tx_hash: null, // Updated once on-chain tx confirms
     });
 
-    // ---------------------------------------------------------------
-    // PHASE 3 TODO: Publish heartbeat to the EscapeHatch contract.
-    //
-    //   import { KMSClient, GenerateMacCommand } from "@aws-sdk/client-kms";
-    //   import { createWalletClient } from 'viem';
-    //   import { polygon } from 'viem/chains';
-    //
-    //   const kms = new KMSClient({ region: process.env.AWS_REGION });
-    //   // ... sign and send heartbeat() transaction to ESCAPE_HATCH_CONTRACT
-    //
-    //   await supabaseAdmin.from('heartbeat_log')
-    //     .update({ polygon_tx_hash: txHash })
-    //     .eq('fired_at', firedAt);
-    // ---------------------------------------------------------------
+    // PHASE 3 TODO: also publish this heartbeat on-chain to the EscapeHatch
+    // contract (KMS-signed tx via viem/polygon), then backfill
+    // heartbeat_log.polygon_tx_hash. Blocked on the contract deployment and
+    // KMS key provisioning — the Supabase log above is the source of truth
+    // until then. (Illustrative pseudo-code removed; it had drifted from the
+    // actual SDK surface and read as if it were real, disabled code.)
 
     console.log('Heartbeat logged at', new Date().toISOString());
     return NextResponse.json({ success: true }, { status: 200 });

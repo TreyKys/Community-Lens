@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { notifyShareStake } from '@/lib/notifyShareStake';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -99,6 +100,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: mapped.error }, { status: mapped.status });
     }
     if (!data) return NextResponse.json({ error: 'Failed to place Multiplier' }, { status: 500 });
+
+    // If this slip was built from a shared pick, notify the sharer.
+    await notifyShareStake(supabaseAdmin, { fromShareId: body?.fromShareId, stakerUserId: user.id });
 
     return NextResponse.json({
       success: true,

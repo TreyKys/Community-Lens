@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runMechanicScan } from '@/lib/mechanic/scans';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -12,23 +13,29 @@ const supabaseAdmin = createClient(
 
 // POST /api/mechanic/post-deploy
 //
-// Fires after every Netlify deploy: runs a full detection scan
-// immediately, records the run tagged 'post_deploy', and posts an
-// admin_alert notification if the scan found new critical findings.
+// Fires after every deploy: runs a full detection scan immediately, records
+// the run tagged 'post_deploy', and posts an admin_alert notification if the
+// scan found new critical findings.
 //
-// Auth: the Netlify webhook secret (NETLIFY_DEPLOY_SECRET) OR the same
-// CRON_SECRET the heartbeat uses, whichever the config sends. Both
-// map to the same effective operator.
+// Auth: the deploy webhook secret OR the same CRON_SECRET the heartbeat uses,
+// whichever the caller sends. Both map to the same effective operator.
 //
-// Configure this once in Netlify → Site settings → Build & deploy →
-// Deploy notifications: outgoing webhook, event 'Deploy succeeded',
-// URL <site>/api/mechanic/post-deploy, header x-cron-secret: <secret>.
+// Host-agnostic (we self-host on AWS now, not Netlify):
+//   * header  x-deploy-secret   (or legacy x-netlify-deploy-secret)
+//   * env     DEPLOY_SECRET     (or legacy NETLIFY_DEPLOY_SECRET)
+// Call it as the last step of scripts/deploy.sh, or from any CI job:
+//   curl -X POST "$APP_URL/api/mechanic/post-deploy" -H "x-cron-secret: $CRON_SECRET"
 export async function POST(request: Request) {
   const cron = request.headers.get('x-cron-secret');
-  const deploy = request.headers.get('x-netlify-deploy-secret');
+  // Accept the legacy Netlify header/env during the cutover so the hook keeps
+  // working whichever host is live at the moment.
+  const deploy =
+    request.headers.get('x-deploy-secret') ??
+    request.headers.get('x-netlify-deploy-secret');
+  const deploySecret = process.env.DEPLOY_SECRET || process.env.NETLIFY_DEPLOY_SECRET;
   const okAuth =
-    (cron && cron === process.env.CRON_SECRET) ||
-    (deploy && deploy === process.env.NETLIFY_DEPLOY_SECRET);
+    safeSecretMatch(cron, process.env.CRON_SECRET) ||
+    safeSecretMatch(deploy, deploySecret);
   if (!okAuth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const startedAt = Date.now();
@@ -40,7 +47,7 @@ export async function POST(request: Request) {
     run_id: scan.runId,
     scan_category: 'post_deploy',
     action: 'detect',
-    operator: 'netlify_deploy',
+    operator: 'post_deploy',
     issue_type: 'post_deploy_scan',
     affected_count: scan.totalFindings,
     details: {

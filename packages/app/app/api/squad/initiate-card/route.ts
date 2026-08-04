@@ -2,20 +2,13 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { initiateCheckout } from '@/lib/squad';
+import { getAuthUser } from '@/lib/getAuthUser';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-async function getAuthUser(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader) return null;
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !user) return null;
-  return user;
-}
 
 /**
  * POST /api/squad/initiate-card
@@ -30,7 +23,7 @@ async function getAuthUser(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const authUser = await getAuthUser(request);
+    const authUser = await getAuthUser(supabaseAdmin, request);
     if (!authUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json().catch(() => ({} as { amount?: number }));

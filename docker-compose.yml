@@ -1,0 +1,87 @@
+# Production stack for a single small instance (Lightsail 2GB / EC2 t4g.small).
+#
+#   caddy → reverse proxy + AUTOMATIC HTTPS (Let's Encrypt, auto-renew)
+#   app   → the Next.js server, never exposed to the internet directly
+#
+# Usage on the box:
+#   cp .env.production.example .env.production   # then fill it in
+#   docker compose up -d --build
+#
+# The app port is deliberately NOT published to the host — only Caddy can
+# reach it, over the internal network. That means there is no way to hit the
+# app on :3000 bypassing TLS.
+
+services:
+  app:
+    # Normal deploys PULL this image, built by CI on GitHub's runners — the
+    # server never compiles anything. Set APP_IMAGE_TAG in .env to a commit SHA
+    # to pin or roll back; it defaults to the newest main build.
+    image: ghcr.io/treykys/community-lens:${APP_IMAGE_TAG:-latest}
+    # `build:` is kept as an escape hatch only — `docker compose up --build`
+    # still works if CI/GHCR is unreachable. Expect it to take 8-15 min on a
+    # 2 GB box; the CI path takes ~30s.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* must be present at BUILD time (they're inlined into the
+        # client bundle), so they're read from .env here too.
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_WALLET_CONNECT_ID: ${NEXT_PUBLIC_WALLET_CONNECT_ID}
+        NEXT_PUBLIC_ALCHEMY_KEY: ${NEXT_PUBLIC_ALCHEMY_KEY}
+        NEXT_PUBLIC_ENABLE_PHONE_AUTH: ${NEXT_PUBLIC_ENABLE_PHONE_AUTH}
+        NEXT_PUBLIC_TRUTH_MARKET_ADDRESS: ${NEXT_PUBLIC_TRUTH_MARKET_ADDRESS}
+        NEXT_PUBLIC_PAYMASTER_URL: ${NEXT_PUBLIC_PAYMASTER_URL}
+    # Server-side secrets are injected at RUNTIME only — never baked into the image.
+    #
+    # This MUST be `.env`, not `.env.production`. Compose substitutes ${VAR} in
+    # the build.args block above from your shell or from a file named exactly
+    # `.env` — `env_file` is NOT consulted for that substitution, it only sets
+    # variables inside the running container. Pointing this at any other name
+    # silently builds the client bundle with blank NEXT_PUBLIC_* values.
+    env_file:
+      - .env
+    restart: unless-stopped
+    expose:
+      - "3000"
+    # Cap memory so a runaway settlement job can't OOM the whole box and take
+    # Caddy down with it. Tune up if you size the instance larger.
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"     # bounded logs — a full disk on a small box is an outage
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificates — MUST persist or you re-issue on
+      - caddy_config:/config  # every restart and hit Let's Encrypt rate limits
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
 import { runMechanicScan } from '@/lib/mechanic/scans';
+import { safeSecretMatch } from '@/lib/safeCompare';
 
 // Read-only detection engine. Runs every scan in parallel and returns
 // categorized findings. No fixes, no mutations — this is the "what's
@@ -21,7 +22,7 @@ const supabaseAdmin = createClient(
 
 export async function GET(request: Request) {
   const cronSecret = request.headers.get('x-cron-secret');
-  const isValidCron = cronSecret === process.env.CRON_SECRET;
+  const isValidCron = safeSecretMatch(cronSecret, process.env.CRON_SECRET);
   const isValidAdmin = isAdminRequest(request);
   if (!isValidCron && !isValidAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

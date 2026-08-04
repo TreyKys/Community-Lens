@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { ADMIN_COOKIE, isAdminRequest } from '@/lib/adminAuth';
+import { safeEqual } from '@/lib/safeCompare';
 
 /**
  * POST /api/admin/auth — exchange the admin secret for an httpOnly cookie.
@@ -16,7 +17,9 @@ export async function POST(request: Request) {
   }
 
   const { secret } = await request.json().catch(() => ({ secret: '' }));
-  if (typeof secret !== 'string' || secret !== expected) {
+  // Constant-time — this is the login endpoint, the most attractive place to
+  // mount a timing attack against the admin secret.
+  if (!safeEqual(secret, expected)) {
     return NextResponse.json({ error: 'Invalid secret' }, { status: 401 });
   }
 
