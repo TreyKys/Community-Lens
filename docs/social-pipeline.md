@@ -247,7 +247,45 @@ packages/app/app/api/social/
 
 ---
 
-## 6. Known limits
+## 6. Self-hosting adaptations
+
+Three things Netlify used to handle that are ours now that the app runs
+in one container on a 2 GB box.
+
+**Renders are serialised.** An `ImageResponse` render is satori plus a
+WASM rasteriser — a large, short-lived allocation. On Netlify each one
+was its own lambda with its own memory. Now they share a heap with live
+traffic, inside a container capped at 1200 MB, on hardware where
+`next build` has already been OOM-killed once (commit `ccea9aa`).
+Concurrent renders could cross the cap, kill the container, fail the
+healthcheck, and get it pulled from Caddy's rotation — a share card
+taking down a live money app. `lib/social/serialise.ts` queues them, so
+that cannot happen regardless of how many unfurlers arrive at once. The
+publisher fetches one card per post, so nothing queues in practice.
+
+**Self-calls go over loopback.** The publisher fetches its own card
+before posting. Using the public URL would route
+container → NAT → internet → our own public IP → Caddy → TLS → back into
+the same container. That is slow, breaks during the few seconds Caddy
+restarts on deploy, and on AWS networks without hairpin NAT it does not
+work at all — the request just hangs. `toInternalUrl()` rewrites our own
+origin to `http://127.0.0.1:3000`; anything third-party is untouched.
+Override with `INTERNAL_APP_URL` if the topology changes.
+
+**Every outbound call has a deadline.** Netlify killed a hung function
+at its execution cap; nothing does that now. A stalled fetch to Gemini
+or X would hold a socket and its buffers long after curl and Caddy had
+both given up — memory a 1200 MB container cannot spare. All outbound
+calls go through `fetchWithTimeout` (20s default, 30s for the card
+render, which is the slowest).
+
+Caddy's `read_timeout`/`write_timeout` are already 300s for the
+settlement crons, so the social crons' `--max-time 290` fits inside them
+with no change needed.
+
+---
+
+## 7. Known limits
 
 - **The odds card is the only creative.** Deliberate — it scales to
   infinite posts at zero design time. Video and multi-image are IG-phase

@@ -17,6 +17,7 @@
 
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { stripLinks, containsLink } from './cost';
+import { fetchWithTimeout } from './selfCall';
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -112,7 +113,7 @@ async function callGemini(prompt: string): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY is not set');
 
-  const r = await fetch(
+  const r = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
     {
       method: 'POST',
