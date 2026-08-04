@@ -50,11 +50,21 @@ On the **server**, make a key pair CI will use:
 ssh-keygen -t ed25519 -f ~/.ssh/gha_deploy -N "" -C "github-actions"
 cat ~/.ssh/gha_deploy.pub >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
-cat ~/.ssh/gha_deploy          # ← paste ALL of this into SSH_PRIVATE_KEY
+
+# Print the key as ONE line and paste that into SSH_PRIVATE_KEY:
+base64 -w0 ~/.ssh/gha_deploy; echo
+
 rm ~/.ssh/gha_deploy           # GitHub holds it now; no reason to leave a copy
 ```
 
-Paste the **whole** private key including the `-----BEGIN`/`-----END` lines.
+**Use the base64 form.** A private key is multi-line, and copying multi-line
+text out of a browser-based SSH terminal frequently drops the line breaks.
+OpenSSH then reports only `Load key: error in libcrypto` — technically correct,
+completely unhelpful. base64 is a single line with nothing to mangle.
+
+The workflow accepts either format (it detects `BEGIN` and falls back to base64
+decoding) and validates the key before connecting, so a bad paste fails with a
+clear message rather than `Permission denied (publickey)`.
 
 ### 3. Let the server pull from GHCR
 
