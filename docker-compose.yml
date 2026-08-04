@@ -13,12 +13,19 @@
 
 services:
   app:
+    # Normal deploys PULL this image, built by CI on GitHub's runners — the
+    # server never compiles anything. Set APP_IMAGE_TAG in .env to a commit SHA
+    # to pin or roll back; it defaults to the newest main build.
+    image: ghcr.io/treykys/community-lens:${APP_IMAGE_TAG:-latest}
+    # `build:` is kept as an escape hatch only — `docker compose up --build`
+    # still works if CI/GHCR is unreachable. Expect it to take 8-15 min on a
+    # 2 GB box; the CI path takes ~30s.
     build:
       context: .
       dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_* must be present at BUILD time (they're inlined into the
-        # client bundle), so they're read from .env.production here too.
+        # client bundle), so they're read from .env here too.
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}

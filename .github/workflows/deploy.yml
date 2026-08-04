@@ -1,0 +1,162 @@
+name: Build & Deploy
+
+# Build the container on GitHub's runners, push it to GHCR, then have the
+# server pull it. The production box never compiles anything:
+#   * deploys drop from 8-15 min to ~30s
+#   * no CPU/RAM contention on the 2 GB instance while users are on it
+#   * a broken build fails in CI and never reaches production
+#   * rollback is "pull the previous tag"
+#
+# Runs on green tests only. A push that breaks the suite is not deployable.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Existing image tag to deploy (commit SHA). Leave blank to build HEAD. Use this to ROLL BACK.'
+        required: false
+        type: string
+
+concurrency:
+  # Never let two deploys race onto the same box.
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ── Gate: don't ship a red build ─────────────────────────────────────────
+  test:
+    if: ${{ github.event.inputs.image_tag == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+        working-directory: packages/app
+      - run: npm run test --workspace app
+
+  build:
+    if: ${{ github.event.inputs.image_tag == '' }}
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Match the server's CPU architecture. Lightsail x86 bundles are
+          # amd64; if you ever move to an ARM instance this must become
+          # linux/arm64 or the image will not start.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
+          # NEXT_PUBLIC_* are inlined into the client bundle at build time, so
+          # CI must supply the same values production uses. These end up in
+          # JS served to browsers — they are public by design, but keeping
+          # them as secrets avoids leaking them in build logs.
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+            NEXT_PUBLIC_APP_URL=${{ secrets.NEXT_PUBLIC_APP_URL }}
+            NEXT_PUBLIC_WALLET_CONNECT_ID=${{ secrets.NEXT_PUBLIC_WALLET_CONNECT_ID }}
+            NEXT_PUBLIC_ALCHEMY_KEY=${{ secrets.NEXT_PUBLIC_ALCHEMY_KEY }}
+            NEXT_PUBLIC_ENABLE_PHONE_AUTH=${{ secrets.NEXT_PUBLIC_ENABLE_PHONE_AUTH }}
+            NEXT_PUBLIC_TRUTH_MARKET_ADDRESS=${{ secrets.NEXT_PUBLIC_TRUTH_MARKET_ADDRESS }}
+            NEXT_PUBLIC_PAYMASTER_URL=${{ secrets.NEXT_PUBLIC_PAYMASTER_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: [build]
+    # Also runs when rolling back, where build/test are skipped.
+    if: ${{ always() && (needs.build.result == 'success' || github.event.inputs.image_tag != '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          [ -z "$TAG" ] && TAG="${{ needs.build.outputs.tag }}"
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Deploying tag: $TAG"
+
+      - name: Add SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Pull and restart
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "APP_IMAGE_TAG='${{ steps.tag.outputs.value }}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd ~/app
+          git fetch origin main --quiet && git checkout main --quiet && git reset --hard origin/main --quiet
+
+          # Record what's currently serving, so a failed rollout can go back.
+          PREV=$(grep -E '^APP_IMAGE_TAG=' .env 2>/dev/null | cut -d= -f2 || true)
+          echo "previous tag: ${PREV:-latest}"
+
+          # Pin the new tag in .env so restarts/reboots keep serving it.
+          grep -v -E '^APP_IMAGE_TAG=' .env > .env.tmp 2>/dev/null || true
+          echo "APP_IMAGE_TAG=${APP_IMAGE_TAG}" >> .env.tmp
+          mv .env.tmp .env && chmod 600 .env
+
+          docker compose pull app
+          docker compose up -d app caddy
+
+          # Wait for the container's own healthcheck to pass.
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' app-app-1 2>/dev/null || echo starting)
+            [ "$status" = "healthy" ] && { echo "healthy"; break; }
+            [ "$i" = "30" ] && {
+              echo "UNHEALTHY after rollout — rolling back to ${PREV:-latest}" >&2
+              docker compose logs --tail=40 app >&2
+              grep -v -E '^APP_IMAGE_TAG=' .env > .env.tmp; echo "APP_IMAGE_TAG=${PREV:-latest}" >> .env.tmp
+              mv .env.tmp .env && chmod 600 .env
+              docker compose up -d app
+              exit 1
+            }
+            sleep 4
+          done
+
+          docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true
+          REMOTE
+
+      - name: Verify public endpoint
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://opinionsng.com/api/status)
+          echo "GET /api/status -> $code"
+          [ "$code" = "200" ] || { echo "Site is not serving 200 after deploy"; exit 1; }
