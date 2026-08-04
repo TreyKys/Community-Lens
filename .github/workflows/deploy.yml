@@ -116,10 +116,30 @@ jobs:
           echo "Deploying tag: $TAG"
 
       - name: Add SSH key
+        env:
+          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+
+          # Accept the key EITHER as raw PEM or as a single-line base64 blob.
+          # Copying a multi-line private key out of a browser SSH terminal
+          # routinely loses the line breaks, which OpenSSH reports only as
+          # "error in libcrypto" — accurate but useless. base64 has no line
+          # breaks to lose, so it survives any copy path.
+          if printf '%s' "$KEY" | grep -q 'BEGIN'; then
+            printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          else
+            printf '%s' "$KEY" | tr -d '\r\n ' | base64 -d > ~/.ssh/id_ed25519
+          fi
           chmod 600 ~/.ssh/id_ed25519
+
+          # Validate before connecting, so a bad secret says so plainly.
+          if ! ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null 2>&1; then
+            echo "::error::SSH_PRIVATE_KEY is not a usable private key. Re-add it as base64 (see DEPLOYS.md): base64 -w0 ~/.ssh/gha_deploy"
+            exit 1
+          fi
+          echo "key parsed OK"
+
           ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Pull and restart
