@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { createClient } from '@supabase/supabase-js';
 import { resolveTheme } from '@/lib/picksThemes';
 import { loadOgFonts } from '@/lib/ogFonts';
+import { createSerialiser } from '@/lib/social/serialise';
 
 // GET /api/social/card/[marketId]?theme=emerald
 //
@@ -27,6 +28,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const CARD_SIZE = { width: 1200, height: 675 };
+
+// Renders are serialised so a burst of unfurlers cannot OOM the 1200 MB
+// container and take the site down with it — see lib/social/serialise.ts
+// for why that is a real risk on this hardware. The publisher fetches
+// exactly one card per post, so nothing queues in normal operation.
+const serialiseRender = createSerialiser();
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -133,7 +140,7 @@ export async function GET(
   const rows = state.rows.slice(0, 4);
   const questionSize = state.question.length > 95 ? 44 : state.question.length > 60 ? 52 : 62;
 
-  return new ImageResponse(
+  return serialiseRender(async () => new ImageResponse(
     (
       <div
         style={{
@@ -253,5 +260,5 @@ export async function GET(
       </div>
     ),
     { ...CARD_SIZE, fonts },
-  );
+  ));
 }

@@ -17,6 +17,8 @@
 // API sending exists behind SOCIAL_REPLY_MODE=api for when the budget
 // justifies it, but manual is the default and the recommended mode.
 
+import { fetchWithTimeout } from './selfCall';
+
 const TG = 'https://api.telegram.org';
 
 function botToken(): string {
@@ -32,7 +34,7 @@ function chatId(): string {
 }
 
 async function tg(method: string, payload: Record<string, unknown>): Promise<any> {
-  const r = await fetch(`${TG}/bot${botToken()}/${method}`, {
+  const r = await fetchWithTimeout(`${TG}/bot${botToken()}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

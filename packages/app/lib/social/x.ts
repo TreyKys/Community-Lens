@@ -13,6 +13,7 @@
 import crypto from 'crypto';
 import { reserve, refund } from './budget';
 import { containsLink } from './cost';
+import { fetchWithTimeout, toInternalUrl } from './selfCall';
 
 const API = 'https://api.x.com';
 const UPLOAD = 'https://upload.twitter.com/1.1/media/upload.json';
@@ -147,7 +148,7 @@ export async function postToX(
   if (opts.mediaIds?.length) payload.media = { media_ids: opts.mediaIds };
   if (opts.replyToId) payload.reply = { in_reply_to_tweet_id: opts.replyToId };
 
-  const r = await fetch(url, {
+  const r = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       Authorization: authHeader('POST', url),
@@ -177,8 +178,16 @@ export async function postToX(
  * once and reuses the id for the life of a single post.
  */
 export async function uploadMedia(imageUrl: string): Promise<string> {
-  const img = await fetch(imageUrl);
-  if (!img.ok) throw new Error(`card image fetch failed ${img.status} for ${imageUrl}`);
+  // Fetch our own card over loopback, not out through Caddy and back.
+  // See lib/social/selfCall.ts — the public round trip is slow, breaks
+  // while Caddy restarts during a deploy, and hangs outright on AWS
+  // setups without hairpin NAT.
+  const localUrl = toInternalUrl(imageUrl);
+
+  // The card is an og render, which is the slowest thing we do — give
+  // it more room than a normal API call, but still a hard ceiling.
+  const img = await fetchWithTimeout(localUrl, {}, 30_000);
+  if (!img.ok) throw new Error(`card image fetch failed ${img.status} for ${localUrl}`);
 
   const buf = Buffer.from(await img.arrayBuffer());
   // 5MB is X's image ceiling; our OG cards land around 100-300KB, so
@@ -188,7 +197,7 @@ export async function uploadMedia(imageUrl: string): Promise<string> {
   }
 
   const form = new URLSearchParams({ media_data: buf.toString('base64') });
-  const r = await fetch(UPLOAD, {
+  const r = await fetchWithTimeout(UPLOAD, {
     method: 'POST',
     headers: {
       // v1.1 upload signs the form body, unlike the v2 JSON endpoints.
@@ -222,7 +231,7 @@ export async function lookupUserId(handle: string): Promise<string> {
   if (!res.ok) throw new Error(`budget: ${res.reason}`);
 
   const url = `${API}/2/users/by/username/${encodeURIComponent(handle)}`;
-  const r = await fetch(url, { headers: { Authorization: authHeader('GET', url) } });
+  const r = await fetchWithTimeout(url, { headers: { Authorization: authHeader('GET', url) } });
 
   if (!r.ok) {
     if (!billedOnFailure(r.status)) await refund('user_lookup');
@@ -265,7 +274,7 @@ export async function fetchRecentPosts(
   const url = `${API}/2/users/${userId}/tweets`;
   const qs = new URLSearchParams(params).toString();
 
-  const r = await fetch(`${url}?${qs}`, {
+  const r = await fetchWithTimeout(`${url}?${qs}`, {
     headers: { Authorization: authHeader('GET', url, params) },
   });
 
