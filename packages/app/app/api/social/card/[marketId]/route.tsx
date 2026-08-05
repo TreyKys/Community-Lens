@@ -79,10 +79,16 @@ function splitFromPools(m: any): Array<{ label: string; pct: number }> | null {
 }
 
 async function loadCard(marketId: string): Promise<CardState | null> {
+  // markets.id is bigserial. Reject anything non-numeric before it
+  // reaches Postgres — an unparseable id makes the query error rather
+  // than return no rows, which would surface as a 500 instead of the
+  // branded fallback card.
+  if (!/^\d+$/.test(marketId)) return null;
+
   const { data: m } = await supabaseAdmin
     .from('markets')
     .select('question, options, closes_at, pool_by_outcome, seed_pool, league_code, home_team, away_team')
-    .eq('id', marketId)
+    .eq('id', Number(marketId))
     .maybeSingle();
 
   if (!m) return null;

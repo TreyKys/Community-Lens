@@ -124,7 +124,7 @@ export async function POST(request: Request) {
         body,
         // Rendered on demand from live pool data at publish time — so
         // the image can never quote a split that has since moved.
-        media_url: `${getBaseUrl()}/api/social/card/${encodeURIComponent(m.id)}`,
+        media_url: `${getBaseUrl()}/api/social/card/${m.id}`,
         source_market_id: m.id,
         scheduled_at: scheduledAt.toISOString(),
         priority: 100,
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
         continue;
       }
 
-      planned.push({ marketId: m.id, kind, at: scheduledAt.toISOString() });
+      planned.push({ marketId: String(m.id), kind, at: scheduledAt.toISOString() });
       slotIndex++;
     }
 

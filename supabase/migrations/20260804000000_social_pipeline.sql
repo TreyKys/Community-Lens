@@ -40,7 +40,16 @@ CREATE TABLE IF NOT EXISTS public.social_posts (
   kind              text NOT NULL,                    -- opening_line | movement | settlement | evergreen | manual
   body              text NOT NULL,
   media_url         text,                             -- absolute URL to an /api/*-card route
-  source_market_id  varchar(255) REFERENCES public.markets(id) ON DELETE SET NULL,
+
+  -- bigint, matching markets.id (bigserial, from phase3_schema).
+  --
+  -- Worth knowing if you read the old migrations: two files share the
+  -- timestamp 20240503000000, and they disagree about this column.
+  -- hybrid_settlement_pivot declares markets.id as VARCHAR(255);
+  -- phase3_schema declares it bigserial. phase3 is the one that took
+  -- effect, and every other table in the schema references
+  -- market_id bigint. Trust those, not the varchar file.
+  source_market_id  bigint REFERENCES public.markets(id) ON DELETE SET NULL,
 
   -- Nullable so the evergreen pool can sit unscheduled until a planner
   -- run needs a filler for a dead fixture day. Everything else must
