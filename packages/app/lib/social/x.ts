@@ -223,6 +223,45 @@ export async function uploadMedia(imageUrl: string): Promise<string> {
 export type XPost = { id: string; text: string; authorId: string; createdAt: string };
 
 /**
+ * Fetch a single post by id.
+ *
+ * The BILLED fallback for share-to-bot, used only when the free oEmbed
+ * route fails AND the operator has explicitly enabled paid lookups.
+ * The caller owns the budget reservation — this function does not
+ * reserve, so the cost decision stays where the policy lives.
+ *
+ * Returns null for a post that is gone or protected, so the caller can
+ * refund rather than treating it as an error.
+ */
+export async function xGetPost(
+  postId: string,
+): Promise<{ text: string; authorUsername: string | null } | null> {
+  const params: Record<string, string> = {
+    'tweet.fields': 'author_id',
+    expansions: 'author_id',
+    'user.fields': 'username',
+  };
+  const url = `${API}/2/tweets/${encodeURIComponent(postId)}`;
+  const qs = new URLSearchParams(params).toString();
+
+  const r = await fetchWithTimeout(`${url}?${qs}`, {
+    headers: { Authorization: authHeader('GET', url, params) },
+  });
+
+  // 404/403 — deleted, protected, or suspended. Not an error worth
+  // throwing over; the caller refunds and asks for a paste instead.
+  if (r.status === 404 || r.status === 403) return null;
+  if (!r.ok) throw new XApiError(`post fetch failed ${r.status}`, r.status, billedOnFailure(r.status));
+
+  const json = await r.json();
+  const text = json?.data?.text;
+  if (!text) return null;
+
+  const username = json?.includes?.users?.[0]?.username ?? null;
+  return { text: String(text), authorUsername: username ? String(username) : null };
+}
+
+/**
  * Resolve @handle -> numeric id. Cached in social_targets because it
  * bills, and a handle's id never changes.
  */

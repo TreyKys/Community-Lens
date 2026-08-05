@@ -34,16 +34,26 @@ day and no search — you genuinely could not watch a timeline, and any
 revive that. This is the single best thing about the new pricing for a
 small account.
 
-**Budget:** ₦10,000/month ≈ **$6.45** at ₦1,550/$.
+**Budget:** $5.00/month funded, guard set to $4.50.
+
+With reply discovery moved to share-to-bot (section 2a), reads drop to
+zero and the whole budget goes to posting:
 
 ```
-4 posts/day, link-free    = 120 × $0.015 = $1.80/month
-~6 targets × 2 scans/day  = roughly       $4.50/month
-                                          ─────────────
-                                          ~$6.30/month
+3 posts/day, link-free  =  90 x $0.015  =  $1.35/month
+reply drafting          =  Gemini only  =  $0
+reply posting           =  manual       =  $0
+                                           ─────────────
+                                           $1.35/month
 ```
 
-It fits, but only just. Every knob that could blow it is capped in code.
+The remaining headroom is deliberate. The ledger is an *estimate* built
+from X's published rate card, not a copy of their billing — the guard is
+set below what is funded so it stops first, cleanly, rather than X's
+credits running dry mid-post.
+
+For reference, with the metered scanner switched on instead, the same
+$5 supports roughly 110 posts/month and six watched accounts.
 
 ---
 
@@ -53,7 +63,7 @@ It fits, but only just. Every knob that could blow it is capped in code.
 | :--- | :--- | :--- | :--- |
 | `cron-social-plan.yml` | 05:00 daily | `POST /api/social/plan` | Gemini only |
 | `cron-social-publish.yml` | hourly | `POST /api/social/publish` | $0.015/post |
-| `cron-social-scan.yml` | 11:00, 17:30 | `POST /api/social/scan` | $0.005/read |
+| `cron-social-scan.yml` | **disabled** (manual only) | `POST /api/social/scan` | $0.005/read |
 
 Same pattern as the existing crons: GitHub Actions → authenticated Next
 route, `x-cron-secret` header, `API_BASE_URL` + `CRON_SECRET` secrets
@@ -122,7 +132,86 @@ person in a row reads as a bot no matter how good the copy is.
 
 ---
 
-## 2. Why replies are not automated
+## 2a. Reply discovery: share-to-bot
+
+**The scanner is off by default.** `cron-social-scan.yml` has no
+schedule — manual trigger only.
+
+Reads are the expensive half. Each billable target poll costs $0.025
+(X's 5-result floor on the timeline endpoint), so two scans a day across
+six accounts is ~$3.65/month. On a $5 budget that is most of the money,
+spent on discovery.
+
+Instead: **you share a post to the bot.**
+
+```
+You see a post worth replying to  →  share/paste it into Telegram
+                                     ↓
+                    Bot drafts a reply, free
+                                     ↓
+                    Tap to copy → paste in the X app
+```
+
+Three ways to send one, cheapest first:
+
+1. **Link + the text pasted underneath** — costs nothing, always works.
+2. **Link alone** — the bot tries oEmbed (public, unauthenticated,
+   free). Whether that endpoint still works is genuinely uncertain; X
+   has been closing these doors for years, so it is attempted, never
+   relied on.
+3. **Link alone, oEmbed failed** — the bot asks you to paste the text.
+   It does *not* silently fall back to a billed read. `/paidlookup on`
+   allows a $0.005 API read per share if you'd rather not paste.
+
+Raw text with no link works too — it gets a synthetic `text:<hash>` id,
+so an accidental double-paste dedupes instead of drafting twice.
+
+What this trades: discovery is manual. What it buys: the whole budget
+goes to posts (~333/month at $0.015 rather than ~110 with scanning on),
+no scraping, no burner accounts, and you are not limited to a fixed list
+of six accounts — anything you see is fair game.
+
+The scanner is kept, not deleted. If the budget grows, restore the
+schedule in `cron-social-scan.yml` and set `social_targets.active = true`.
+
+---
+
+## 2b. Control surface
+
+Everything below is reachable from Telegram, with no deploy and no SSH.
+The pipeline spends money on a schedule with nobody watching, so "stop
+it" has to be thirty seconds away.
+
+| Command | What it does |
+| :--- | :--- |
+| `/status` | Paused or live, queue depth, published in 24h, spend |
+| `/queue` | The next posts due, with ids |
+| `/budget` | Spend bar, and how many posts the remainder buys |
+| `/pause [reason]` | **Kill switch.** Stops publishing on the next run |
+| `/resume` | Start again |
+| `/cap N` | Posts per day, 0-20. `/cap off` clears the override |
+| `/skip ID` | Cancel one queued post |
+| `/paidlookup on\|off` | Allow a $0.005 read when a share can't be read free |
+| `/help` | The list |
+
+Two properties worth knowing:
+
+**`/pause` is checked before anything is claimed**, so it stops the next
+hourly run cleanly and leaves the queue exactly as it was. Nothing is
+lost; `/resume` picks up where it stopped.
+
+**Settings fail closed.** If the settings row can't be read, publishing
+reads as paused. An unattended job that spends money should not decide
+on its own that everything is probably fine when it cannot check.
+
+Commands are accepted only from `TELEGRAM_CHAT_ID`. Telegram delivers
+every message the bot can see and bot usernames are guessable — without
+that check, a stranger who found it could pause your publishing or burn
+budget on paid lookups.
+
+---
+
+## 2c. Why replies are not automated
 
 They could be — $0.015 each now. They aren't, for three reasons in
 descending order of importance.
