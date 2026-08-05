@@ -62,10 +62,27 @@ export type ReplyCard = {
  * be edited in place when the operator acts on it.
  */
 export async function sendReplyCard(card: ReplyCard): Promise<number> {
+  // Text pasted without a link carries a synthetic 'text:<hash>' id, so
+  // there is no permalink to open. Telegram rejects the whole message
+  // if a URL button is malformed, which would lose the draft entirely —
+  // so the button is only added when we have a real post id.
+  const hasPermalink = /^\d+$/.test(card.sourcePostId) && card.author !== 'unknown';
   const permalink = `https://x.com/${card.author}/status/${card.sourcePostId}`;
 
+  const buttons: Array<Array<Record<string, string>>> = [];
+  if (hasPermalink) {
+    // Opens the native app on a phone; falls back to web on desktop.
+    buttons.push([{ text: 'Open in X', url: permalink }]);
+  }
+  buttons.push([
+    { text: 'Posted', callback_data: `posted:${card.replyId}` },
+    { text: 'Skip', callback_data: `skip:${card.replyId}` },
+  ]);
+
+  const heading = card.author === 'unknown' ? '<b>Shared post</b>' : `<b>@${escapeHtml(card.author)}</b>`;
+
   const text =
-    `<b>@${escapeHtml(card.author)}</b>\n` +
+    `${heading}\n` +
     `<blockquote>${escapeHtml(card.sourceText.slice(0, 280))}</blockquote>\n\n` +
     `<b>Draft reply</b> — tap to copy:\n` +
     `<code>${escapeHtml(card.draft)}</code>`;
@@ -75,16 +92,7 @@ export async function sendReplyCard(card: ReplyCard): Promise<number> {
     text,
     parse_mode: 'HTML',
     link_preview_options: { is_disabled: true },
-    reply_markup: {
-      inline_keyboard: [
-        // Opens the native app on a phone; falls back to web on desktop.
-        [{ text: 'Open in X', url: permalink }],
-        [
-          { text: 'Posted', callback_data: `posted:${card.replyId}` },
-          { text: 'Skip', callback_data: `skip:${card.replyId}` },
-        ],
-      ],
-    },
+    reply_markup: { inline_keyboard: buttons },
   });
 
   return Number(result?.message_id ?? 0);

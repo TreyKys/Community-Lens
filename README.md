@@ -22,7 +22,7 @@ but not wired to the managed platform; GitHub Actions is the live automation lay
 | `cron-heartbeat.yml` | Sun 00:00 UTC | `POST /api/admin/heartbeat` |
 | `cron-social-plan.yml` | 05:00 UTC daily | `POST /api/social/plan` |
 | `cron-social-publish.yml` | hourly | `POST /api/social/publish` |
-| `cron-social-scan.yml` | 11:00, 17:30 UTC | `POST /api/social/scan` |
+| `cron-social-scan.yml` | manual only (disabled) | `POST /api/social/scan` |
 
 The social workflows drive the X pipeline — see
 [`docs/social-pipeline.md`](docs/social-pipeline.md). They spend real

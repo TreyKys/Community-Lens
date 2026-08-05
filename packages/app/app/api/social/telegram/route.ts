@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { safeEqual } from '@/lib/safeCompare';
-import { answerCallback, markCardHandled, notify } from '@/lib/social/telegram';
-import { budgetSummary } from '@/lib/social/budget';
+import { answerCallback, markCardHandled, notify, sendReplyCard } from '@/lib/social/telegram';
+import { handleCommand } from '@/lib/social/commands';
+import { ingestShared } from '@/lib/social/ingest';
+import { getSettings } from '@/lib/social/settings';
+import { draftReply } from '@/lib/social/reply';
 
 // POST /api/social/telegram
 //
@@ -21,6 +24,92 @@ import { budgetSummary } from '@/lib/social/budget';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * The share-to-bot path: operator sends a post (link or text), we draft
+ * a reply and send back the same card a scan would have produced.
+ *
+ * Costs nothing by default. Drafting is Gemini; reading the shared post
+ * uses free oEmbed, and only touches the billed X API if the operator
+ * turned that on with /paidlookup.
+ */
+async function handleShare(raw: string): Promise<void> {
+  const settings = await getSettings();
+  const result = await ingestShared(raw, { allowPaidLookup: settings.allowPaidLookup });
+
+  if (!result.ok) {
+    await notify(result.hint);
+    return;
+  }
+
+  const { post } = result;
+  const supa = getSupabaseAdmin();
+
+  // Already drafted against this post? Hand back what we have rather
+  // than paying Gemini again and buzzing twice for the same thing.
+  const { data: existing } = await supa
+    .from('social_replies')
+    .select('id, draft_body, status')
+    .eq('source_post_id', post.postId)
+    .maybeSingle();
+
+  if (existing) {
+    await notify(
+      `Already drafted this one (<b>${existing.status}</b>):\n\n` +
+      `<code>${String(existing.draft_body).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</code>`,
+    );
+    return;
+  }
+
+  const draft = await draftReply({
+    authorHandle: post.author,
+    authorLabel: null,
+    sourceText: post.text,
+  });
+
+  if (!draft) {
+    // draftReply returns null on a compliance rejection or a SKIP —
+    // sensitive topics are deliberately left alone.
+    await notify(
+      `No draft for that one. Either it tripped a compliance rule, or it's the kind of ` +
+      `post (tragedy, crime, active political conflict) the drafter is told to skip.\n\n` +
+      `Send it again with your own angle and I'll work from that.`,
+    );
+    return;
+  }
+
+  const { data: row, error } = await supa
+    .from('social_replies')
+    .insert({
+      source_post_id: post.postId,
+      source_author: post.author,
+      source_text: post.text.slice(0, 1000),
+      source_url: post.url,
+      origin: 'shared',
+      draft_body: draft,
+      status: 'drafted',
+    })
+    .select('id')
+    .single();
+
+  if (error || !row) {
+    await notify(`Drafted it but couldn't save: ${error?.message ?? 'unknown error'}`);
+    return;
+  }
+
+  const messageId = await sendReplyCard({
+    replyId: row.id,
+    author: post.author,
+    sourceText: post.text,
+    sourcePostId: post.postId,
+    draft,
+  });
+
+  await supa
+    .from('social_replies')
+    .update({ status: 'sent_to_review', telegram_message_id: messageId })
+    .eq('id', row.id);
+}
+
 export async function POST(request: Request) {
   const provided = request.headers.get('x-telegram-bot-api-secret-token');
   if (!safeEqual(provided, process.env.TELEGRAM_WEBHOOK_SECRET)) {
@@ -38,19 +127,29 @@ export async function POST(request: Request) {
 
   const cb = update?.callback_query;
   if (!cb) {
-    // A plain text message — support one operator command.
-    const text = String(update?.message?.text ?? '').trim().toLowerCase();
-    if (text === '/budget') {
-      const b = await budgetSummary().catch(() => null);
-      if (b) {
-        await notify(
-          `<b>X budget</b>\n` +
-          `Spent: $${b.spentUsd.toFixed(3)} (₦${b.spentNgn.toLocaleString()})\n` +
-          `Cap: $${b.capUsd.toFixed(2)} (₦${b.capNgn.toLocaleString()})\n` +
-          `Left: $${b.remainingUsd.toFixed(3)} — ${100 - b.pctUsed}%`,
-        ).catch(() => {});
-      }
+    const raw = String(update?.message?.text ?? '').trim();
+    if (!raw) return NextResponse.json({ ok: true });
+
+    // Only the configured operator may drive this. Telegram delivers
+    // every message the bot can see, and the bot's username is
+    // guessable — without this, a stranger who finds it could pause
+    // publishing or burn budget on paid lookups.
+    const fromId = String(update?.message?.from?.id ?? '');
+    if (fromId !== String(process.env.TELEGRAM_CHAT_ID ?? '')) {
+      return NextResponse.json({ ok: true });
     }
+
+    try {
+      if (raw.startsWith('/')) {
+        await notify(await handleCommand(raw));
+      } else {
+        await handleShare(raw);
+      }
+    } catch (e: any) {
+      await notify(`Something broke handling that: ${String(e?.message ?? e).slice(0, 200)}`)
+        .catch(() => {});
+    }
+
     return NextResponse.json({ ok: true });
   }
 

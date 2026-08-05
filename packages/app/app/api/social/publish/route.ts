@@ -3,6 +3,7 @@ import { safeSecretMatch } from '@/lib/safeCompare';
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { postToX, uploadMedia, XApiError, isXConfigured } from '@/lib/social/x';
 import { budgetSummary } from '@/lib/social/budget';
+import { getSettings } from '@/lib/social/settings';
 import { notify } from '@/lib/social/telegram';
 
 // POST /api/social/publish
@@ -44,6 +45,20 @@ export async function POST(request: Request) {
     return NextResponse.json({
       published: 0,
       skipped: [{ id: 0, reason: 'X credentials not configured — queue left intact' }],
+    });
+  }
+
+  // The kill switch. Checked before anything is claimed, so /pause from
+  // a phone stops the next run cleanly and leaves the queue exactly as
+  // it was. getSettings() fails closed — an unreadable settings row
+  // reads as paused, because an unattended job that spends money should
+  // not assume everything is fine when it cannot check.
+  const settings = await getSettings();
+  if (settings.publishingPaused) {
+    return NextResponse.json({
+      published: 0,
+      paused: true,
+      reason: settings.pausedReason ?? 'publishing paused',
     });
   }
 

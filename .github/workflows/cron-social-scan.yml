@@ -2,24 +2,27 @@ name: Cron — Social Reply Scan
 
 # Reads monitored accounts and pushes reply drafts to Telegram.
 #
-# TWO scans a day, timed so the drafts are waiting when you actually
-# have a phone in your hand:
-#   11:00 UTC = 12:00 WAT — lunch break
-#   17:30 UTC = 18:30 WAT — after work, into the evening peak
+# SCHEDULE DELIBERATELY DISABLED — manual trigger only.
 #
-# Two and not three because this is the metered-read side and the
-# greedy one: each billable target poll costs $0.025 (X's 5-result
-# floor), so a third daily scan is roughly $4.50/month on its own —
-# most of a ₦10k budget. Add it back only after raising
-# SOCIAL_MONTHLY_BUDGET_USD.
+# Reply discovery moved to share-to-bot: you send a post to the Telegram
+# bot and it drafts a reply, for free. This scanner is the old metered
+# route, where each billable target poll costs $0.025 (X's 5-result
+# floor on the timeline endpoint) — roughly $3.65/month at two scans a
+# day, which on a $5 budget is most of the money.
 #
-# The route also caps reads per run and stops entirely once spend
-# crosses 65% of the monthly budget, so publishing keeps its reserve.
+# With discovery manual, that entire budget goes to posts instead: ~333
+# posts/month at $0.015 each, versus ~110 with scanning switched on.
+#
+# The scanner is kept, not deleted, because it is a working
+# implementation and the trade flips if the budget grows. To bring it
+# back: restore the schedule below, and set social_targets.active = true
+# for the accounts you want watched (all six ship inactive).
+#
+#   schedule:
+#     - cron: '0 11 * * *'
+#     - cron: '30 17 * * *'
 
 on:
-  schedule:
-    - cron: '0 11 * * *'
-    - cron: '30 17 * * *'
   workflow_dispatch:
 
 concurrency:

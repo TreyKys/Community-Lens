@@ -4,6 +4,7 @@ import { getSupabaseAdmin, getBaseUrl } from '@/lib/oracle';
 import { composeMarketPost, openMarkets, type PostKind } from '@/lib/social/compose';
 import { budgetSummary } from '@/lib/social/budget';
 import { notify } from '@/lib/social/telegram';
+import { getSettings } from '@/lib/social/settings';
 
 // POST /api/social/plan
 //
@@ -32,7 +33,18 @@ export const maxDuration = 300;
  */
 const SLOTS_UTC = [7, 12, 17, 20];
 
-function dailyCap(): number {
+/**
+ * Posts to queue today.
+ *
+ * The database override wins over the env var, so /cap from Telegram
+ * takes effect on the next run without a deploy. Zero is a legitimate
+ * value — "queue nothing" — so it is distinguished from "unset" rather
+ * than falling through a truthiness check.
+ */
+function dailyCap(override: number | null): number {
+  if (override !== null && Number.isFinite(override) && override >= 0) {
+    return Math.min(override, SLOTS_UTC.length);
+  }
   const n = Number(process.env.SOCIAL_DAILY_POST_CAP);
   return Number.isFinite(n) && n > 0 ? Math.min(n, SLOTS_UTC.length) : SLOTS_UTC.length;
 }
@@ -54,9 +66,17 @@ export async function POST(request: Request) {
   }
 
   const supa = getSupabaseAdmin();
-  const cap = dailyCap();
+  const settings = await getSettings();
+  const cap = dailyCap(settings.dailyPostCap);
   const planned: Array<{ marketId: string; kind: PostKind; at: string }> = [];
   const errors: string[] = [];
+
+  // Nothing to plan, and no Gemini calls to pay for. Returning early
+  // also stops the "queued 0" alert below from firing every morning
+  // while deliberately capped at zero.
+  if (cap === 0) {
+    return NextResponse.json({ planned: 0, slots: [], errors: [], cappedAtZero: true });
+  }
 
   try {
     const markets = await openMarkets(40);
