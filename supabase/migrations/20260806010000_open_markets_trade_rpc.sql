@@ -137,7 +137,8 @@ DECLARE
   v_fee      numeric;
   v_total    numeric;
   v_cash     numeric;
-  v_other    numeric;
+  v_other    bigint;
+  v_basis_sold  numeric := 0;
   v_accr_before numeric;
   v_accr_after  numeric;
 BEGIN
@@ -147,13 +148,12 @@ BEGIN
   SELECT * INTO v_prior FROM public.open_trades
    WHERE client_trade_id = p_client_trade_id;
   IF FOUND THEN
+    -- Replay the RECORDED result. Re-reading the live position here would
+    -- report a figure another trade has since moved, so a retrying client
+    -- would see a number that never corresponded to its own trade.
     RETURN QUERY SELECT 'already_executed'::text, v_prior.cost_tngn, v_prior.fee_tngn,
                         v_prior.cost_tngn + v_prior.fee_tngn,
-                        COALESCE((SELECT shares_cash + shares_bonus FROM public.open_positions
-                                   WHERE market_id = v_prior.market_id
-                                     AND user_id = v_prior.user_id
-                                     AND outcome_idx = v_prior.outcome_idx), 0),
-                        v_prior.price_after;
+                        v_prior.shares_after, v_prior.price_after;
     RETURN;
   END IF;
 
@@ -215,6 +215,15 @@ BEGIN
     END IF;
   END IF;
 
+  -- ── 6b. Per-account position cap. One account cornering the book realises
+  -- the house's whole subsidy without any second opinion ever being expressed,
+  -- which is both an exposure event and a worthless market.
+  IF p_delta_shares > 0
+     AND (v_held + p_delta_shares) > v_mkt.max_position_mult * v_mkt.b THEN
+    RAISE EXCEPTION 'position cap: max % shares of one outcome',
+      v_mkt.max_position_mult * v_mkt.b USING ERRCODE = 'P0001';
+  END IF;
+
   -- ── 7. Price from the LOCKED book.
   v_next := v_mkt.q;
   v_next[v_idx] := v_next[v_idx] + p_delta_shares;
@@ -271,10 +280,23 @@ BEGIN
     INSERT INTO public.open_positions (market_id, user_id, outcome_idx, shares_cash, cost_cash)
     VALUES (p_market_id, p_user_id, p_outcome_idx, p_delta_shares, v_total)
     RETURNING * INTO v_pos;
-  ELSE
+  ELSIF p_delta_shares > 0 THEN
     UPDATE public.open_positions
        SET shares_cash = shares_cash + p_delta_shares,
            cost_cash   = cost_cash   + v_total
+     WHERE id = v_pos.id
+     RETURNING * INTO v_pos;
+  ELSE
+    -- Selling retires basis PROPORTIONALLY. Subtracting the proceeds instead
+    -- would leave the remaining shares carrying the wrong basis, and would push
+    -- cost_cash negative on any profitable exit — making every P&L figure
+    -- derived from it wrong.
+    v_basis_sold := CASE WHEN v_held > 0
+                         THEN round(v_pos.cost_cash * (-p_delta_shares) / v_held, 2)
+                         ELSE 0 END;
+    UPDATE public.open_positions
+       SET shares_cash = shares_cash + p_delta_shares,
+           cost_cash   = GREATEST(cost_cash - v_basis_sold, 0)
      WHERE id = v_pos.id
      RETURNING * INTO v_pos;
   END IF;
@@ -297,11 +319,12 @@ BEGIN
   -- ── 12. Immutable log. q_after makes the whole book replayable from here.
   INSERT INTO public.open_trades (
     client_trade_id, market_id, user_id, outcome_idx, delta_shares,
-    cost_tngn, fee_tngn, paid_cash, paid_bonus, price_after, q_after)
+    cost_tngn, fee_tngn, paid_cash, paid_bonus, price_after, q_after, shares_after)
   VALUES (
     p_client_trade_id, p_market_id, p_user_id, p_outcome_idx, p_delta_shares,
     v_cost, v_fee, v_total, 0,
-    (public.lmsr_prices(v_next, v_mkt.b))[v_idx], v_next);
+    (public.lmsr_prices(v_next, v_mkt.b))[v_idx], v_next,
+    v_pos.shares_cash + v_pos.shares_bonus);
 
   RETURN QUERY SELECT 'executed'::text, v_cost, v_fee, v_total,
                       v_pos.shares_cash + v_pos.shares_bonus,

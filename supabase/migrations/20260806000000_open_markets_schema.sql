@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
   unresolvable_policy text NOT NULL DEFAULT 'void_at_last_price'
                       CHECK (unresolvable_policy IN ('void_at_last_price', 'roll_to_next_horizon')),
 
+  -- Cap on any single account's holding of one outcome, as a multiple of b.
+  -- Without it one account can walk a Starter book to 0.98 alone, realising
+  -- the house's entire subsidy with no other trader involved — and a market
+  -- with one participant is not a prediction market.
+  max_position_mult numeric NOT NULL DEFAULT 0.5 CHECK (max_position_mult > 0),
+
   -- LMSR state. b is IMMUTABLE once open: changing it reprices every existing
   -- position discontinuously (a ₦3,296 silent transfer on a mid-size book) and
   -- silently re-bases the exposure budget. Liquidity changes need a halt and
@@ -104,7 +110,11 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
   CONSTRAINT open_markets_q_init_matches CHECK (array_length(q_initial, 1) = array_length(outcomes, 1)),
   -- Creator can never be paid more than accrued.
   CONSTRAINT open_markets_creator_paid   CHECK (creator_paid <= creator_accrued),
-  CONSTRAINT open_markets_fees_nonneg    CHECK (fees_collected >= 0 AND fees_collected_real >= 0)
+  CONSTRAINT open_markets_fees_nonneg    CHECK (fees_collected >= 0 AND fees_collected_real >= 0),
+  -- An open market MUST have a trading cut-off. Otherwise the book stays live
+  -- while the outcome becomes public and an admin walks to the resolve screen,
+  -- and the house is the counterparty to every one of those informed trades.
+  CONSTRAINT open_markets_close_required CHECK (status <> 'open' OR trading_closes_at IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS open_markets_status_idx   ON public.open_markets (status, horizon_at);
@@ -154,6 +164,9 @@ CREATE TABLE IF NOT EXISTS public.open_trades (
   paid_cash       numeric NOT NULL DEFAULT 0,
   paid_bonus      numeric NOT NULL DEFAULT 0,
   price_after     numeric NOT NULL,
+  shares_after    numeric NOT NULL DEFAULT 0,  -- holding AFTER this trade, so an
+                                              -- idempotent replay reports what THIS
+                                              -- trade did, not live state
   q_after         numeric[] NOT NULL,    -- full state: the book is replayable
   created_at      timestamptz NOT NULL DEFAULT now()
 );
