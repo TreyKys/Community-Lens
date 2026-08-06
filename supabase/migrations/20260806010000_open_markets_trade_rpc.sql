@@ -25,7 +25,15 @@ DECLARE
   v_sum numeric;
 BEGIN
   IF p_b IS NULL OR p_b <= 0 THEN
-    RAISE EXCEPTION 'lmsr_cost: b must be positive';
+    RAISE EXCEPTION 'lmsr_cost: b must be positive' USING ERRCODE = 'P0001';
+  END IF;
+  -- max() and sum() are AGGREGATES: they skip NULLs. So a single NULL element
+  -- makes this return the cost of a book WITHOUT that outcome — a plausible,
+  -- finite, entirely wrong number that every downstream guard then trusts.
+  IF p_q IS NULL OR array_length(p_q, 1) IS NULL
+     OR EXISTS (SELECT 1 FROM unnest(p_q) AS v WHERE v IS NULL) THEN
+    RAISE EXCEPTION 'lmsr_cost: q must be non-empty with no NULL elements'
+      USING ERRCODE = 'P0001';
   END IF;
   SELECT max(v) INTO v_m FROM unnest(p_q) AS v;
   SELECT sum(exp((v - v_m) / p_b)) INTO v_sum FROM unnest(p_q) AS v;
@@ -42,6 +50,14 @@ AS $$
 DECLARE
   v_m numeric; v_sum numeric; v_out numeric[];
 BEGIN
+  IF p_b IS NULL OR p_b <= 0 THEN
+    RAISE EXCEPTION 'lmsr_prices: b must be positive' USING ERRCODE = 'P0001';
+  END IF;
+  IF p_q IS NULL OR array_length(p_q, 1) IS NULL
+     OR EXISTS (SELECT 1 FROM unnest(p_q) AS v WHERE v IS NULL) THEN
+    RAISE EXCEPTION 'lmsr_prices: q must be non-empty with no NULL elements'
+      USING ERRCODE = 'P0001';
+  END IF;
   SELECT max(v) INTO v_m FROM unnest(p_q) AS v;
   SELECT sum(exp((v - v_m) / p_b)) INTO v_sum FROM unnest(p_q) AS v;
   SELECT array_agg(exp((v - v_m) / p_b) / v_sum ORDER BY o) INTO v_out
@@ -70,7 +86,17 @@ DECLARE
   v_next numeric[]; v_raw numeric; v_cost numeric; v_fee numeric;
 BEGIN
   SELECT * INTO v_mkt FROM public.open_markets WHERE id = p_market_id;
-  IF NOT FOUND THEN RAISE EXCEPTION 'market not found'; END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'market not found' USING ERRCODE = 'P0002'; END IF;
+  -- Mirror the executor's validation. Without it this quotes a live-looking
+  -- price on a resolved book, and an out-of-range index extends q with NULLs
+  -- and returns "total ₦0.01" for an arbitrary trade.
+  IF v_mkt.status <> 'open' THEN
+    RAISE EXCEPTION 'market is not open (status=%)', v_mkt.status USING ERRCODE = 'P0001';
+  END IF;
+  IF p_outcome_idx < 0
+     OR p_outcome_idx >= COALESCE(array_length(v_mkt.outcomes, 1), 0) THEN
+    RAISE EXCEPTION 'outcome index out of range' USING ERRCODE = 'P0001';
+  END IF;
 
   v_next := v_mkt.q;
   v_next[p_outcome_idx + 1] := v_next[p_outcome_idx + 1] + p_delta_shares;
@@ -148,6 +174,17 @@ BEGIN
   SELECT * INTO v_prior FROM public.open_trades
    WHERE client_trade_id = p_client_trade_id;
   IF FOUND THEN
+    -- The key alone is not enough. client_trade_id is a column on open_trades,
+    -- so without this check a caller replaying someone else's key receives
+    -- that trade's cost, fee, size and fill price — a confident "success" for
+    -- a trade they never made, and a disclosure of another user's economics.
+    IF v_prior.user_id      <> p_user_id
+       OR v_prior.market_id   <> p_market_id
+       OR v_prior.outcome_idx <> p_outcome_idx
+       OR v_prior.delta_shares <> p_delta_shares THEN
+      RAISE EXCEPTION 'client_trade_id % already used for a different trade',
+        p_client_trade_id USING ERRCODE = 'P0001';
+    END IF;
     -- Replay the RECORDED result. Re-reading the live position here would
     -- report a figure another trade has since moved, so a retrying client
     -- would see a number that never corresponded to its own trade.
@@ -165,7 +202,10 @@ BEGIN
 
   -- Engine-wide kill switch. A per-market halt is not enough when the fault is
   -- in the pricing function itself.
-  IF NOT (SELECT trading_enabled FROM public.open_markets_config WHERE id = 1) THEN
+  -- COALESCE is load-bearing: if the singleton row is missing, the subquery is
+  -- NULL, NOT NULL is NULL, and plpgsql takes NEITHER branch — the kill switch
+  -- silently fails OPEN, which is the one behaviour it must never have.
+  IF NOT COALESCE((SELECT trading_enabled FROM public.open_markets_config WHERE id = 1), false) THEN
     RAISE EXCEPTION 'open markets trading is disabled' USING ERRCODE = 'P0001';
   END IF;
 
@@ -195,6 +235,13 @@ BEGIN
   END IF;
 
   v_n := array_length(v_mkt.outcomes, 1);
+  -- array_length of an empty array is NULL, and every guard below compares
+  -- against it. A NULL there is not "unknown", it is "no check ran": the
+  -- range check, complete-set check, minimum-trade check, both slippage
+  -- guards and the BALANCE check all evaluate to NULL and fall through.
+  IF v_n IS NULL OR v_n < 2 THEN
+    RAISE EXCEPTION 'market has no valid outcomes' USING ERRCODE = 'P0001';
+  END IF;
   IF p_outcome_idx < 0 OR p_outcome_idx >= v_n THEN
     RAISE EXCEPTION 'outcome index out of range' USING ERRCODE = 'P0001';
   END IF;
@@ -212,7 +259,14 @@ BEGIN
   -- ── 5. No naked shorts. Selling shares you don't hold is borrowing from the
   -- house: proceeds asymptote to b·ln(N) while the liability grows linearly,
   -- so the house's loss is unbounded rather than capped.
-  IF p_delta_shares < 0 AND v_held + p_delta_shares < 0 THEN
+  -- v1 is cash-only. Refuse rather than corrupt if that ever stops being true:
+  -- the write below decrements shares_cash alone, so validating a sell against
+  -- cash+bonus would drive shares_cash negative and make the position
+  -- permanently unsellable the day a single bonus share exists.
+  IF p_delta_shares < 0 AND v_pos.shares_bonus > 0 THEN
+    RAISE EXCEPTION 'bonus lots are not sellable in v1' USING ERRCODE = 'P0001';
+  END IF;
+  IF p_delta_shares < 0 AND COALESCE(v_pos.shares_cash, 0) + p_delta_shares < 0 THEN
     RAISE EXCEPTION 'cannot sell more shares than held' USING ERRCODE = 'P0001';
   END IF;
 
@@ -248,7 +302,11 @@ BEGIN
   -- of a kobo on every single exit.
   v_cost := ceil(v_raw * 100) / 100;
 
-  IF abs(v_cost) < c_min_trade THEN
+  -- The minimum blocks ENTRIES, not exits: a residual position worth ₦80 must
+  -- still be closable or the user's money is trapped by a guard meant to
+  -- protect fee revenue.
+  IF abs(v_cost) < c_min_trade
+     AND NOT (p_delta_shares < 0 AND v_pos.shares_cash + p_delta_shares = 0) THEN
     RAISE EXCEPTION 'trade below minimum of %', c_min_trade USING ERRCODE = 'P0001';
   END IF;
 
@@ -304,12 +362,14 @@ BEGIN
     -- would leave the remaining shares carrying the wrong basis, and would push
     -- cost_cash negative on any profitable exit — making every P&L figure
     -- derived from it wrong.
-    v_basis_sold := CASE WHEN v_held > 0
-                         THEN round(v_pos.cost_cash * (-p_delta_shares) / v_held, 2)
+    -- Denominator is the CASH lot, matching the lot being sold. Using
+    -- cash+bonus here would retire the wrong fraction of basis.
+    v_basis_sold := CASE WHEN v_pos.shares_cash > 0
+                         THEN round(v_pos.cost_cash * (-p_delta_shares) / v_pos.shares_cash, 2)
                          ELSE 0 END;
     UPDATE public.open_positions
        SET shares_cash = shares_cash + p_delta_shares,
-           cost_cash   = GREATEST(cost_cash - v_basis_sold, 0)
+           cost_cash   = cost_cash - v_basis_sold
      WHERE id = v_pos.id
      RETURNING * INTO v_pos;
   END IF;
@@ -342,7 +402,17 @@ BEGIN
   -- from house_reserve.total_tngn, and place_bet_locked / place_multiplier_slip
   -- size their stake caps off it. An engine that moves real money without
   -- touching the reserve makes the OTHER engines mis-price.
-  PERFORM public.apply_house_pnl_open(v_fee, p_market_id);
+  -- NOTE: the reserve is deliberately NOT touched here. apply_house_pnl_open
+  -- locks house_reserve id=1, a platform-wide singleton, and this function
+  -- already holds the USER row — while settle_multiplier_market takes them in
+  -- the opposite order (apply_house_pnl then credit_user). That is an ABBA
+  -- deadlock between the two engines, and it would abort a settlement sweep
+  -- mid-payout. It would also serialise every trade on every open market
+  -- behind one row, making the whole platform's money path single-threaded.
+  --
+  -- Fees accrue on the market row this transaction already holds, and a cron
+  -- sweeps them to the reserve — exactly the argument already made above for
+  -- not paying the creator inline.
 
   INSERT INTO public.treasury_log (type, amount_tngn, user_id, open_market_id, metadata)
   VALUES ('open_trade_fee', v_fee, p_user_id, p_market_id,

@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
   -- Without it one account can walk a Starter book to 0.98 alone, realising
   -- the house's entire subsidy with no other trader involved — and a market
   -- with one participant is not a prediction market.
-  max_position_mult numeric NOT NULL DEFAULT 0.5 CHECK (max_position_mult > 0),
+  -- Upper bound matters: without it one UPDATE to 1e30 voids the entire
+  -- anti-cornering guarantee this column exists to provide.
+  max_position_mult numeric NOT NULL DEFAULT 0.5
+                      CHECK (max_position_mult > 0 AND max_position_mult <= 2),
 
   -- LMSR state. b is IMMUTABLE once open: changing it reprices every existing
   -- position discontinuously (a ₦3,296 silent transfer on a mid-size book) and
@@ -112,6 +115,10 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
   -- the bar retroactively and unlock payouts that were never earned.
   threshold_tngn    numeric NOT NULL DEFAULT 0,
   fees_collected    numeric NOT NULL DEFAULT 0,
+  -- Fees already swept into house_reserve. The trade path deliberately does
+  -- NOT touch the reserve (ABBA deadlock with settle_multiplier_market, plus
+  -- global serialisation on one row), so a cron reconciles the difference.
+  fees_swept        numeric NOT NULL DEFAULT 0 CHECK (fees_swept >= 0),
   fees_collected_real numeric NOT NULL DEFAULT 0,  -- excludes bonus-funded flow
   creator_accrued   numeric NOT NULL DEFAULT 0,
   creator_paid      numeric NOT NULL DEFAULT 0,
@@ -124,7 +131,10 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
   opened_at         timestamptz,
   resolved_at       timestamptz,
 
-  CONSTRAINT open_markets_outcomes_min   CHECK (array_length(outcomes, 1) >= 2),
+  -- COALESCE: array_length of an empty array is NULL, and CHECK treats NULL
+  -- as PASS — so '{}' satisfied the bare comparison and produced a market
+  -- whose NULL outcome count then walked past every guard in the trade RPC.
+  CONSTRAINT open_markets_outcomes_min   CHECK (COALESCE(array_length(outcomes, 1), 0) >= 2),
   CONSTRAINT open_markets_q_matches      CHECK (array_length(q, 1) = array_length(outcomes, 1)),
   CONSTRAINT open_markets_q_init_matches CHECK (array_length(q_initial, 1) = array_length(outcomes, 1)),
   -- Creator can never be paid more than accrued.
@@ -157,12 +167,12 @@ CREATE TABLE IF NOT EXISTS public.open_positions (
   -- through a money ledger.
   market_id     uuid NOT NULL REFERENCES public.open_markets(id) ON DELETE RESTRICT,
   user_id       uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
-  outcome_idx   smallint NOT NULL,
+  outcome_idx   smallint NOT NULL CHECK (outcome_idx >= 0),
 
   shares_cash   numeric NOT NULL DEFAULT 0 CHECK (shares_cash  >= 0),
   shares_bonus  numeric NOT NULL DEFAULT 0 CHECK (shares_bonus >= 0),
-  cost_cash     numeric NOT NULL DEFAULT 0,
-  cost_bonus    numeric NOT NULL DEFAULT 0,
+  cost_cash     numeric NOT NULL DEFAULT 0 CHECK (cost_cash  >= 0),
+  cost_bonus    numeric NOT NULL DEFAULT 0 CHECK (cost_bonus >= 0),
 
   status        text NOT NULL DEFAULT 'open'
                   CHECK (status IN ('open','settled','refunded','cashed_out')),
@@ -186,7 +196,7 @@ CREATE TABLE IF NOT EXISTS public.open_trades (
   market_id       uuid NOT NULL REFERENCES public.open_markets(id),
   user_id         uuid NOT NULL REFERENCES public.users(id),
   outcome_idx     smallint NOT NULL,
-  delta_shares    numeric NOT NULL,
+  delta_shares    numeric NOT NULL CHECK (delta_shares <> 0),
   cost_tngn       numeric NOT NULL,      -- signed, pre-fee
   fee_tngn        numeric NOT NULL CHECK (fee_tngn >= 0),
   paid_cash       numeric NOT NULL DEFAULT 0,
@@ -219,8 +229,9 @@ CREATE TABLE IF NOT EXISTS public.open_settlements (
   -- failure this table was added to prevent.
   epoch       smallint NOT NULL DEFAULT 0,
   basis       text CHECK (basis IN ('par','zero','pro_rata','cost_basis','curve')),
-  tngn        numeric NOT NULL DEFAULT 0,
-  bonus       numeric NOT NULL DEFAULT 0,
+  -- A negative settlement is a silent debit dressed as a payout.
+  tngn        numeric NOT NULL DEFAULT 0 CHECK (tngn  >= 0),
+  bonus       numeric NOT NULL DEFAULT 0 CHECK (bonus >= 0),
   -- COMPUTED at settle, RELEASED after the dispute window. Money that is
   -- already in a withdrawable balance cannot be clawed back, so the window is
   -- decorative unless the payout is held.
@@ -271,9 +282,13 @@ CREATE TABLE IF NOT EXISTS public.open_market_disputes (
   opened_at   timestamptz NOT NULL DEFAULT now(),
   ruled_at    timestamptz,
   ruled_by    uuid REFERENCES public.users(id),
-  ruling      text,
-  UNIQUE (market_id, user_id)      -- one open dispute per user per market
+  ruling      text
 );
+
+-- One OPEN dispute per user per market. A plain UNIQUE would mean a user
+-- whose first dispute was rejected could never dispute that market again.
+CREATE UNIQUE INDEX IF NOT EXISTS open_disputes_one_open_per_user
+  ON public.open_market_disputes (market_id, user_id) WHERE status = 'open';
 
 
 -- ── Engine-wide kill switch ────────────────────────────────────────────────
@@ -312,14 +327,29 @@ DROP POLICY IF EXISTS open_positions_owner_read ON public.open_positions;
 CREATE POLICY open_positions_owner_read ON public.open_positions
   FOR SELECT USING (auth.uid() = user_id);
 
+-- Owner-only. A USING (true) policy here is the SAME defect this platform
+-- already had an incident over: 20240621000000_launch_hardening.sql opens by
+-- recording that user_bets shipped with USING (true), letting any signed-in
+-- user read everyone's bet history. open_trades is worse — it carries naira
+-- amounts and the idempotency keys. A public per-account wallet-size signal is
+-- a physical-safety problem on this platform, not only a privacy one.
 DROP POLICY IF EXISTS open_trades_public_read ON public.open_trades;
-CREATE POLICY open_trades_public_read ON public.open_trades FOR SELECT USING (true);
+DROP POLICY IF EXISTS open_trades_owner_read ON public.open_trades;
+CREATE POLICY open_trades_owner_read ON public.open_trades
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- RLS is row-level and cannot hide columns, so the public tape is a view with
+-- the identifying columns simply absent.
+CREATE OR REPLACE VIEW public.open_trades_tape AS
+  SELECT market_id, outcome_idx, delta_shares, price_after, created_at
+    FROM public.open_trades;
+GRANT SELECT ON public.open_trades_tape TO anon, authenticated;
 
 DROP POLICY IF EXISTS open_settlements_owner_read ON public.open_settlements;
 CREATE POLICY open_settlements_owner_read ON public.open_settlements
   FOR SELECT USING (EXISTS (
     SELECT 1 FROM public.open_positions p
-     WHERE p.id = position_id AND p.user_id = auth.uid()));
+     WHERE p.id = open_settlements.position_id AND p.user_id = auth.uid()));
 
 DROP POLICY IF EXISTS open_disputes_owner_read ON public.open_market_disputes;
 CREATE POLICY open_disputes_owner_read ON public.open_market_disputes

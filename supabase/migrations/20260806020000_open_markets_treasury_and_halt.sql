@@ -158,11 +158,61 @@ BEGIN
 END;
 $$;
 
+
+-- ── Fee sweep: the reserve is updated OUT of the trade path ────────────────
+-- execute_open_trade deliberately does not call apply_house_pnl_open. Doing so
+-- would take an exclusive lock on house_reserve id=1 while already holding the
+-- user row — and settle_multiplier_market takes those two in the opposite
+-- order (apply_house_pnl at line 87, credit_user at 124). That is an ABBA
+-- deadlock between two engines, and the loser is usually the settlement batch,
+-- which rolls back mid-payout and retries into the same deadlock. It would
+-- also funnel every trade on every market through one row.
+--
+-- So fees accrue on the market row the trade already holds, and this sweeps
+-- the difference. Idempotent by construction: it only ever moves
+-- (fees_collected − fees_swept), so a double run is a no-op.
+CREATE OR REPLACE FUNCTION public.sweep_open_market_fees()
+RETURNS TABLE (markets_swept integer, tngn_swept numeric)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_row record;
+  v_n integer := 0;
+  v_total numeric := 0;
+  v_delta numeric;
+BEGIN
+  FOR v_row IN
+    SELECT id, fees_collected, fees_swept
+      FROM public.open_markets
+     WHERE fees_collected > fees_swept
+     ORDER BY id
+     FOR UPDATE SKIP LOCKED          -- never block a live trade
+  LOOP
+    v_delta := v_row.fees_collected - v_row.fees_swept;
+    IF v_delta <= 0 THEN CONTINUE; END IF;
+
+    PERFORM public.apply_house_pnl_open(v_delta, v_row.id);
+    UPDATE public.open_markets SET fees_swept = fees_collected WHERE id = v_row.id;
+
+    v_n := v_n + 1;
+    v_total := v_total + v_delta;
+  END LOOP;
+
+  RETURN QUERY SELECT v_n, v_total;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.sweep_open_market_fees() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sweep_open_market_fees() TO service_role;
+
 -- ── Live exposure, the number the treasury actually cares about ────────────
 CREATE OR REPLACE VIEW public.open_markets_exposure AS
 SELECT
   COALESCE(SUM(b * ln(array_length(outcomes, 1)::numeric)), 0) AS worst_case_tngn,
   COALESCE(SUM(fees_collected), 0)                             AS fees_collected_tngn,
+  COALESCE(SUM(fees_collected - fees_swept), 0)                AS fees_unswept_tngn,
   COALESCE(SUM(creator_accrued - creator_paid), 0)             AS creator_owed_tngn,
   count(*)                                                     AS live_markets
 FROM public.open_markets
