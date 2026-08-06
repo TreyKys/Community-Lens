@@ -163,11 +163,24 @@ BEGIN
     RAISE EXCEPTION 'market not found' USING ERRCODE = 'P0002';
   END IF;
 
+  -- Engine-wide kill switch. A per-market halt is not enough when the fault is
+  -- in the pricing function itself.
+  IF NOT (SELECT trading_enabled FROM public.open_markets_config WHERE id = 1) THEN
+    RAISE EXCEPTION 'open markets trading is disabled' USING ERRCODE = 'P0001';
+  END IF;
+
   IF v_mkt.status <> 'open' THEN
     RAISE EXCEPTION 'market is not open (status=%)', v_mkt.status USING ERRCODE = 'P0001';
   END IF;
   IF v_mkt.trading_closes_at IS NOT NULL AND now() >= v_mkt.trading_closes_at THEN
     RAISE EXCEPTION 'trading closed' USING ERRCODE = 'P0001';
+  END IF;
+  -- Freeze by the CLOCK, not by when the horizon cron happens to fire.
+  -- horizon_at is on a publicly readable table, so any lag between the
+  -- published time and the job flipping the status is a window in which
+  -- everyone knows an unwind is coming and can still exit at full price.
+  IF v_mkt.horizon_at IS NOT NULL AND now() >= v_mkt.horizon_at THEN
+    RAISE EXCEPTION 'horizon reached; trading frozen pending review' USING ERRCODE = 'P0001';
   END IF;
 
   -- ── 3. Creators may never trade their own market.
@@ -311,10 +324,32 @@ BEGIN
   UPDATE public.open_markets
      SET q                   = v_next,
          fees_collected      = fees_collected + v_fee,
+         -- v1 is cash-only, so every fee is 'real'. This stays a SEPARATE
+         -- column because the day bonus lots land, only the cash-funded
+         -- portion may count toward the creator threshold — otherwise free
+         -- promotional credit would unlock creator payouts.
          fees_collected_real = fees_collected_real + v_fee,
          creator_accrued     = creator_accrued
                                + c_creator_share * (v_accr_after - v_accr_before)
    WHERE id = p_market_id;
+
+  -- ── 11b. The FEE is house revenue and must reach the reserve. The v_cost
+  -- portion is deliberately NOT credited: it is a liability deposit held
+  -- against future payouts, and booking it as revenue would overstate the
+  -- reserve by the entire size of the book.
+  --
+  -- This matters beyond reporting: reserve_health.deployable_tngn is derived
+  -- from house_reserve.total_tngn, and place_bet_locked / place_multiplier_slip
+  -- size their stake caps off it. An engine that moves real money without
+  -- touching the reserve makes the OTHER engines mis-price.
+  PERFORM public.apply_house_pnl_open(v_fee, p_market_id);
+
+  INSERT INTO public.treasury_log (type, amount_tngn, user_id, open_market_id, metadata)
+  VALUES ('open_trade_fee', v_fee, p_user_id, p_market_id,
+          jsonb_build_object('client_trade_id', p_client_trade_id,
+                             'outcome_idx', p_outcome_idx,
+                             'delta_shares', p_delta_shares,
+                             'cost_tngn', v_cost));
 
   -- ── 12. Immutable log. q_after makes the whole book replayable from here.
   INSERT INTO public.open_trades (

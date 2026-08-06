@@ -59,8 +59,27 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
 
   status            text NOT NULL DEFAULT 'pending_review'
                       CHECK (status IN ('pending_review','revise','rejected','open',
-                                        'halted','horizon_window','pending_payout',
+                                        'closed','halted','horizon_window','pending_payout',
                                         'resolved','voided','retired')),
+  -- 'closed' = trading over, awaiting resolution. Without it, settlement would
+  -- be reachable from 'open', i.e. an admin resolving while the book is still
+  -- live and traders are filling against a known answer.
+
+  -- Halt is a MODIFIER, not a state. Overwriting status with 'halted' destroys
+  -- the information needed to resume: a market halted mid-horizon-window would
+  -- never be picked up by the close-window job again, stranding every
+  -- cash-out election permanently.
+  halted_from_status text,
+
+  -- Payout progress, kept orthogonal to lifecycle so the two don't multiply
+  -- into a combinatorial status enum.
+  pending_kind      text CHECK (pending_kind IN ('resolve','void','retire','cash_out')),
+  payout_phase      text NOT NULL DEFAULT 'none'
+                      CHECK (payout_phase IN ('none','computed','releasing','released','reversed')),
+  horizon_window_closes_at timestamptz,
+  -- Every guard that blocks a payout can strand money forever. This is the
+  -- backstop that forces a human ruling rather than an indefinite freeze.
+  max_hold_until    timestamptz,
   horizon_at        timestamptz,
   horizon_count     smallint NOT NULL DEFAULT 0,
   -- Trading stops here, before the outcome becomes public. Without it the book
@@ -114,7 +133,13 @@ CREATE TABLE IF NOT EXISTS public.open_markets (
   -- An open market MUST have a trading cut-off. Otherwise the book stays live
   -- while the outcome becomes public and an admin walks to the resolve screen,
   -- and the house is the counterparty to every one of those informed trades.
-  CONSTRAINT open_markets_close_required CHECK (status <> 'open' OR trading_closes_at IS NOT NULL)
+  CONSTRAINT open_markets_close_required CHECK (status <> 'open' OR trading_closes_at IS NOT NULL),
+  -- Four eyes on resolution, and the creator is never one of them.
+  CONSTRAINT open_markets_four_eyes CHECK (
+    resolved_by IS NULL OR resolution_confirmed_by IS NULL
+    OR (resolved_by <> resolution_confirmed_by
+        AND resolved_by <> COALESCE(created_by, '00000000-0000-0000-0000-000000000000'::uuid)
+        AND resolution_confirmed_by <> COALESCE(created_by, '00000000-0000-0000-0000-000000000000'::uuid)))
 );
 
 CREATE INDEX IF NOT EXISTS open_markets_status_idx   ON public.open_markets (status, horizon_at);
@@ -127,8 +152,11 @@ CREATE INDEX IF NOT EXISTS open_markets_creator_idx  ON public.open_markets (cre
 -- cash. Lots are conserved additively and cannot be overwritten.
 CREATE TABLE IF NOT EXISTS public.open_positions (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  market_id     uuid NOT NULL REFERENCES public.open_markets(id) ON DELETE CASCADE,
-  user_id       uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  -- RESTRICT, not CASCADE: deleting a user must never erase the record that
+  -- money was owed or paid. A privacy deletion anonymises; it does not delete
+  -- through a money ledger.
+  market_id     uuid NOT NULL REFERENCES public.open_markets(id) ON DELETE RESTRICT,
+  user_id       uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
   outcome_idx   smallint NOT NULL,
 
   shares_cash   numeric NOT NULL DEFAULT 0 CHECK (shares_cash  >= 0),
@@ -178,16 +206,57 @@ CREATE INDEX IF NOT EXISTS open_trades_mkt_user_idx ON public.open_trades (marke
 -- ── Settlements: the definitive "was this money moved?" record ─────────────
 CREATE TABLE IF NOT EXISTS public.open_settlements (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  position_id uuid NOT NULL REFERENCES public.open_positions(id) ON DELETE CASCADE,
-  market_id   uuid NOT NULL REFERENCES public.open_markets(id) ON DELETE CASCADE,
+  position_id uuid NOT NULL REFERENCES public.open_positions(id) ON DELETE RESTRICT,
+  market_id   uuid NOT NULL REFERENCES public.open_markets(id) ON DELETE RESTRICT,
   kind        text NOT NULL CHECK (kind IN ('resolve','void','cash_out','retire')),
+  -- epoch distinguishes REPEATS of the same kind on the same position:
+  -- horizon_count for cash_out, resolution attempt for resolve. Without it,
+  -- UNIQUE(position_id, kind) makes a SECOND horizon cash-out impossible —
+  -- because a user re-entering a market reuses the same position row. That
+  -- either aborts the whole sweep on one user, or (written the natural way,
+  -- with ON CONFLICT DO NOTHING) silently pays them ₦0 and marks them
+  -- cashed_out. Money vanishing behind a clean audit row is exactly the
+  -- failure this table was added to prevent.
+  epoch       smallint NOT NULL DEFAULT 0,
+  basis       text CHECK (basis IN ('par','zero','pro_rata','cost_basis','curve')),
   tngn        numeric NOT NULL DEFAULT 0,
   bonus       numeric NOT NULL DEFAULT 0,
+  -- COMPUTED at settle, RELEASED after the dispute window. Money that is
+  -- already in a withdrawable balance cannot be clawed back, so the window is
+  -- decorative unless the payout is held.
+  released_at timestamptz,
+  attempts    smallint NOT NULL DEFAULT 0,
+  failed_at   timestamptz,
+  last_error  text,
+  shortfall   numeric NOT NULL DEFAULT 0,
+  reversal_of uuid REFERENCES public.open_settlements(id),
   created_at  timestamptz NOT NULL DEFAULT now(),
-  -- One payout per position per event. A retried sweep is a no-op, not a
-  -- second payment.
-  UNIQUE (position_id, kind)
+  UNIQUE (position_id, kind, epoch)
 );
+
+CREATE INDEX IF NOT EXISTS open_settlements_unreleased_idx
+  ON public.open_settlements (market_id, id) WHERE released_at IS NULL;
+
+-- ── Horizon elections ──────────────────────────────────────────────────────
+-- Absence of a row means ROLL. Never move a user's money without instruction.
+CREATE TABLE IF NOT EXISTS public.open_horizon_elections (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  market_id   uuid NOT NULL REFERENCES public.open_markets(id) ON DELETE RESTRICT,
+  position_id uuid NOT NULL REFERENCES public.open_positions(id) ON DELETE RESTRICT,
+  user_id     uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+  horizon_no  smallint NOT NULL,
+  choice      text NOT NULL CHECK (choice IN ('roll','cash_out')),
+  decided_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (position_id, horizon_no)
+);
+
+ALTER TABLE public.open_horizon_elections ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS open_elections_owner_read ON public.open_horizon_elections;
+CREATE POLICY open_elections_owner_read ON public.open_horizon_elections
+  FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS open_horizon_elections_service_all ON public.open_horizon_elections;
+CREATE POLICY open_horizon_elections_service_all ON public.open_horizon_elections
+  FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
 
 -- ── Disputes ───────────────────────────────────────────────────────────────
 -- A flag must cost something and must not, on its own, freeze everyone's money.
@@ -206,6 +275,28 @@ CREATE TABLE IF NOT EXISTS public.open_market_disputes (
   UNIQUE (market_id, user_id)      -- one open dispute per user per market
 );
 
+
+-- ── Engine-wide kill switch ────────────────────────────────────────────────
+-- Singleton, same shape as house_reserve. Read inside execute_open_trade so no
+-- caller can bypass it. Lives here rather than in a later migration because the
+-- trade RPC references it — a function body binds late, so a wrong order would
+-- apply cleanly and then fail on the first real trade.
+CREATE TABLE IF NOT EXISTS public.open_markets_config (
+  id                smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  trading_enabled   boolean NOT NULL DEFAULT true,
+  disabled_reason   text,
+  disabled_by       uuid REFERENCES public.users(id),
+  -- Refuse to open new markets once committed worst-case exposure reaches this.
+  max_total_exposure_tngn numeric NOT NULL DEFAULT 500000,
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.open_markets_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE public.open_markets_config ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS open_markets_config_service ON public.open_markets_config;
+CREATE POLICY open_markets_config_service ON public.open_markets_config
+  FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+
 -- ── RLS: readable by all, writable only by service_role ────────────────────
 ALTER TABLE public.open_markets           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.open_positions         ENABLE ROW LEVEL SECURITY;
@@ -215,7 +306,7 @@ ALTER TABLE public.open_market_disputes   ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS open_markets_public_read ON public.open_markets;
 CREATE POLICY open_markets_public_read ON public.open_markets
-  FOR SELECT USING (status IN ('open','horizon_window','pending_payout','resolved','voided','retired','halted'));
+  FOR SELECT USING (status IN ('open','closed','horizon_window','pending_payout','resolved','voided','retired','halted'));
 
 DROP POLICY IF EXISTS open_positions_owner_read ON public.open_positions;
 CREATE POLICY open_positions_owner_read ON public.open_positions
