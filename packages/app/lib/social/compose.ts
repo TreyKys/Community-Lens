@@ -38,7 +38,11 @@ Hard rules:
 - Do not invent numbers. Use only the figures given to you.`;
 
 type MarketRow = {
-  id: string;
+  // bigint in Postgres (markets.id is bigserial), so it arrives as a
+  // number. Note that two old migrations share the timestamp
+  // 20240503000000 and disagree on this — phase3_schema's bigserial is
+  // the one that took effect.
+  id: number;
   question: string;
   options: string[];
   closes_at: string;
