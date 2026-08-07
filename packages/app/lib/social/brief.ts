@@ -221,11 +221,16 @@ ${req.brief}
 
 Write exactly ${req.count} DIFFERENT posts answering that brief. Each one a separate angle.
 
-${research ? `WHAT IS ACTUALLY HAPPENING RIGHT NOW — these are real, current, and searched moments ago. Build the posts on THESE, not on general knowledge about the subject. A post about last night beats a post about the concept:
+${research ? `RESEARCH — real, current, searched moments ago. Build every post on THIS, not on general knowledge about the subject.
 
 ${research.findings}
 
-Use the names and specifics above. Do not invent anything that is not in that list. If a finding is thin, write around it rather than padding it out.
+How to use it:
+- Name the specifics. "Kola went at 12%" lands; "there was an eviction" does not.
+- Prefer the ARGUMENTS over the events. Pick a side of a live disagreement and say something a reader could disagree with. A post nobody can argue with is a post nobody replies to.
+- Do NOT invent anything absent from the research above. No scores, names, dates or percentages of your own.
+- If one finding is thin, use a different one rather than padding it into a whole post.
+- Do not write "reportedly" or "sources say". Either it is in the research or it does not go in the post.
 ` : ''}
 ${context ? `Currently live on the site — use ONLY if the brief genuinely relates to one of these. If the brief is about something else, ignore this list entirely and do not mention markets or odds:
 

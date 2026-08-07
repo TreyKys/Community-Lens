@@ -12,6 +12,7 @@ import {
 import { handleCommand, isMultiMessageCommand, commandName } from '@/lib/social/commands';
 import { parseBrief, draftFromBrief } from '@/lib/social/brief';
 import { nextFreeSlot, formatSlot } from '@/lib/social/slots';
+import { randomThemeId } from '@/lib/social/cardText';
 import { ingestShared } from '@/lib/social/ingest';
 import { getSettings } from '@/lib/social/settings';
 import { draftReply } from '@/lib/social/reply';
@@ -196,6 +197,9 @@ async function handleDraft(raw: string): Promise<void> {
         status: 'draft',      // outside the queue — cannot publish
         scheduled_at: null,   // a slot is chosen when you tap Queue
         priority: 50,         // ahead of evergreen filler once queued
+        // Fixed now, not at render time, so the card the operator
+        // approves in /preview is the one that publishes.
+        card_theme: randomThemeId(),
       })
       .select('id')
       .single();

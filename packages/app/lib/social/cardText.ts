@@ -1,3 +1,5 @@
+import { PICKS_THEMES, type PicksThemeId } from '@/lib/picksThemes';
+
 // Deciding what text goes on an anticipation card.
 //
 // Extracted from the card route so it can be tested. The route renders
@@ -87,6 +89,19 @@ export function pillFor(kind: string, hasMarket: boolean): string {
   if (kind === 'movement') return 'LINE MOVING';
   if (kind === 'evergreen') return 'HOW IT WORKS';
   return 'CALL IT';
+}
+
+/**
+ * A theme for a new draft, chosen at random from the six OPx palettes.
+ *
+ * Assigned once when the draft is CREATED and stored, not picked at
+ * render time. Two reasons: the preview the operator approves has to be
+ * the image that publishes, and a timeline of posts that all look
+ * identical stops being noticed — variety is the point.
+ */
+export function randomThemeId(): PicksThemeId {
+  const ids = Object.keys(PICKS_THEMES) as PicksThemeId[];
+  return ids[Math.floor(Math.random() * ids.length)];
 }
 
 /**

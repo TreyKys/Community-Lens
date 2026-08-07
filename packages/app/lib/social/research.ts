@@ -47,22 +47,38 @@ export async function researchBrief(brief: string): Promise<Research | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
-  const prompt = `Search for what is happening RIGHT NOW with: ${brief}
+  const today = new Date().toISOString().split('T')[0];
 
-Focus on Nigeria and a Nigerian audience.
+  const prompt = `Today is ${today}. Research this subject for a Nigerian audience on X: ${brief}
 
-Report back ONLY concrete, recent, checkable facts — things that happened in the last few days. For each one give the fact and roughly when it happened.
+Run SEVERAL different searches, not one. Look for the latest news, and separately for what people are arguing about — those are different queries and both matter.
 
-Good: "Sunday 3 Aug: <specific person> was evicted after <specific thing>"
-Bad: "the show is popular and generates a lot of conversation"
+Return TWO sections.
 
-If you cannot find anything recent and specific, say exactly: NOTHING RECENT
+=== WHAT HAPPENED ===
+Specific events from the last 7 days. Every line must contain at least one PROPER NOUN (a person, a team, a place) or a NUMBER. A line with neither is useless — drop it.
+
+Good:  "Sun 3 Aug — Kola was evicted with 12% of the vote, the narrowest margin this season"
+Good:  "Tue — Ada and Chidi's argument over the food budget ran 40 minutes on the live feed"
+Bad:   "there was drama in the house this week"
+Bad:   "housemates continue to form alliances"
+
+=== WHAT PEOPLE ARE ARGUING ABOUT ===
+The live disagreements. For each: the claim, and what the other side says.
+
+This section matters MORE than the first. A post about something that happened gets read; a post that takes a side in an argument already running gets replies. Give me the fault lines.
+
+Good:  "Half the timeline says Kola was robbed by the vote split; the other half says he coasted for three weeks and deserved it"
+Bad:   "viewers have different opinions about the eviction"
 
 Rules:
-- No speculation, no rumour, no "reportedly" unless you name who reported it.
-- Names spelled as the sources spell them.
-- At most 8 findings, newest first.
-- No preamble. Just the list.`;
+- Anything you cannot attribute to something you actually found, leave out. Do not pad.
+- Names and spellings exactly as the sources have them.
+- If a claim is a rumour, say whose rumour it is.
+- Max 6 lines per section, newest first.
+- No preamble, no summary, no closing thought. Just the two sections.
+
+If searching turns up nothing from the last 7 days, reply with exactly: NOTHING RECENT`;
 
   try {
     const r = await fetchWithTimeout(
@@ -77,7 +93,11 @@ Rules:
           tools: [{ google_search: {} }],
           generationConfig: {
             temperature: 0.2,          // facts, not flair
-            maxOutputTokens: 1200,
+            // Two sections of six lines, plus room for the thinking
+            // this call deliberately leaves enabled. Sized generously
+            // because a truncated research block silently produces
+            // thin posts rather than an error.
+            maxOutputTokens: 3000,
             // NOTE: thinking is deliberately left at its default here.
             // The model has to decide what to search for and reconcile
             // what comes back, which is the one place in this pipeline
