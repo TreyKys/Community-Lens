@@ -92,10 +92,12 @@ BEGIN
          AND abs((p.shares_cash + p.shares_bonus) - COALESCE(t.net, 0)) > 0.000001
     ) bad;
 
-  -- 3. Cash conservation. What the curve says the book holds must be no MORE
-  -- than what wallets actually paid in. A NEGATIVE residual means rounding is
-  -- running the wrong way — that is the exact bug the round-trip property test
-  -- caught in lmsr.ts, and it would bleed on every single trade.
+  -- 3. Cash conservation, while the market is still live. A NEGATIVE residual
+  -- means rounding is running the wrong way — the exact bug the round-trip
+  -- property test caught in lmsr.ts, which would bleed on every trade.
+  -- Skipped once unwinding has begun, since q no longer tracks cash-in.
+  IF v_mkt.status IN ('open','closed','horizon_window','halted')
+     AND v_mkt.horizon_count = 0 THEN
   RETURN QUERY
   SELECT COALESCE(SUM(t.cost_tngn), 0)
            >= (public.lmsr_cost(v_mkt.q, v_mkt.b) - public.lmsr_cost(v_mkt.q_initial, v_mkt.b)) - 1,
@@ -104,6 +106,7 @@ BEGIN
          COALESCE(SUM(t.cost_tngn), 0),
          'charged must be >= curve; the gap is house-favourable rounding'
     FROM public.open_trades t WHERE t.market_id = p_market_id;
+  END IF;
 
   -- 4. Fees on the market row must equal the fees in the trade log.
   RETURN QUERY
@@ -124,17 +127,27 @@ BEGIN
          'accrued must not exceed 25% of fees above the threshold'
     FROM public.open_trades t WHERE t.market_id = p_market_id;
 
-  -- 6. Payouts must never exceed what was collected plus the subsidy bound.
+  -- 6. Payouts must never exceed the cash that actually came in, plus the
+  -- subsidy the house agreed to put up.
+  --
+  -- Measured against the TRADE LOG, not the current curve state. After a
+  -- horizon cash-out or a retire, q has been unwound toward zero, so
+  -- C(q) − C(q_initial) no longer represents what was historically collected —
+  -- comparing against it flags every partially-unwound market as critical.
+  -- SUM(cost_tngn) is the real cash-in and is unaffected by unwinds.
   RETURN QUERY
-  SELECT COALESCE(SUM(s.tngn + s.bonus), 0)
-           <= (public.lmsr_cost(v_mkt.q, v_mkt.b) - public.lmsr_cost(v_mkt.q_initial, v_mkt.b))
+  SELECT COALESCE((SELECT SUM(s.tngn + s.bonus) FROM public.open_settlements s
+                    WHERE s.market_id = p_market_id), 0)
+           <= COALESCE((SELECT SUM(t.cost_tngn) FROM public.open_trades t
+                         WHERE t.market_id = p_market_id), 0)
               + v_mkt.b * ln(array_length(v_mkt.outcomes, 1)::numeric) + 1,
-         'payouts_within_pool_plus_subsidy',
-         (public.lmsr_cost(v_mkt.q, v_mkt.b) - public.lmsr_cost(v_mkt.q_initial, v_mkt.b))
+         'payouts_within_cash_in_plus_subsidy',
+         COALESCE((SELECT SUM(t.cost_tngn) FROM public.open_trades t
+                    WHERE t.market_id = p_market_id), 0)
            + v_mkt.b * ln(array_length(v_mkt.outcomes, 1)::numeric),
-         COALESCE(SUM(s.tngn + s.bonus), 0),
-         'total settled must be within pool + b*ln(N)'
-    FROM public.open_settlements s WHERE s.market_id = p_market_id;
+         COALESCE((SELECT SUM(s.tngn + s.bonus) FROM public.open_settlements s
+                    WHERE s.market_id = p_market_id), 0),
+         'total ever paid out must be within cash-in + b*ln(N)';
 END;
 $$;
 
