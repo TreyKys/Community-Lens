@@ -14,11 +14,21 @@ const escapeHtml = (s: string) =>
 
 const HELP = `<b>Opinions.ng social bot</b>
 
+<b>Writing posts</b>
+<code>/draft 4 BBN posts</code>
+<code>/draft 3 posts about the Super Eagles squad</code>
+<code>/draft something about the naira this week</code>
+
+You tell me the subject; I write the posts and send them one at a time
+with Queue / Discard buttons. Tap Queue and it takes the next free slot.
+Doesn't have to be about anything on the site.
+
 <b>Drafting a reply</b>
 Send an X post link — or paste a post's text — and I'll draft a reply, free.
 Link + the text pasted underneath works best: no lookup needed.
 
 <b>Control</b>
+/drafts — re-send any drafts still waiting on a decision
 /status — what's queued, what's paused, what it cost
 /queue — the next posts due
 /budget — spend this month
@@ -28,6 +38,25 @@ Link + the text pasted underneath works best: no lookup needed.
 /skip ID — cancel one queued post
 /paidlookup on|off — allow a $0.005 read when a share can't be read free
 /help — this`;
+
+/**
+ * Commands the webhook handles itself rather than through
+ * handleCommand.
+ *
+ * These send SEVERAL messages (one card per draft) instead of returning
+ * one reply, and they run long enough to need an acknowledgement first
+ * — so they cannot fit the "command in, string out" shape below.
+ */
+const MULTI_MESSAGE = new Set(['/draft', '/post', '/write', '/drafts']);
+
+/** Normalise "/Draft@MyBot" to "/draft". */
+export function commandName(text: string): string {
+  return text.trim().split(/\s+/)[0].toLowerCase().replace(/@[\w_]+$/, '');
+}
+
+export function isMultiMessageCommand(text: string): boolean {
+  return MULTI_MESSAGE.has(commandName(text));
+}
 
 export async function handleCommand(text: string): Promise<string> {
   const [rawCmd, ...args] = text.trim().split(/\s+/);
