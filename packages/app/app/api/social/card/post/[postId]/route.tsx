@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { resolveTheme } from '@/lib/picksThemes';
 import { loadOgFonts } from '@/lib/ogFonts';
 import { createSerialiser } from '@/lib/social/serialise';
+import { headlineFrom, kickerFrom, pillFor, headlineSize } from '@/lib/social/cardText';
 
 // GET /api/social/card/post/[postId]?theme=emerald
 //
@@ -46,55 +47,8 @@ type CardState = {
   pill: string;
 };
 
-/**
- * The forward-looking pill.
- *
- * "MARKET OPEN" only when a market actually backs the post. A briefed
- * post about Big Brother Naija may have no market at all, and a card
- * announcing one that does not exist is a false claim on a regulated
- * product's account — not merely an odd caption.
- */
-function pillFor(kind: string, hasMarket: boolean): string {
-  if (hasMarket) return 'MARKET OPEN';
-  if (kind === 'settlement') return 'SETTLED';
-  if (kind === 'movement') return 'LINE MOVING';
-  if (kind === 'evergreen') return 'HOW IT WORKS';
-  return 'CALL IT';
-}
 
-/**
- * Trim the copy down to what reads at a glance.
- *
- * A post is up to 240 characters. All of it at poster size is a wall
- * nobody reads on a phone, so the card carries the opening thought and
- * lets the post text underneath carry the rest — the two are seen
- * together in the timeline.
- */
-function headlineFrom(body: string): string {
-  const clean = body.replace(/\s+/g, ' ').trim();
-  if (clean.length <= 120) return clean;
 
-  // Prefer a sentence boundary; the first sentence is almost always the
-  // hook the writer intended.
-  const firstStop = clean.search(/[.!?]\s/);
-  if (firstStop > 40 && firstStop < 140) return clean.slice(0, firstStop + 1);
-
-  const cut = clean.slice(0, 120);
-  const lastSpace = cut.lastIndexOf(' ');
-  return (lastSpace > 80 ? cut.slice(0, lastSpace) : cut).replace(/[,;:]$/, '') + '…';
-}
-
-/** Fall back to a sensible eyebrow when none was set. */
-function kickerFrom(brief: string | null, kind: string): string {
-  if (brief) {
-    const words = brief.replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/).slice(0, 3);
-    if (words.length) return words.join(' ').toUpperCase().slice(0, 24);
-  }
-  if (kind === 'evergreen') return 'HOW IT WORKS';
-  if (kind === 'movement') return 'LINE MOVING';
-  if (kind === 'settlement') return 'SETTLED';
-  return 'OPINIONS';
-}
 
 async function loadCard(postId: string): Promise<CardState | null> {
   if (!/^\d+$/.test(postId)) return null;
@@ -138,8 +92,7 @@ export async function GET(
   const fonts = await loadOgFonts();
 
   // Long lines need smaller type or they overflow the frame.
-  const len = state.headline.length;
-  const headlineSize = len > 100 ? 52 : len > 70 ? 62 : len > 40 ? 74 : 86;
+  const fontSize = headlineSize(state.headline.length);
 
   return serialiseRender(async () => new ImageResponse(
     (
@@ -192,7 +145,7 @@ export async function GET(
           style={{
             display: 'flex',
             color: theme.fg,
-            fontSize: headlineSize,
+            fontSize: fontSize,
             fontWeight: 700,
             lineHeight: 1.12,
             maxWidth: 1010,
