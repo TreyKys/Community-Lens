@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { safeEqual } from '@/lib/safeCompare';
-import { answerCallback, markCardHandled, notify, sendReplyCard } from '@/lib/social/telegram';
-import { handleCommand } from '@/lib/social/commands';
+import {
+  answerCallback, markCardHandled, notify, sendReplyCard,
+  sendDraftCard, markDraftHandled,
+} from '@/lib/social/telegram';
+import { handleCommand, isMultiMessageCommand, commandName } from '@/lib/social/commands';
+import { parseBrief, draftFromBrief } from '@/lib/social/brief';
+import { nextFreeSlot, formatSlot } from '@/lib/social/slots';
 import { ingestShared } from '@/lib/social/ingest';
 import { getSettings } from '@/lib/social/settings';
 import { draftReply } from '@/lib/social/reply';
@@ -110,6 +115,173 @@ async function handleShare(raw: string): Promise<void> {
     .eq('id', row.id);
 }
 
+/**
+ * `/draft 4 BBN posts` — write posts from the operator's own brief.
+ *
+ * The subject comes from the operator, not the market table. That is
+ * the entire point: ranking open markets by closing time surfaced Dutch
+ * second-division fixtures with nothing to say about them, and no
+ * prompt fixes a bad subject. Live markets are still offered to the
+ * model as optional context, to be ignored when the brief is about
+ * something else.
+ */
+async function handleDraft(raw: string): Promise<void> {
+  const req = parseBrief(raw);
+
+  if (!req.brief || req.brief.length < 2) {
+    await notify(
+      `What should I write about?\n\n` +
+      `<code>/draft 4 BBN posts</code>\n` +
+      `<code>/draft 3 posts about the Super Eagles squad</code>`,
+    );
+    return;
+  }
+
+  // Gemini takes a few seconds for four posts. Without this the bot
+  // looks dead.
+  await notify(`Writing ${req.count} post${req.count === 1 ? '' : 's'} — <i>${escapeHtml(req.brief)}</i>…`);
+
+  let result;
+  try {
+    result = await draftFromBrief(req);
+  } catch (e: any) {
+    await notify(`Drafting failed: ${String(e?.message ?? e).slice(0, 200)}`);
+    return;
+  }
+
+  if (!result.drafts.length) {
+    const why = result.rejected.length
+      ? `\n\nAll ${result.rejected.length} were rejected by a compliance guard: ` +
+        result.rejected.map((r) => r.reason).join('; ').slice(0, 300)
+      : '';
+    await notify(`Nothing usable came back for that brief.${why}\n\nTry rephrasing it.`);
+    return;
+  }
+
+  const supa = getSupabaseAdmin();
+  let sent = 0;
+
+  for (const body of result.drafts) {
+    const { data: row, error } = await supa
+      .from('social_posts')
+      .insert({
+        channel: 'x',
+        kind: 'briefed',
+        body,
+        brief: req.brief,
+        status: 'draft',      // outside the queue — cannot publish
+        scheduled_at: null,   // a slot is chosen when you tap Queue
+        priority: 50,         // ahead of evergreen filler once queued
+      })
+      .select('id')
+      .single();
+
+    if (error || !row) continue;
+
+    const messageId = await sendDraftCard({
+      postId: row.id,
+      index: sent + 1,
+      total: result.drafts.length,
+      body,
+    });
+
+    // Reuse provider_post_id to remember which card to edit later. It
+    // is null until publish, and a draft has no provider id yet.
+    await supa
+      .from('social_posts')
+      .update({ provider_post_id: `tg:${messageId}` })
+      .eq('id', row.id);
+
+    sent++;
+  }
+
+  if (result.rejected.length) {
+    await notify(
+      `(${result.rejected.length} draft${result.rejected.length === 1 ? '' : 's'} dropped by a ` +
+      `compliance guard: ${result.rejected.map((r) => r.reason).join('; ').slice(0, 200)})`,
+    );
+  }
+}
+
+/** Re-send anything still sitting undecided. */
+async function handlePendingDrafts(): Promise<void> {
+  const supa = getSupabaseAdmin();
+  const { data } = await supa
+    .from('social_posts')
+    .select('id, body, brief')
+    .eq('status', 'draft')
+    .order('created_at', { ascending: true })
+    .limit(10);
+
+  if (!data?.length) {
+    await notify(`No drafts waiting. <code>/draft 4 BBN posts</code> to write some.`);
+    return;
+  }
+
+  for (let i = 0; i < data.length; i++) {
+    const messageId = await sendDraftCard({
+      postId: data[i].id,
+      index: i + 1,
+      total: data.length,
+      body: String(data[i].body),
+    });
+    await supa
+      .from('social_posts')
+      .update({ provider_post_id: `tg:${messageId}` })
+      .eq('id', data[i].id);
+  }
+}
+
+/** Queue or discard one draft, from a button tap. */
+async function decideDraft(postId: number, queue: boolean): Promise<string> {
+  const supa = getSupabaseAdmin();
+
+  const { data: post } = await supa
+    .from('social_posts')
+    .select('id, provider_post_id, status')
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (!post || post.status !== 'draft') return 'Already handled';
+
+  const messageId = Number(String(post.provider_post_id ?? '').replace(/^tg:/, '')) || 0;
+
+  if (!queue) {
+    await supa
+      .from('social_posts')
+      .update({ status: 'cancelled', provider_post_id: null })
+      .eq('id', postId)
+      .eq('status', 'draft');
+    if (messageId) await markDraftHandled(messageId, 'discarded').catch(() => {});
+    return 'Discarded';
+  }
+
+  const slot = await nextFreeSlot();
+  if (!slot) {
+    return 'No free slot in the next 3 days — publish or /skip something first';
+  }
+
+  const { data: updated } = await supa
+    .from('social_posts')
+    .update({
+      status: 'queued',
+      scheduled_at: slot.toISOString(),
+      provider_post_id: null,   // back to meaning "the X post id"
+    })
+    .eq('id', postId)
+    .eq('status', 'draft')      // compare-and-set: a double tap is a no-op
+    .select('id');
+
+  if (!updated?.length) return 'Already handled';
+
+  const when = formatSlot(slot);
+  if (messageId) await markDraftHandled(messageId, 'queued', when).catch(() => {});
+  return `Queued for ${when}`;
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 export async function POST(request: Request) {
   const provided = request.headers.get('x-telegram-bot-api-secret-token');
   if (!safeEqual(provided, process.env.TELEGRAM_WEBHOOK_SECRET)) {
@@ -140,7 +312,11 @@ export async function POST(request: Request) {
     }
 
     try {
-      if (raw.startsWith('/')) {
+      if (isMultiMessageCommand(raw)) {
+        // These send a card per draft rather than one reply.
+        if (commandName(raw) === '/drafts') await handlePendingDrafts();
+        else await handleDraft(raw);
+      } else if (raw.startsWith('/')) {
         await notify(await handleCommand(raw));
       } else {
         await handleShare(raw);
@@ -153,10 +329,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Buttons on a callback are only as trustworthy as who tapped them.
+  // Telegram reports the tapper, and it need not be the same person the
+  // card was sent to.
+  const cbFrom = String(cb.from?.id ?? '');
+  if (cbFrom !== String(process.env.TELEGRAM_CHAT_ID ?? '')) {
+    await answerCallback(cb.id, 'Not authorised').catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
   const data = String(cb.data ?? '');
   const [action, rawId] = data.split(':');
-  const replyId = Number(rawId);
+  const targetId = Number(rawId);
 
+  // Draft cards (qpost/dpost) act on social_posts; reply cards
+  // (posted/skip) act on social_replies. Different tables, so they
+  // dispatch separately.
+  if (['qpost', 'dpost'].includes(action)) {
+    if (!Number.isFinite(targetId)) {
+      await answerCallback(cb.id, 'Nothing to do').catch(() => {});
+      return NextResponse.json({ ok: true });
+    }
+    const outcome = await decideDraft(targetId, action === 'qpost');
+    await answerCallback(cb.id, outcome).catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
+  const replyId = targetId;
   if (!Number.isFinite(replyId) || !['posted', 'skip'].includes(action)) {
     await answerCallback(cb.id, 'Nothing to do').catch(() => {});
     return NextResponse.json({ ok: true });

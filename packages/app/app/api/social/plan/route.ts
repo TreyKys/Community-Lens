@@ -66,6 +66,17 @@ export async function POST(request: Request) {
   }
 
   const supa = getSupabaseAdmin();
+
+  // Retire drafts nobody decided on. A brief written for Tuesday's news
+  // is worthless by Thursday, and a /drafts list that keeps growing
+  // stops being reviewable — which is how a bad post eventually gets
+  // approved by a tired thumb.
+  await supa
+    .from('social_posts')
+    .update({ status: 'cancelled', last_error: 'draft expired unreviewed' })
+    .eq('status', 'draft')
+    .lt('created_at', new Date(Date.now() - 36 * 3600 * 1000).toISOString());
+
   const settings = await getSettings();
   const cap = dailyCap(settings.dailyPostCap);
   const planned: Array<{ marketId: string; kind: PostKind; at: string }> = [];

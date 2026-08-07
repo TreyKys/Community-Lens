@@ -98,6 +98,56 @@ export async function sendReplyCard(card: ReplyCard): Promise<number> {
   return Number(result?.message_id ?? 0);
 }
 
+export type DraftCard = {
+  postId: number;
+  index: number;
+  total: number;
+  body: string;
+};
+
+/**
+ * One drafted post, awaiting a decision.
+ *
+ * Sent as its own message rather than a numbered list in a single
+ * message, so each has its own buttons. Picking two of four is then two
+ * taps, with no need to say WHICH two — which is the whole point of
+ * reviewing on a phone before work.
+ */
+export async function sendDraftCard(card: DraftCard): Promise<number> {
+  const text =
+    `<b>Draft ${card.index}/${card.total}</b>  ·  ${card.body.length} chars\n\n` +
+    `${escapeHtml(card.body)}`;
+
+  const result = await tg('sendMessage', {
+    chat_id: chatId(),
+    text,
+    parse_mode: 'HTML',
+    link_preview_options: { is_disabled: true },
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '✓ Queue', callback_data: `qpost:${card.postId}` },
+        { text: '✗ Discard', callback_data: `dpost:${card.postId}` },
+      ]],
+    },
+  });
+
+  return Number(result?.message_id ?? 0);
+}
+
+/** Replace a draft card's buttons with what was decided. */
+export async function markDraftHandled(
+  messageId: number,
+  outcome: 'queued' | 'discarded',
+  detail?: string,
+): Promise<void> {
+  const label = outcome === 'queued' ? `✅ Queued${detail ? ` · ${detail}` : ''}` : '🗑 Discarded';
+  await tg('editMessageReplyMarkup', {
+    chat_id: chatId(),
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [[{ text: label, callback_data: 'noop' }]] },
+  });
+}
+
 /**
  * Collapse a card once it is handled, so a scrollback of forty cards
  * shows at a glance what is still outstanding.

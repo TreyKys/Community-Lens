@@ -176,6 +176,49 @@ schedule in `cron-social-scan.yml` and set `social_targets.active = true`.
 
 ---
 
+## 2a-bis. Writing posts: you brief, it drafts
+
+The planner writes posts ABOUT markets, ranked by which closes soonest.
+On a real morning that surfaced Dutch second-division fixtures whose
+auto-seeded titles were barely English, with no pool data to quote —
+and the model, given nothing to say, echoed the title back:
+
+```
+"Cambuur vs Excelsior (DED)"
+"Cambuur vs Excelsior (BTTS): will both"
+```
+
+No prompt fixes that. The subject was wrong, not the wording. So the
+operator picks the subject instead:
+
+```
+/draft 4 BBN posts
+/draft 3 posts about the Super Eagles squad
+/draft something about the naira this week
+```
+
+Four cards come back, one per message, each with **Queue** / **Discard**.
+Tap Queue and it takes the next free slot; tap Discard and it's gone.
+Picking two of four is two taps.
+
+**The site is optional context, not the driver.** Up to eight live
+markets are offered to the model, explicitly marked "use ONLY if the
+brief genuinely relates" — so a BBN post never ends up quoting a
+Portuguese fixture. Markets with real money on them are offered first,
+since a market nobody has bet on has no number worth repeating.
+
+Drafts are safe by construction: `status = 'draft'` is outside the
+publisher's query entirely, so one cannot publish by accident whatever
+its schedule says. Undecided drafts are retired after 36 hours — a
+brief written for Tuesday's news is worthless by Thursday, and a
+`/drafts` list that keeps growing stops being reviewable, which is how a
+bad post eventually gets approved by a tired thumb.
+
+The market-driven planner still runs. It is now the floor, not the
+engine.
+
+---
+
 ## 2b. Control surface
 
 Everything below is reachable from Telegram, with no deploy and no SSH.
@@ -184,6 +227,8 @@ it" has to be thirty seconds away.
 
 | Command | What it does |
 | :--- | :--- |
+| `/draft <brief>` | Write posts from your own brief; pick with buttons |
+| `/drafts` | Re-send drafts still awaiting a decision |
 | `/status` | Paused or live, queue depth, published in 24h, spend |
 | `/queue` | The next posts due, with ids |
 | `/budget` | Spend bar, and how many posts the remainder buys |
