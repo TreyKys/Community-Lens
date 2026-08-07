@@ -143,7 +143,9 @@ async function handleDraft(raw: string): Promise<void> {
 
   // Gemini takes a few seconds for four posts. Without this the bot
   // looks dead.
-  await notify(`Writing ${req.count} post${req.count === 1 ? '' : 's'} — <i>${escapeHtml(req.brief)}</i>…`);
+  await notify(
+    `Researching <i>${escapeHtml(req.brief)}</i>, then writing ${req.count} post${req.count === 1 ? '' : 's'}…`,
+  );
 
   let result;
   try {
@@ -160,6 +162,24 @@ async function handleDraft(raw: string): Promise<void> {
       : '';
     await notify(`Nothing usable came back for that brief.${why}\n\nTry rephrasing it.`);
     return;
+  }
+
+  // Show the findings BEFORE the drafts. The operator is the only one
+  // who can tell whether a "fact" from a search result is actually
+  // true, and they should get that chance while the posts are still
+  // drafts rather than after one has published.
+  if (result.research) {
+    const src = result.research.sources.length
+      ? `\n\n<i>Sources: ${escapeHtml(result.research.sources.join(', '))}</i>`
+      : '';
+    await notify(
+      `<b>What I found</b>\n\n${escapeHtml(result.research.findings.slice(0, 2500))}${src}`,
+    ).catch(() => {});
+  } else {
+    await notify(
+      `<i>No recent news found for that brief — the posts below are written from general knowledge, ` +
+      `so they may read generic. A more specific brief usually helps.</i>`,
+    ).catch(() => {});
   }
 
   const supa = getSupabaseAdmin();

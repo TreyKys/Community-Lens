@@ -4,8 +4,21 @@
 // pixels, which are awkward to assert against; these are the decisions
 // that actually determine whether a card reads well.
 
-/** Longest headline that still reads at poster size on a phone. */
-const MAX_HEADLINE = 120;
+/**
+ * Longest headline the card will carry.
+ *
+ * Raised from 120 after a real post came in at 123 characters — three
+ * over — and got an ellipsis for it:
+ *
+ *   "BBN or Naija Super Eagles? For some, the drama and loyalty in the
+ *    house feels more real than national team games right…"
+ *
+ * Truncating three characters of content and adding one is a strictly
+ * worse card. At 150 almost every post fits whole, and headlineSize
+ * drops the type a tier to make room. Posts are capped at ~250
+ * characters, so the sentence-break path still handles the long ones.
+ */
+const MAX_HEADLINE = 150;
 
 /**
  * The line the card carries.
@@ -76,7 +89,17 @@ export function pillFor(kind: string, hasMarket: boolean): string {
   return 'CALL IT';
 }
 
-/** Type size that keeps the headline inside the frame. */
+/**
+ * Type size that keeps the headline inside the frame.
+ *
+ * The 44px tier exists so a 150-character headline still fits: at
+ * ~46 characters a line that is four lines, about 200px, against
+ * roughly 400px of vertical room between the kicker and the footer.
+ */
 export function headlineSize(len: number): number {
-  return len > 100 ? 52 : len > 70 ? 62 : len > 40 ? 74 : 86;
+  if (len > 130) return 44;
+  if (len > 100) return 52;
+  if (len > 70) return 62;
+  if (len > 40) return 74;
+  return 86;
 }

@@ -8,29 +8,46 @@ describe('headlineFrom', () => {
   });
 
   it('breaks on the last COMPLETE sentence rather than trailing off', () => {
-    // A real draft. The naive version cut at the last word before 120
-    // and appended an ellipsis, giving "...when Biggie is…" while a
-    // clean break sat 40 characters earlier.
+    // Genuinely over the limit, so the sentence-break path runs. The
+    // naive version cut at the last word and appended an ellipsis;
+    // this must land on a full stop instead.
     const body =
       "BBN is back. Get ready for 70 days of 'ships', gbas gbos, and daily agenda. " +
-      'The streets never rest when Biggie is watching.';
-    const out = headlineFrom(body);
+      'The streets never rest when Biggie is watching and the timeline never sleeps either.';
+    expect(body.length).toBeGreaterThan(150);
 
-    expect(out).toBe("BBN is back. Get ready for 70 days of 'ships', gbas gbos, and daily agenda.");
+    const out = headlineFrom(body);
+    expect(out).toBe(
+      "BBN is back. Get ready for 70 days of 'ships', gbas gbos, and daily agenda.",
+    );
     expect(out).not.toMatch(/…$/);
     expect(out).toMatch(/[.!?]$/);
   });
 
   it('keeps a post that is exactly at the limit intact', () => {
-    const s = 'a'.repeat(120);
+    const s = 'a'.repeat(150);
     expect(headlineFrom(s)).toBe(s);
   });
 
+  it('does not truncate a post that is barely over the old limit', () => {
+    // The production failure: 123 characters against a 120 limit. It
+    // cut three characters of content and added an ellipsis, which is
+    // a strictly worse card. The only sentence break sat at index 25,
+    // too early to use.
+    const body =
+      'BBN or Naija Super Eagles? For some, the drama and loyalty in the house ' +
+      'feels more real than national team games right now.';
+    expect(body.length).toBeGreaterThan(120);
+    const out = headlineFrom(body);
+    expect(out).toBe(body);
+    expect(out).not.toMatch(/…/);
+  });
+
   it('falls back to a word-boundary ellipsis when there is no sentence break', () => {
-    const body = 'word '.repeat(40).trim();  // 199 chars, no punctuation
+    const body = 'word '.repeat(50).trim();  // 249 chars, no punctuation
     const out = headlineFrom(body);
     expect(out.endsWith('…')).toBe(true);
-    expect(out.length).toBeLessThanOrEqual(121);
+    expect(out.length).toBeLessThanOrEqual(151);
     // Never a severed word.
     expect(out.slice(0, -1).trim().endsWith('word')).toBe(true);
   });
@@ -103,6 +120,8 @@ describe('headlineSize', () => {
     expect(headlineSize(60)).toBe(74);
     expect(headlineSize(90)).toBe(62);
     expect(headlineSize(115)).toBe(52);
+    // The tier that makes a 150-character headline fit at all.
+    expect(headlineSize(145)).toBe(44);
   });
 
   it('is monotonic — a longer line is never given bigger type', () => {

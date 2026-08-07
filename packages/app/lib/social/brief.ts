@@ -20,6 +20,7 @@
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { sanitisePost, violatesCompliance, sentimentFromPools } from './compose';
 import { generate, GeminiTruncatedError } from './gemini';
+import { researchBrief, type Research } from './research';
 
 /** Hard ceiling per brief. More than this is unreviewable on a phone. */
 export const MAX_DRAFTS = 6;
@@ -188,6 +189,8 @@ export type DraftResult = {
   rejected: Array<{ text: string; reason: string }>;
   /** The model hit its output limit; fewer posts came back than asked. */
   truncated: boolean;
+  /** What the grounded search turned up, if anything. */
+  research: Research | null;
 };
 
 /**
@@ -199,8 +202,13 @@ export type DraftResult = {
  */
 export async function draftFromBrief(
   req: BriefRequest,
-  opts: { includeMarkets?: boolean } = {},
+  opts: { includeMarkets?: boolean; research?: boolean } = {},
 ): Promise<DraftResult> {
+  // Research first. A post about what happened last night beats a post
+  // about the general nature of the thing, every time — and only one of
+  // those can start a conversation on X.
+  const research = opts.research === false ? null : await researchBrief(req.brief);
+
   const context = opts.includeMarkets === false ? '' : await marketContext();
 
   const prompt = `${VOICE}
@@ -213,6 +221,12 @@ ${req.brief}
 
 Write exactly ${req.count} DIFFERENT posts answering that brief. Each one a separate angle.
 
+${research ? `WHAT IS ACTUALLY HAPPENING RIGHT NOW — these are real, current, and searched moments ago. Build the posts on THESE, not on general knowledge about the subject. A post about last night beats a post about the concept:
+
+${research.findings}
+
+Use the names and specifics above. Do not invent anything that is not in that list. If a finding is thin, write around it rather than padding it out.
+` : ''}
 ${context ? `Currently live on the site — use ONLY if the brief genuinely relates to one of these. If the brief is about something else, ignore this list entirely and do not mention markets or odds:
 
 ${context}
@@ -271,5 +285,5 @@ No preamble, no commentary, no markdown, no quotes around the posts.`;
     if (drafts.length >= req.count) break;
   }
 
-  return { drafts, rejected, truncated };
+  return { drafts, rejected, truncated, research };
 }
