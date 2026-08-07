@@ -17,9 +17,7 @@
 
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { stripLinks, containsLink } from './cost';
-import { fetchWithTimeout } from './selfCall';
-
-const GEMINI_MODEL = 'gemini-2.5-flash';
+import { generate } from './gemini';
 
 export type PostKind = 'opening_line' | 'movement' | 'settlement' | 'evergreen';
 
@@ -113,32 +111,6 @@ const KIND_BRIEF: Record<PostKind, string> = {
     'No specific market. Write about how prediction markets differ from betting: you take a position against other people, not against a house.',
 };
 
-async function callGemini(prompt: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY is not set');
-
-  const r = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.9, maxOutputTokens: 300 },
-      }),
-    },
-  );
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => '');
-    throw new Error(`Gemini ${r.status}: ${t.slice(0, 300)}`);
-  }
-
-  const json = await r.json();
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Gemini returned no text');
-  return String(text);
-}
 
 /**
  * Clean up whatever the model actually returned.
@@ -154,6 +126,10 @@ export function sanitisePost(raw: string): string {
   t = t.replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
   // Drop a leading "Post:" / "Tweet:" / "Here's ...:" preamble.
   t = t.replace(/^(here'?s?[^:\n]{0,40}:|post:|tweet:|option \d:)\s*/i, '').trim();
+  // Belt and braces on the list marker. splitDrafts strips these, but a
+  // stray "1. " reaching a published post is embarrassing enough to
+  // check twice — and this is the last stop before the database.
+  t = t.replace(/^\s*\d{1,2}\s*[.)]\s+/, '').trim();
   // Unwrap surrounding quotes, but only if BOTH ends have them.
   if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith('“') && t.endsWith('”'))) {
     t = t.slice(1, -1).trim();
@@ -208,7 +184,7 @@ Write ONE post. Output only the post text — no preamble, no quotes, no markdow
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const text = sanitisePost(await callGemini(prompt));
+      const text = sanitisePost(await generate(prompt, { temperature: 0.9, maxOutputTokens: 400 }));
       if (!text) continue;
       if (!violatesCompliance(text)) return text;
     } catch {

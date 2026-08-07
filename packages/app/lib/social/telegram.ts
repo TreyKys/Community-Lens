@@ -134,6 +134,103 @@ export async function sendDraftCard(card: DraftCard): Promise<number> {
   return Number(result?.message_id ?? 0);
 }
 
+export type PreviewCard = {
+  postId: number;
+  index: number;
+  total: number;
+  body: string;
+  when: string;
+  mediaKind: 'none' | 'auto_card' | 'upload';
+};
+
+const MEDIA_LABEL: Record<PreviewCard['mediaKind'], string> = {
+  none: 'no image',
+  auto_card: 'OPx card (auto)',
+  upload: 'your image',
+};
+
+/**
+ * One queued post, with its image state and the controls to change it.
+ *
+ * The image row is spelled out rather than implied by a highlighted
+ * button, because the thing being confirmed is "what will actually go
+ * out", and a button that merely looks pressed is not an answer to
+ * that.
+ */
+export async function sendPreviewCard(card: PreviewCard): Promise<number> {
+  const text =
+    `<b>#${card.postId}</b> · ${card.index}/${card.total} · ${escapeHtml(card.when)}\n` +
+    `Image: <b>${MEDIA_LABEL[card.mediaKind]}</b>\n\n` +
+    `${escapeHtml(card.body)}`;
+
+  const rows: Array<Array<Record<string, string>>> = [
+    [
+      { text: card.mediaKind === 'auto_card' ? '🖼 Card ✓' : '🖼 Add card', callback_data: `mcard:${card.postId}` },
+      { text: card.mediaKind === 'upload' ? '📤 Yours ✓' : '📤 Upload', callback_data: `mup:${card.postId}` },
+    ],
+    [
+      { text: card.mediaKind === 'none' ? '🚫 No image ✓' : '🚫 No image', callback_data: `mnone:${card.postId}` },
+      { text: '🗑 Cancel post', callback_data: `pcancel:${card.postId}` },
+    ],
+  ];
+
+  const result = await tg('sendMessage', {
+    chat_id: chatId(),
+    text,
+    parse_mode: 'HTML',
+    link_preview_options: { is_disabled: true },
+    reply_markup: { inline_keyboard: rows },
+  });
+
+  return Number(result?.message_id ?? 0);
+}
+
+/** Redraw a preview card in place after its image changed. */
+export async function refreshPreviewCard(messageId: number, card: PreviewCard): Promise<void> {
+  const text =
+    `<b>#${card.postId}</b> · ${card.index}/${card.total} · ${escapeHtml(card.when)}\n` +
+    `Image: <b>${MEDIA_LABEL[card.mediaKind]}</b>\n\n` +
+    `${escapeHtml(card.body)}`;
+
+  const rows: Array<Array<Record<string, string>>> = [
+    [
+      { text: card.mediaKind === 'auto_card' ? '🖼 Card ✓' : '🖼 Add card', callback_data: `mcard:${card.postId}` },
+      { text: card.mediaKind === 'upload' ? '📤 Yours ✓' : '📤 Upload', callback_data: `mup:${card.postId}` },
+    ],
+    [
+      { text: card.mediaKind === 'none' ? '🚫 No image ✓' : '🚫 No image', callback_data: `mnone:${card.postId}` },
+      { text: '🗑 Cancel post', callback_data: `pcancel:${card.postId}` },
+    ],
+  ];
+
+  await tg('editMessageText', {
+    chat_id: chatId(),
+    message_id: messageId,
+    text,
+    parse_mode: 'HTML',
+    link_preview_options: { is_disabled: true },
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+/**
+ * Send an actual picture, so the operator sees what will be attached
+ * rather than trusting a label that says an image exists.
+ */
+export async function sendPhotoPreview(source: string, caption: string): Promise<void> {
+  // Telegram accepts either a public URL it will fetch, or one of its
+  // own file_ids. An uploaded photo is already on their servers, so
+  // passing the id back avoids a needless round trip through us.
+  const photo = source.startsWith('tg:') ? source.slice(3) : source;
+
+  await tg('sendPhoto', {
+    chat_id: chatId(),
+    photo,
+    caption: caption.slice(0, 900),
+    parse_mode: 'HTML',
+  });
+}
+
 /** Replace a draft card's buttons with what was decided. */
 export async function markDraftHandled(
   messageId: number,

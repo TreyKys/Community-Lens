@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/oracle';
 import { postToX, uploadMedia, XApiError, isXConfigured } from '@/lib/social/x';
 import { budgetSummary } from '@/lib/social/budget';
 import { getSettings } from '@/lib/social/settings';
+import { resolveMediaUrl } from '@/lib/social/media';
 import { notify } from '@/lib/social/telegram';
 
 // POST /api/social/publish
@@ -119,7 +120,13 @@ export async function POST(request: Request) {
       let mediaIds: string[] | undefined;
       if (post.media_url) {
         try {
-          mediaIds = [await uploadMedia(post.media_url as string)];
+          // An operator upload is stored as tg:<file_id>, because
+          // Telegram's download links expire in about an hour and a
+          // post queued at breakfast publishes in the evening. The
+          // file_id is permanent; the URL is minted here, seconds
+          // before it is used.
+          const src = await resolveMediaUrl(post.media_url as string);
+          mediaIds = [await uploadMedia(src)];
         } catch (e: any) {
           skipped.push({ id: post.id, reason: `media upload failed, posting text-only: ${e?.message}` });
         }
