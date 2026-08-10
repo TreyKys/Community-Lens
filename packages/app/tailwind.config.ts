@@ -10,6 +10,13 @@ const config: Config = {
   theme: {
 	extend: {
 		fontFamily: {
+			// Body text. Geist was already self-hosted and preloaded via
+			// next/font/local but never referenced — it downloaded on every
+			// page load and did nothing, while every word rendered in a
+			// stencil display face.
+			sans: ['var(--font-geist-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+			mono: ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
+			// Display only — logo and headings.
 			saira: ['"Saira Stencil"', 'sans-serif'],
 		},
 		colors: {

@@ -9,7 +9,9 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-xl border bg-card text-card-foreground shadow",
+      // `shadow` barely registers on a dark ground and is CPU-painted,
+      // so it costs more than it shows. The inset highlight does the work.
+      "rounded-xl border bg-card text-card-foreground surface-raised",
       className
     )}
     {...props}
