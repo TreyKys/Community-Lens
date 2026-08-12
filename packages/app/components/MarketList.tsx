@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -912,7 +912,27 @@ function MarketCard({
   );
 }
 
+
+// Deep comparison using JSON.stringify for market object handles all fields without hardcoding.
+// This is safe because the market object from Supabase is composed of primitives and simple arrays.
+const MemoizedMarketCard = memo(MarketCard, (prev, next) => {
+  return (
+    JSON.stringify(prev.market) === JSON.stringify(next.market) &&
+    prev.isStaked === next.isStaked &&
+    prev.hideViewMore === next.hideViewMore &&
+    prev.prefillOutcomeIndex === next.prefillOutcomeIndex &&
+    prev.prefillStakeTngn === next.prefillStakeTngn &&
+    prev.prefillEditStake === next.prefillEditStake &&
+    prev.prefillFromShareId === next.prefillFromShareId &&
+    prev.autoOpen === next.autoOpen &&
+    // Check access_token instead of just user ID to ensure active session updates propagate
+    prev.session?.access_token === next.session?.access_token &&
+    prev.onBetPlaced === next.onBetPlaced
+  );
+});
+
 type CategoryFilter = {
+
   category: string | null;
   sport: string | null;
   excludeSport: string | null;
@@ -1301,7 +1321,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     };
   }, [scrollKey]);
 
+
+  const sessionUserId = session?.user?.id;
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    await fetchMarkets({ silent: true });
+    if (sessionUserId) fetchStakedMarkets(sessionUserId);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [fetchMarkets, fetchStakedMarkets, sessionUserId, setAutoSharePick]);
+
   if (isLoading) {
+
     return (
       <div className="space-y-3">
         {[...Array(3)].map((_, i) => (
@@ -1333,25 +1368,11 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       {markets.map((market) => {
         const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
         return (
-          <MarketCard
+          <MemoizedMarketCard
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
