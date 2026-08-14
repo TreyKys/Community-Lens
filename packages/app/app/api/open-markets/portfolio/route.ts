@@ -38,12 +38,30 @@ export async function GET(request: Request) {
 
   const { data: markets } = await supabaseAdmin
     .from('open_markets')
-    .select('id, question, outcomes, q, b, status, horizon_at, horizon_window_closes_at, resolved_outcome')
+    .select('id, question, outcomes, q, b, status, horizon_at, horizon_count, ' +
+            'horizon_window_closes_at, resolved_outcome')
     .in('id', marketIds);
 
   const byId: Record<string, any> = {};
   for (const m of (markets || []) as any[]) {
     byId[m.id] = { ...m, prices: pricesFromQ(m.q, m.b) };
+  }
+
+  // Any choice already made for the CURRENT horizon. Without this the prompt
+  // would keep asking after the user has answered — the page reloads straight
+  // after the POST, and market status alone stays 'horizon_window' either way.
+  //
+  // Keyed by horizon_no because a market has many horizons over its life, and a
+  // choice made at horizon 2 says nothing about horizon 3.
+  const { data: elections } = await supabaseAdmin
+    .from('open_horizon_elections')
+    .select('position_id, horizon_no, choice')
+    .eq('user_id', user.id)
+    .in('position_id', (positions || []).map(p => p.id));
+
+  const choiceByPosition: Record<string, { horizonNo: number; choice: string }> = {};
+  for (const e of (elections || []) as any[]) {
+    choiceByPosition[e.position_id] = { horizonNo: e.horizon_no, choice: e.choice };
   }
 
   const open: any[] = [];
@@ -56,6 +74,13 @@ export async function GET(request: Request) {
     const shares = Number(p.shares_cash) + Number(p.shares_bonus);
     const basis = Number(p.cost_cash);
     const price = m.prices[p.outcome_idx] ?? 0;
+
+    const inWindow = m.status === 'horizon_window';
+    const elected = choiceByPosition[p.id];
+    // Only a choice made at THIS horizon counts as answered.
+    const currentChoice = elected && elected.horizonNo === m.horizon_count
+      ? elected.choice
+      : null;
 
     const row = {
       positionId: p.id,
@@ -75,7 +100,14 @@ export async function GET(request: Request) {
       // from a notification the user may have missed.
       horizonAt: m.horizon_at,
       horizonWindowClosesAt: m.horizon_window_closes_at,
-      needsHorizonChoice: m.status === 'horizon_window',
+      inHorizonWindow: inWindow,
+      // Unanswered only. Doing nothing means staying in, so an unanswered
+      // prompt is not an error state — but it is the one thing on this page
+      // with a deadline, so the UI ranks it first until it's answered.
+      needsHorizonChoice: inWindow && !currentChoice,
+      // Kept separate so the UI can show what was chosen and offer to change
+      // it: the RPC upserts, so a holder may switch while the window is open.
+      horizonChoice: currentChoice,
       status: p.status,
       settledAt: p.settled_at,
     };
