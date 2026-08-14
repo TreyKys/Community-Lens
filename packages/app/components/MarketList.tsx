@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -645,7 +645,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+const MarketCard = memo(function MarketCardInner({
   market,
   session,
   onBetPlaced,
@@ -910,7 +910,30 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+}, (prev, next) => {
+  if (prev.isStaked !== next.isStaked) return false;
+  if (prev.autoOpen !== next.autoOpen) return false;
+
+  // Compare session object reference or access_token to ensure proper re-rendering
+  if (prev.session !== next.session && prev.session?.access_token !== next.session?.access_token) return false;
+
+  // Deep compare nested arrays like options to prevent stale closures/bugs
+  if (prev.market.options?.length !== next.market.options?.length) return false;
+  for (let i = 0; i < (prev.market.options?.length || 0); i++) {
+    if (prev.market.options[i] !== next.market.options[i]) return false;
+  }
+
+  // Dynamically iterate over Object.keys to compare all fields
+  const keys = Object.keys(prev.market) as Array<keyof typeof prev.market>;
+  for (const key of keys) {
+    if (key === 'options') continue;
+    if (prev.market[key] !== next.market[key]) return false;
+  }
+
+  if (prev.onBetPlaced !== next.onBetPlaced) return false;
+
+  return true;
+});
 
 type CategoryFilter = {
   category: string | null;
