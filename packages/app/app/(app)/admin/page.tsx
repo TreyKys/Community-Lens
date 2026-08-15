@@ -282,6 +282,24 @@ function TreasuryPanel() {
           <ExternalLink className="w-4 h-4 text-muted-foreground" />
         </div>
       </Link>
+
+      {/* Open Markets is a separate engine with its own house exposure, so it
+          gets its own gate and its own dashboard rather than sharing the
+          locked-odds screens. */}
+      <Link href="/admin/open-markets">
+        <div className="flex items-center justify-between p-4 bg-card border border-emerald-500/20 rounded-xl hover:border-emerald-500/40 transition-colors cursor-pointer">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Open Markets review</p>
+              <p className="text-xs text-muted-foreground">Approve submissions · exposure dashboard</p>
+            </div>
+          </div>
+          <ExternalLink className="w-4 h-4 text-muted-foreground" />
+        </div>
+      </Link>
     </div>
   );
 }
