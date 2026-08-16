@@ -23,7 +23,7 @@ MIGRATIONS=(
   20260806030000_open_markets_invariants
   20260806040000_open_markets_settlement
   20260806050000_open_markets_horizon
-  20260807000000_open_markets_review
+  20260807000100_open_markets_review
   20260807010000_open_markets_invariant_fix
   20260807020000_open_markets_creator_and_disputes
 )
