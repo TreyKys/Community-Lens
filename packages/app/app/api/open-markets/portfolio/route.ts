@@ -117,7 +117,14 @@ export async function GET(request: Request) {
       costTngn += basis;
       valueTngn += shares * price;
     } else {
-      closed.push(row);
+      // A position the user sold out of completely keeps status 'open' with
+      // zero shares until the market settles. Rendering that raw would put a
+      // card in "Finished" wearing an "open" badge, which reads as a live
+      // holding that has somehow lost all its value.
+      closed.push({
+        ...row,
+        status: p.status === 'open' && shares === 0 ? 'sold' : p.status,
+      });
     }
   }
 

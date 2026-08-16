@@ -1,0 +1,32 @@
+name: Cron — Open Markets
+
+# Drives every scheduled job the Open Markets engine needs: opening horizon
+# windows, closing them and paying the leavers, releasing settlements once
+# their dispute window has passed, sweeping fees into the reserve, and the
+# health scan.
+#
+# Without this the engine fails silently — horizons never fire, cash-outs are
+# never paid, and settled money sits with released_at NULL forever. Nothing
+# errors; the money just never moves.
+#
+# Every 15 minutes is enough: the tightest deadline it serves is a 72-hour
+# election window, and the dispute window is measured in hours.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-open-markets
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the Open Markets tick
+        run: |
+          curl -sSf -X POST "${{ secrets.API_BASE_URL }}/api/cron/open-markets" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

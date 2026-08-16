@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ChevronLeft, ShieldAlert, BarChart3 } from 'lucide-react';
+import { Loader2, ChevronLeft, ShieldAlert, BarChart3, Gavel } from 'lucide-react';
 
 // Open Markets review queue.
 //
@@ -128,10 +128,16 @@ export default function OpenMarketsReviewPage() {
         <Link href="/admin" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground">
           <ChevronLeft className="w-4 h-4" /> Admin
         </Link>
-        <Link href="/admin/open-markets/exposure"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <BarChart3 className="w-3.5 h-3.5" /> Exposure
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/admin/open-markets/resolve"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <Gavel className="w-3.5 h-3.5" /> Resolve
+          </Link>
+          <Link href="/admin/open-markets/exposure"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <BarChart3 className="w-3.5 h-3.5" /> Exposure
+          </Link>
+        </div>
       </div>
 
       <div>

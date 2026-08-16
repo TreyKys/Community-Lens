@@ -210,7 +210,9 @@ export default function OpenPortfolioPage() {
                       <span>{row.outcomeLabel} · paid {ngn(row.costBasisTngn)}</span>
                       <Badge variant="outline" className="text-[9px] px-1 py-0">
                         {row.status === 'settled' ? 'settled'
-                          : row.status === 'cashed_out' ? 'cashed out' : row.status}
+                          : row.status === 'cashed_out' ? 'cashed out'
+                          : row.status === 'sold' ? 'sold'
+                          : row.status === 'refunded' ? 'refunded' : row.status}
                       </Badge>
                     </div>
                   </CardContent>
