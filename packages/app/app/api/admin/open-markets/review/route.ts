@@ -106,6 +106,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: row?.reason || 'Could not apply', detail: row }, { status: 400 });
   }
 
+  // Tell the creator. A decision nobody hears about is, to the person waiting
+  // on it, indistinguishable from no decision at all — and "revise" is useless
+  // unless the notes reach them.
+  try {
+    const { data: mkt } = await supabaseAdmin
+      .from('open_markets')
+      .select('created_by, question')
+      .eq('id', marketId)
+      .maybeSingle();
+    const creatorId = (mkt as any)?.created_by;
+    if (creatorId) {
+      const q = String((mkt as any)?.question || 'your market');
+      const message =
+        decision === 'approve'
+          ? `Your market is live: "${q.slice(0, 70)}"`
+          : decision === 'revise'
+          ? `Changes needed on "${q.slice(0, 50)}": ${notes || 'see the notes'}`
+          : `Your market wasn't approved: ${notes || 'it did not meet the guidelines'}`;
+      await supabaseAdmin.from('notifications').insert({
+        user_id: creatorId,
+        type: `open_market_${decision}`,
+        message,
+        severity: decision === 'approve' ? 'success' : 'warning',
+        action_url: decision === 'approve' ? `/open/${marketId}` : '/open/creator',
+      });
+    }
+  } catch {
+    // Never fail a completed review because the notification insert failed —
+    // the decision has already been applied and is the thing that matters.
+  }
+
   return NextResponse.json({
     applied: true,
     status: row.new_status,

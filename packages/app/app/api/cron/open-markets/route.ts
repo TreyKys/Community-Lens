@@ -39,6 +39,87 @@ const note = (s: StepResult, marketId: string, e: unknown) => {
   }
 };
 
+// Tell every holder their review window is open.
+//
+// This is the single most important notification in the engine. The window is
+// the one chance to take money out of a market that has not resolved, doing
+// nothing means staying in, and a holder who never hears about it has had that
+// choice made for them by silence.
+async function notifyHolders(marketId: string, closesAt?: string | null) {
+  const { data: mkt } = await supabaseAdmin
+    .from('open_markets')
+    .select('question')
+    .eq('id', marketId)
+    .maybeSingle();
+
+  const { data: positions } = await supabaseAdmin
+    .from('open_positions')
+    .select('user_id')
+    .eq('market_id', marketId)
+    .eq('status', 'open')
+    .gt('shares_cash', 0);
+
+  // One notification per person, not per position: a holder with three
+  // outcomes in one market has one decision to make, not three.
+  const userIds = Array.from(new Set((positions || []).map((p: any) => p.user_id)));
+  if (userIds.length === 0) return;
+
+  const q = String((mkt as any)?.question || 'a market you hold');
+  const when = closesAt ? ` You have until ${new Date(closesAt).toLocaleString()}.` : '';
+
+  await supabaseAdmin.from('notifications').insert(
+    userIds.map(uid => ({
+      user_id: uid,
+      type: 'open_market_horizon',
+      message: `Review date reached on "${q.slice(0, 60)}". Stay in, or take your money out.${when}`,
+      severity: 'warning',
+      action_url: '/open/portfolio',
+    })),
+  );
+}
+
+// Tell people their money has landed. A payout that arrives silently reads as
+// a payout that never arrived.
+async function notifyPaid(marketId: string) {
+  const { data: mkt } = await supabaseAdmin
+    .from('open_markets')
+    .select('question, status')
+    .eq('id', marketId)
+    .maybeSingle();
+
+  const { data: rows } = await supabaseAdmin
+    .from('open_settlements')
+    .select('tngn, bonus, position_id, open_positions!inner(user_id)')
+    .eq('market_id', marketId)
+    .not('released_at', 'is', null)
+    .limit(500);
+
+  const byUser: Record<string, number> = {};
+  for (const r of (rows || []) as any[]) {
+    const uid = r.open_positions?.user_id;
+    if (!uid) continue;
+    byUser[uid] = (byUser[uid] || 0) + Number(r.tngn || 0) + Number(r.bonus || 0);
+  }
+  const entries = Object.entries(byUser).filter(([, amt]) => amt > 0);
+  if (entries.length === 0) return;
+
+  const q = String((mkt as any)?.question || 'a market you held');
+  const voided = (mkt as any)?.status === 'voided';
+
+  await supabaseAdmin.from('notifications').insert(
+    entries.map(([uid, amt]) => ({
+      user_id: uid,
+      type: voided ? 'open_market_refund' : 'open_market_payout',
+      message: voided
+        ? `"${q.slice(0, 60)}" was voided. ₦${Math.round(amt).toLocaleString()} returned to your wallet.`
+        : `"${q.slice(0, 60)}" settled. ₦${Math.round(amt).toLocaleString()} paid into your wallet.`,
+      amount: amt,
+      severity: 'success',
+      action_url: '/open/portfolio',
+    })),
+  );
+}
+
 export async function POST(request: Request) {
   if (!safeSecretMatch(request.headers.get('x-cron-secret'), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -71,7 +152,10 @@ export async function POST(request: Request) {
       });
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
-      if (row?.applied) opened.ok++; else opened.skipped++;
+      if (row?.applied) {
+        opened.ok++;
+        await notifyHolders(m.id, row?.closes_at);
+      } else opened.skipped++;
     } catch (e) { note(opened, m.id, e); }
   }
 
@@ -126,7 +210,10 @@ export async function POST(request: Request) {
         if (error) throw new Error(error.message);
         const row = Array.isArray(data) ? data[0] : data;
         released.ok += Number(row?.released || 0);
-        if (row?.finished || Number(row?.released || 0) === 0 || ++guard > 20) break;
+        if (row?.finished || Number(row?.released || 0) === 0 || ++guard > 20) {
+          if (row?.finished) await notifyPaid(m.id);
+          break;
+        }
       }
     } catch (e) {
       // Halted, disputed, inside the window, or already finished — all normal.

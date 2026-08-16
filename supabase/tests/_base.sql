@@ -21,8 +21,26 @@ CREATE TABLE public.treasury_log(
   id bigserial PRIMARY KEY, type text, amount_tngn numeric,
   user_id uuid, metadata jsonb, created_at timestamptz DEFAULT now());
 
+-- Mirrors production exactly, including the columns added later:
+--   * user_id is NULLABLE (dropped NOT NULL in 20240505000000) — that is what
+--     makes `user_id: null, type: 'admin_alert'` the house alert channel, and
+--     halt_open_market depends on it.
+--   * amount / severity / category / reference_code / action_url were added by
+--     20260701100000.
+-- A stub that omits any of these turns a real failure into a passing test, or
+-- a passing feature into a fake failure. Both have already happened here.
 CREATE TABLE public.notifications(
-  id bigserial PRIMARY KEY, user_id uuid, type text, message text,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES public.users(id) ON DELETE CASCADE,
+  type text NOT NULL,
+  message text NOT NULL,
+  amount numeric,
+  is_read boolean DEFAULT false,
+  severity text NOT NULL DEFAULT 'info'
+    CHECK (severity IN ('info','success','warning','critical')),
+  category text,
+  reference_code text,
+  action_url text,
   created_at timestamptz DEFAULT now());
 
 CREATE TABLE public.house_reserve(

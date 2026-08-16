@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getAuthUser } from '@/lib/getAuthUser';
 import { type OpenMarketListRow, pricesFromQ, volumeFromFees } from '@/lib/openMarketTypes';
 
 export const dynamic = 'force-dynamic';
@@ -63,4 +64,57 @@ export async function GET(request: Request) {
   });
 
   return NextResponse.json({ markets }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
+
+// POST /api/open-markets — a user submits a market for review.
+//
+// It lands in pending_review and is invisible to everyone but admins until an
+// approver opens it. Nothing here can open a book: liquidity, the trading
+// cut-off and the exposure check are all decided at approval, because choosing
+// your own liquidity is choosing the house's maximum loss on your market.
+//
+// Every content rule lives in submit_open_market, not here — the category
+// allowlist, the outcome rules, the queue limit. A rule enforced in this route
+// is a rule the admin submit path doesn't have.
+
+export async function POST(request: Request) {
+  const user = await getAuthUser(supabaseAdmin, request);
+  if (!user) return NextResponse.json({ error: 'Please sign in' }, { status: 401 });
+
+  const b = await request.json().catch(() => ({} as any));
+  const outcomes = Array.isArray(b?.outcomes)
+    ? b.outcomes.map((o: unknown) => String(o).trim()).filter(Boolean)
+    : [];
+
+  const { data, error } = await supabaseAdmin.rpc('submit_open_market', {
+    p_created_by: user.id,
+    p_question: String(b?.question || ''),
+    p_description: b?.description ? String(b.description) : null,
+    p_category: String(b?.category || ''),
+    p_outcomes: outcomes,
+    p_resolution_source: String(b?.resolutionSource || ''),
+    p_resolution_detail: b?.resolutionDetail ? String(b.resolutionDetail) : null,
+    p_horizon_at: b?.horizonAt || null,
+    p_trading_closes_at: b?.tradingClosesAt || null,
+  });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.applied) {
+    // Refusals are things the submitter can fix, so they come back as a
+    // readable sentence rather than a server error.
+    return NextResponse.json({ error: row?.reason || 'Could not submit' }, { status: 400 });
+  }
+
+  await supabaseAdmin.from('notifications').insert({
+    user_id: user.id,
+    type: 'open_market_submitted',
+    message: 'Your market is with our reviewers. We usually decide within a day.',
+    severity: 'info',
+    action_url: '/open/creator',
+  });
+
+  return NextResponse.json({ marketId: row.market_id, status: 'pending_review' });
 }

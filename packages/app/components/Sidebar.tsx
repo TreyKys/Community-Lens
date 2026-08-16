@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote, Crown } from 'lucide-react';
+import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote, Crown, LineChart, PenLine } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -82,6 +82,31 @@ export function Sidebar() {
           onClick={() => router.push('/leaderboard')}
         >
           <Crown className="h-4 w-4 text-amber-400 drop-shadow-[0_0_8px_currentColor]" /> Leaderboard
+        </Button>
+      </div>
+
+      {/* Open Markets is a SEPARATE engine, not another category filter. It
+          gets its own block rather than joining CATEGORIES below, because
+          those route through handleNavigation with a ?category= param — a
+          filter over the locked-odds markets, which is not what this is.
+          Rendered on every breakpoint: nothing else in the app links to it. */}
+      <div className="flex flex-col gap-1 mb-3 border-b pb-3">
+        <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-muted-foreground px-3 mb-1">
+          Open Markets
+        </p>
+        <Button
+          variant={pathname?.startsWith('/open') && !pathname?.startsWith('/open/creator') ? 'secondary' : 'ghost'}
+          className="w-full justify-start gap-2 hover:bg-muted/50"
+          onClick={() => router.push('/open')}
+        >
+          <LineChart className="h-4 w-4 text-emerald-400" /> Browse
+        </Button>
+        <Button
+          variant={pathname?.startsWith('/open/creator') ? 'secondary' : 'ghost'}
+          className="w-full justify-start gap-2 hover:bg-muted/50"
+          onClick={() => router.push('/open/creator')}
+        >
+          <PenLine className="h-4 w-4 text-emerald-400" /> Create &amp; earn
         </Button>
       </div>
 
