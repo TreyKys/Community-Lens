@@ -227,7 +227,25 @@ export function wouldFormCompleteSet(
 }
 
 /**
- * Unwind a whole book fairly — for horizon cash-out, auto-retire and void.
+ * Unwind a book fairly — for TERMINAL, WHOLE-BOOK exits only: void and retire.
+ *
+ * ⚠️ NOT for the horizon cash-out, where only a subset of holders exits.
+ *
+ * Pro-rata pays each holder `pool × wᵢ/W`. That distributes exactly the pool
+ * only when EVERY holder is paid and the book goes to zero. Pay a subset and
+ * decrement q by their shares, and the pool falls by the full marginal value
+ * of those shares while you only paid `k = pool/W < 1` of it — so the
+ * shortfall is silently charged to whoever STAYED. Measured on a 3-holder
+ * book: paying one holder ₦7,851 shrank the pool by ₦9,217, taxing the two
+ * who rolled ₦1,365 between them. They took the DEFAULT action.
+ * (Not decrementing q is worse: the same naira is then distributed again at
+ * the next horizon, and again at retire.)
+ *
+ * A curve-priced sell has no such problem — sequential sells telescope, so
+ * Σ payouts = C(q_start) − C(q_end) exactly for any subset. Horizon cash-out
+ * must therefore execute as an ordinary sell through the trade RPC, which
+ * also removes the perverse result that electing cash-out paid LESS than
+ * simply pressing sell.
  *
  * Paying every holder a single snapshot price is a riskless drain: by
  * convexity of C, p·q ≥ C(q) − C(0), and the gap is the entire LMSR subsidy,

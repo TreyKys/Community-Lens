@@ -117,11 +117,21 @@
     --radius: 0.5rem;
   }
   .dark {
+    /* Elevation ladder.
+     *
+     * --card was 5% against a 3.5% page — a 1.5 point gap, which reads as no
+     * gap at all. Every card, panel and dialog sat at almost exactly the
+     * colour of the page behind it, so only a 1px border separated them. That
+     * flatness is most of what reads as "dry".
+     *
+     * Shadows barely register on a dark ground, so depth has to come from
+     * surfaces getting LIGHTER as they rise. Small steps — enough to read as
+     * layered, not enough to wash out the emerald tint. */
     --background: 152 35% 3.5%;        /* very dark emerald-tinted black */
     --foreground: 152 8% 96%;
-    --card: 152 25% 5%;
+    --card: 152 22% 8.5%;              /* +5 over the page (was +1.5) */
     --card-foreground: 152 8% 96%;
-    --popover: 152 25% 4%;
+    --popover: 152 22% 11%;            /* higher still — floats above cards */
     --popover-foreground: 152 8% 96%;
     --primary: 152 76% 45%;            /* emerald-400 */
     --primary-foreground: 152 35% 3.5%;
@@ -133,8 +143,8 @@
     --accent-foreground: 0 0% 98%;
     --destructive: 0 62.8% 40%;
     --destructive-foreground: 0 0% 98%;
-    --border: 152 12% 14%;
-    --input: 152 12% 14%;
+    --border: 152 14% 18%;   /* lifted to stay visible on the lighter card */
+    --input: 152 14% 18%;
     --ring: 152 76% 45%;
     --chart-1: 152 76% 45%;
     --chart-2: 160 60% 50%;
@@ -171,5 +181,44 @@
     [role='textbox'] {
       font-size: 16px !important;
     }
+  }
+}
+
+@layer base {
+  /* Display face for headings only. Saira Stencil has gaps cut through its
+   * letterforms — it earns its keep on a logo or a headline and fights
+   * legibility everywhere else. Body copy uses Geist, which was already
+   * self-hosted and preloaded but never actually applied. */
+  h1, h2, .font-display {
+    font-family: 'Saira Stencil', var(--font-geist-sans), sans-serif;
+    letter-spacing: 0.01em;
+  }
+
+  /* Numbers that change must not reflow the text around them. Without tabular
+   * figures a ticking price makes its whole row twitch, which reads as broken
+   * rather than live. */
+  .tabular, [data-numeric] { font-variant-numeric: tabular-nums; }
+}
+
+@layer components {
+  /* A hairline top highlight is what makes a surface look raised on a dark
+   * ground — it mimics light catching the top edge. One inset shadow, no extra
+   * paint layer, and unlike a drop shadow it is never animated. */
+  .surface-raised { box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.06); }
+}
+
+/* Respect a reduced-motion preference.
+ *
+ * There were 132 animate-* usages here and zero references to this query.
+ * Beyond accessibility it is a direct win on the low-end Android this app is
+ * mostly used on: animation costs battery and CPU, and honouring the setting
+ * is free. Nothing here is communicated by movement alone, so removing motion
+ * removes no meaning. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

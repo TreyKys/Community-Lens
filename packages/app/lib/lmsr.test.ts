@@ -266,3 +266,42 @@ describe('slippage guard operates on the post-fee number', () => {
     expect(Math.abs(sell.totalKobo)).toBeLessThan(Math.abs(sell.costKobo)); // fee taken
   });
 });
+
+describe('pro-rata is valid ONLY for a terminal whole-book unwind', () => {
+  it('distributes exactly the pool when EVERY holder exits', () => {
+    const q = [30_000, 0];
+    const holders = [0, 1, 2].map(() => ({ outcomeIdx: 0, shares: 10_000 }));
+    const paid = proRataUnwind(q, [0, 0], b, holders).reduce((s, p) => s + p, 0);
+    const pool = (lmsrCost(q, b) - lmsrCost([0, 0], b)) * KOBO_PER_NAIRA;
+    expect(paid).toBeLessThanOrEqual(Math.ceil(pool));
+    expect(paid).toBeGreaterThan(pool - holders.length - 1);
+  });
+
+  it('ATTACK: paying only a SUBSET pro-rata taxes the holders who stayed', () => {
+    // The bug this comment block exists to prevent. Pay 1 of 3 holders
+    // pro-rata, then decrement q by their shares: the pool falls by MORE than
+    // was paid out, and the difference is borne by whoever rolled.
+    const q = [30_000, 0];
+    const poolBefore = lmsrCost(q, b) - lmsrCost([0, 0], b);
+    // All three ARE holders — only the first elects to exit. Their pro-rata
+    // share is therefore computed against the full book, exactly as it would
+    // be at a horizon. (Passing only the leaver would hand them the entire
+    // pool, which is a different — and even worse — bug.)
+    const allThree = [0, 1, 2].map(() => ({ outcomeIdx: 0, shares: 10_000 }));
+    const paidOne = proRataUnwind(q, [0, 0], b, allThree)[0] / KOBO_PER_NAIRA;
+    const poolAfter = lmsrCost([20_000, 0], b) - lmsrCost([0, 0], b);
+    const taxedTheStayers = (poolBefore - poolAfter) - paidOne;
+    expect(taxedTheStayers).toBeGreaterThan(1_000);   // ~₦1,365 on this book
+  });
+
+  it('a curve-priced sell telescopes exactly — the correct horizon mechanism', () => {
+    let q = [30_000, 0];
+    let total = 0;
+    for (let i = 0; i < 3; i++) {
+      total += Math.abs(rawTradeCost(q, b, 0, -10_000));
+      q = [q[0] - 10_000, q[1]];
+    }
+    const collected = lmsrCost([30_000, 0], b) - lmsrCost([0, 0], b);
+    expect(total).toBeCloseTo(collected, 6);          // house-neutral, exactly
+  });
+});

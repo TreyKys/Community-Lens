@@ -337,7 +337,7 @@ function BettingInterface({
               <span className="text-xs text-muted-foreground w-20 truncate">{d.option}</span>
               <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-500"
+                  className="h-full rounded-full transition-[width] duration-500 ease-out"
                   style={{
                     width: `${d.percentage}%`,
                     background: i === 0 ? '#3b82f6' : i === 1 ? '#f59e0b' : '#ef4444',
@@ -360,7 +360,11 @@ function BettingInterface({
               onClick={() => setSelectedOption(idx.toString())}
               aria-selected={isSelected}
               className={cn(
-                'flex items-center justify-center rounded-lg border border-muted bg-popover/50 p-3 cursor-pointer transition-all text-sm font-medium text-center',
+                'flex items-center justify-center rounded-lg border border-muted bg-popover/50 p-3 cursor-pointer text-sm font-medium text-center',
+                // transition-colors, not -all: only paint what changes. active:
+                // gives touch users the sub-100ms feedback that makes a tap
+                // feel connected — hover gives them nothing at all.
+                'transition-colors duration-150 active:border-emerald-500/50',
                 getOptionStyle(opt)
               )}
             >
@@ -687,10 +691,13 @@ function MarketCard({
     );
     if (isOpen) return (
       <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px] flex items-center gap-1">
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
-        </span>
+        {/* Static dot. This renders once PER CARD, so the pulse it used to
+            carry meant a 20-market list ran 20 concurrent infinite animations
+            — the compositor never idles and the battery drains, on phones
+            where that is a real cost. A pulse should mean "live connection",
+            which is a property of the app, not of every row; that one lives in
+            the Navbar. The dot alone still says OPEN. */}
+        <span className="inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
         OPEN
       </Badge>
     );
@@ -704,7 +711,7 @@ function MarketCard({
   return (
     <Card
       data-market-id={market.id}
-      className="hover:shadow-lg transition-all bg-card relative overflow-hidden group border-muted"
+      className="bg-card transition-colors duration-150 hover:border-emerald-500/30 active:border-emerald-500/50 relative overflow-hidden group border-muted"
     >
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
