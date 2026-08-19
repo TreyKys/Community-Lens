@@ -1024,9 +1024,18 @@ interface MarketListProps {
   /** Scope the whole list to one sport (e.g. "football"). Used by the
       /football hub when no specific league is selected. */
   sport?: string;
+  /** The markets.category value the leagueCode/sport filters are ANDed
+      against. Defaults to 'sports' — every existing caller (the football
+      hub, the per-league pages) is a sports hub, so this default keeps
+      them working with zero changes. A non-sports hub (e.g. /bbn, which
+      reuses this exact leagueCode/sport mechanism under category=
+      'entertainment') MUST pass its own value here, or the query silently
+      ANDs in category='sports' and returns nothing — no error, just an
+      empty list that looks like "no markets yet" forever. */
+  scopeCategory?: string;
 }
 
-export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport }: MarketListProps) {
+export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport, scopeCategory = 'sports' }: MarketListProps) {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'trending';
   const subcategory = searchParams.get('subcategory') || null;
@@ -1127,7 +1136,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   // Per-view scroll key. /markets uses category+subcategory+filters so each
   // tab remembers its own position; the sub-market and league hubs get
   // their own keys so back-navigating into them lands you where you were.
-  const scrollKey = `mlist_${filterExactMarketId ?? ''}_${filterChildrenOfParentId ?? ''}_${leagueCode ?? ''}_${sport ?? ''}_${category}_${subcategory ?? ''}_${sortParam}_${statusParam}_${searchQuery}`;
+  const scrollKey = `mlist_${filterExactMarketId ?? ''}_${filterChildrenOfParentId ?? ''}_${leagueCode ?? ''}_${sport ?? ''}_${scopeCategory}_${category}_${subcategory ?? ''}_${sortParam}_${statusParam}_${searchQuery}`;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
@@ -1205,14 +1214,14 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
         const stripped = leagueCode.replace(/[\[\]]/g, '');
         query = query
           .is('parent_market_id', null)
-          .eq('category', 'sports')
+          .eq('category', scopeCategory)
           .eq('league_code', stripped);
       } else if (sport) {
         // Sport-scoped list (e.g. /football "All" tab) — pull every market
         // for the sport regardless of league.
         query = query
           .is('parent_market_id', null)
-          .eq('category', 'sports')
+          .eq('category', scopeCategory)
           .eq('sport', sport);
       } else {
         // General market list — top-level only
@@ -1261,7 +1270,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     } finally {
       setIsLoading(false);
     }
-  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory, leagueCode, sortParam, statusParam, searchQuery]);
+  }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory, leagueCode, sport, scopeCategory, sortParam, statusParam, searchQuery]);
 
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 
