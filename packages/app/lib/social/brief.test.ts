@@ -112,3 +112,28 @@ describe('splitDrafts', () => {
     expect(out).toHaveLength(2);
   });
 });
+
+describe('splitDrafts — list marker on a single item', () => {
+  it('strips "1. " when the response held only one post', () => {
+    // The exact production failure: a truncated response contained just
+    // "1. ...", the numbered split found no second item to split on,
+    // and the raw text went out on the card with its marker attached.
+    expect(splitDrafts('1. BBN is back and the TL is wild.'))
+      .toEqual(['BBN is back and the TL is wild.']);
+  });
+
+  it('strips a bullet on a single item too', () => {
+    expect(splitDrafts('- Just the one thought.')).toEqual(['Just the one thought.']);
+  });
+
+  it('leaves an unmarked single post alone', () => {
+    expect(splitDrafts('No marker on this one.')).toEqual(['No marker on this one.']);
+  });
+
+  it('does not eat a leading number that is part of the sentence', () => {
+    // "12 away games" must survive — only a marker followed by a
+    // separator is a list marker.
+    expect(splitDrafts('12 away games unbeaten and nobody is talking about it.'))
+      .toEqual(['12 away games unbeaten and nobody is talking about it.']);
+  });
+});

@@ -18,10 +18,9 @@
 // Portuguese league fixture.
 
 import { getSupabaseAdmin } from '@/lib/oracle';
-import { fetchWithTimeout } from './selfCall';
 import { sanitisePost, violatesCompliance, sentimentFromPools } from './compose';
-
-const GEMINI_MODEL = 'gemini-2.5-flash';
+import { generate, GeminiTruncatedError } from './gemini';
+import { researchBrief, type Research } from './research';
 
 /** Hard ceiling per brief. More than this is unreviewable on a phone. */
 export const MAX_DRAFTS = 6;
@@ -143,36 +142,6 @@ export async function marketContext(limit = 8): Promise<string> {
   }
 }
 
-async function callGemini(prompt: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY is not set');
-
-  const r = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        // Higher than the market composer. Four posts on one subject
-        // need to differ from each other, and low temperature produces
-        // four paraphrases.
-        generationConfig: { temperature: 1.0, maxOutputTokens: 900 },
-      }),
-    },
-    30_000,
-  );
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => '');
-    throw new Error(`Gemini ${r.status}: ${t.slice(0, 300)}`);
-  }
-
-  const json = await r.json();
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Gemini returned no text');
-  return String(text);
-}
 
 /**
  * Split a numbered list into individual posts.
@@ -202,14 +171,26 @@ export function splitDrafts(raw: string): string[] {
 
   // Blank-line separated paragraphs.
   const paras = t.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
-  if (paras.length > 1) return paras;
+  if (paras.length > 1) return paras.map(stripListMarker);
 
-  return t ? [t] : [];
+  // Single item. It still needs its marker stripped — when a truncated
+  // response contained only "1. ..." the split above found nothing to
+  // split on, fell through to here, and the "1. " went out on the card.
+  return t ? [stripListMarker(t)] : [];
+}
+
+/** Remove a leading "1." / "2)" / "- " list marker. */
+function stripListMarker(s: string): string {
+  return s.replace(/^\s*(?:\d{1,2}\s*[.)\-:]|[-*•])\s*/, '').trim();
 }
 
 export type DraftResult = {
   drafts: string[];
   rejected: Array<{ text: string; reason: string }>;
+  /** The model hit its output limit; fewer posts came back than asked. */
+  truncated: boolean;
+  /** What the grounded search turned up, if anything. */
+  research: Research | null;
 };
 
 /**
@@ -221,8 +202,13 @@ export type DraftResult = {
  */
 export async function draftFromBrief(
   req: BriefRequest,
-  opts: { includeMarkets?: boolean } = {},
+  opts: { includeMarkets?: boolean; research?: boolean } = {},
 ): Promise<DraftResult> {
+  // Research first. A post about what happened last night beats a post
+  // about the general nature of the thing, every time — and only one of
+  // those can start a conversation on X.
+  const research = opts.research === false ? null : await researchBrief(req.brief);
+
   const context = opts.includeMarkets === false ? '' : await marketContext();
 
   const prompt = `${VOICE}
@@ -235,6 +221,17 @@ ${req.brief}
 
 Write exactly ${req.count} DIFFERENT posts answering that brief. Each one a separate angle.
 
+${research ? `RESEARCH — real, current, searched moments ago. Build every post on THIS, not on general knowledge about the subject.
+
+${research.findings}
+
+How to use it:
+- Name the specifics. "Kola went at 12%" lands; "there was an eviction" does not.
+- Prefer the ARGUMENTS over the events. Pick a side of a live disagreement and say something a reader could disagree with. A post nobody can argue with is a post nobody replies to.
+- Do NOT invent anything absent from the research above. No scores, names, dates or percentages of your own.
+- If one finding is thin, use a different one rather than padding it into a whole post.
+- Do not write "reportedly" or "sources say". Either it is in the research or it does not go in the post.
+` : ''}
 ${context ? `Currently live on the site — use ONLY if the brief genuinely relates to one of these. If the brief is about something else, ignore this list entirely and do not mention markets or odds:
 
 ${context}
@@ -245,8 +242,27 @@ Output ONLY a numbered list, one post per line, like:
 
 No preamble, no commentary, no markdown, no quotes around the posts.`;
 
-  const raw = await callGemini(prompt);
+  let raw: string;
+  let truncated = false;
+  try {
+    raw = await generate(prompt, { temperature: 1.0, maxOutputTokens: 1500 });
+  } catch (e) {
+    if (e instanceof GeminiTruncatedError) {
+      // Salvage the complete posts from the fragment and flag it. The
+      // last item is mid-sentence, so it is dropped below.
+      raw = e.partial;
+      truncated = true;
+    } else {
+      throw e;
+    }
+  }
+
   const pieces = splitDrafts(raw);
+
+  // A truncated response ends mid-sentence, so its final item is not a
+  // usable post. Publishing half a thought is worse than returning one
+  // fewer draft.
+  if (truncated && pieces.length > 1) pieces.pop();
 
   const drafts: string[] = [];
   const rejected: Array<{ text: string; reason: string }> = [];
@@ -274,5 +290,5 @@ No preamble, no commentary, no markdown, no quotes around the posts.`;
     if (drafts.length >= req.count) break;
   }
 
-  return { drafts, rejected };
+  return { drafts, rejected, truncated, research };
 }

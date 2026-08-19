@@ -16,10 +16,8 @@
 //     and the account only has to be caught once.
 
 import { stripLinks, containsLink } from './cost';
-import { fetchWithTimeout } from './selfCall';
+import { generate } from './gemini';
 import { sanitisePost } from './compose';
-
-const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const REPLY_VOICE = `You are a sharp, well-informed Nigerian voice on X replying to someone else's post. You happen to run a prediction market, but you are NOT here to advertise it.
 
@@ -61,32 +59,6 @@ export function replyViolation(text: string): string | null {
   return null;
 }
 
-async function callGemini(prompt: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY is not set');
-
-  const r = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 1.0, maxOutputTokens: 200 },
-      }),
-    },
-  );
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => '');
-    throw new Error(`Gemini ${r.status}: ${t.slice(0, 300)}`);
-  }
-
-  const json = await r.json();
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Gemini returned no text');
-  return String(text);
-}
 
 export type ReplyInput = {
   authorHandle: string;
@@ -114,7 +86,7 @@ Output only the reply text, or the single word SKIP.`;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const raw = await callGemini(prompt);
+      const raw = await generate(prompt, { temperature: 1.0, maxOutputTokens: 300 });
       if (/^\s*SKIP\s*$/i.test(raw)) return null;
 
       const text = stripLinks(sanitisePost(raw));

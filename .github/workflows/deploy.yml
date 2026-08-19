@@ -183,6 +183,25 @@ jobs:
 
       - name: Verify public endpoint
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://opinionsng.com/api/status)
-          echo "GET /api/status -> $code"
-          [ "$code" = "200" ] || { echo "Site is not serving 200 after deploy"; exit 1; }
+          # Retry, because a single shot here races Caddy.
+          #
+          # `docker compose up -d app` replaces the container, which gets a
+          # new IP on the docker network. Caddy active-health-checks the
+          # upstream every 30s (health_interval in the Caddyfile) and keeps
+          # serving 503 until its next check notices the new address. The
+          # step above only waits for the CONTAINER to report healthy, so a
+          # fast container start lands this curl inside Caddy's window and
+          # fails a deploy that actually worked.
+          #
+          # 90s of polling comfortably covers one health_interval.
+          for i in $(seq 1 18); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://opinionsng.com/api/status || echo 000)
+            echo "attempt $i: GET /api/status -> $code"
+            if [ "$code" = "200" ]; then
+              echo "Site is serving."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Site still not serving 200 after ~90s — the app or Caddy is genuinely down." >&2
+          exit 1

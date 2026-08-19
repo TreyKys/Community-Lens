@@ -28,6 +28,7 @@ Send an X post link — or paste a post's text — and I'll draft a reply, free.
 Link + the text pasted underneath works best: no lookup needed.
 
 <b>Control</b>
+/preview — every queued post, with its image, before it goes out
 /drafts — re-send any drafts still waiting on a decision
 /status — what's queued, what's paused, what it cost
 /queue — the next posts due
@@ -47,7 +48,7 @@ Link + the text pasted underneath works best: no lookup needed.
  * one reply, and they run long enough to need an acknowledgement first
  * — so they cannot fit the "command in, string out" shape below.
  */
-const MULTI_MESSAGE = new Set(['/draft', '/post', '/write', '/drafts']);
+const MULTI_MESSAGE = new Set(['/draft', '/post', '/write', '/drafts', '/preview']);
 
 /** Normalise "/Draft@MyBot" to "/draft". */
 export function commandName(text: string): string {
