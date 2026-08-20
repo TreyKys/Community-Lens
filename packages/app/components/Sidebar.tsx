@@ -32,10 +32,15 @@ const CATEGORIES: Category[] = [
     icon: Trophy,
     color: 'text-yellow-500',
     subcategories: [
+      // Each of these has its own hub page now, so they route by href rather
+      // than through the markets-page category filter. Fights used to be
+      // `category: 'fight'` — it kept working, but a filtered list has no
+      // room for competition tabs or a backdrop, which is what the hub adds.
       { id: 'football', label: '⚽ Football', href: '/football' },
-      // Fights jumps straight to its own top-level category — never the
-      // sports+subcategory combo which buildCategoryFilter doesn't honor.
-      { id: 'fight', label: '🥊 Fights', category: 'fight' },
+      { id: 'basketball', label: '🏀 Basketball', href: '/basketball' },
+      { id: 'tennis', label: '🎾 Tennis', href: '/tennis' },
+      { id: 'esports', label: '🎮 Esports', href: '/esports' },
+      { id: 'fight', label: '🥊 Boxing & MMA', href: '/fight' },
     ],
   },
   // Its own top-level entry, not a Sports/Economy subcategory: BBN isn't a
@@ -150,12 +155,16 @@ export function Sidebar() {
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4 pr-2 py-1 space-y-1">
                 {category.subcategories?.map(sub => {
-                  // sub.category present → jump to that top-level category
-                  // (e.g. Fights → category=fight). Falls back to nested
-                  // subcategory routing only when no override is set.
-                  const isActive = sub.category
-                    ? currentCategory === sub.category
-                    : currentSubcategory === sub.id;
+                  // Active state has to be resolved the same way navigation
+                  // is, or the highlight lands on the wrong row: an href
+                  // subcategory leaves the markets page entirely, so its
+                  // ?category / ?subcategory params are gone and checking
+                  // them would never match.
+                  const isActive = sub.href
+                    ? !!pathname?.startsWith(sub.href)
+                    : sub.category
+                      ? currentCategory === sub.category
+                      : currentSubcategory === sub.id;
                   return (
                     <Button
                       key={sub.id}

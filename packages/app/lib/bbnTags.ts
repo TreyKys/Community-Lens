@@ -62,6 +62,23 @@ export const BBN_TAGS: Record<string, BbnTag> = {
 
 export const BBN_TAG_IDS = Object.keys(BBN_TAGS);
 
+// Backdrop art for /bbn, in the same shape the sport hubs use
+// (see lib/sportHubs.ts for the full note on supplying imagery).
+//
+// imageUrl is deliberately unset, and there is a specific reason beyond the
+// general licensing one: the official Big Brother Naija key art and logo are
+// Multichoice/Africa Magic property. Putting them on a real-money predictions
+// site is both a trademark exposure and an implied endorsement this site does
+// not have — which is why the hero uses a generic "being watched" eye motif
+// rather than the show's mark. If you supply a photo here, use one you have
+// cleared, and keep the branding generic.
+//
+// Wide landscape, 2400px+ on the long edge. The gradient art below renders on
+// its own until then, so the page is never waiting on this.
+export const BBN_HUB_ART: { gradient: [string, string]; imageUrl?: string } = {
+  gradient: ['rgba(217,70,239,0.28)', 'rgba(245,158,11,0.20)'],
+};
+
 export function getBbnTag(id: string | null | undefined): BbnTag | null {
   if (!id) return null;
   return BBN_TAGS[id] ?? null;

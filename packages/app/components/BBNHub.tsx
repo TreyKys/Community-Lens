@@ -4,9 +4,10 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import Link from 'next/link';
 import { Eye, ChevronLeft, Trophy, DoorOpen, Crown, Heart, Zap, Flame, TrendingUp, ArrowRight } from 'lucide-react';
-import { BBN_TAGS, BBN_TAG_IDS, BBN_SPORT, getBbnTag } from '@/lib/bbnTags';
+import { BBN_TAGS, BBN_TAG_IDS, BBN_SPORT, BBN_HUB_ART, getBbnTag } from '@/lib/bbnTags';
 import { MarketList } from '@/components/MarketList';
 import { MarketsToolbar } from '@/components/MarketsToolbar';
+import { ScrollFadeBackdrop } from '@/components/ScrollFadeBackdrop';
 import { OpenMarketCard, type OpenMarketCardRow } from '@/components/OpenMarketCard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -55,7 +56,9 @@ export function BBNHub({ openCount, upcomingCount, poolTngn, tagCounts,
   const hasLocked = openCount > 0 || upcomingCount > 0;
 
   return (
-    <div className="flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
+    <div className="relative flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
+      <ScrollFadeBackdrop gradient={BBN_HUB_ART.gradient} imageUrl={BBN_HUB_ART.imageUrl} />
+
       <BBNHero
         openCount={openCount + tradingOpenCount}
         upcomingCount={upcomingCount}
