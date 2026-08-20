@@ -90,12 +90,19 @@ export function ScrollFadeBackdrop({ gradient, imageUrl, alt }: {
         />
       )}
 
-      {/* Gradient art. Sits ABOVE the photo when there is one (tinting it into
-          the site's palette) and IS the backdrop when there isn't. Static —
-          no blur filter, no animation. */}
+      {/* Gradient art — two jobs depending on whether a photo loaded.
+
+          NO PHOTO: this IS the backdrop, at full strength.
+
+          PHOTO: it drops to a faint tint. The hub art is already graded to
+          the brand emerald, so laying a full-strength per-sport gradient
+          (orange for basketball, violet for esports) over the top fights the
+          photograph and turns it muddy instead of tinting it. At low opacity
+          it just ties the corners back into the page. */}
       <div
-        className="absolute inset-0"
+        className="absolute inset-0 transition-opacity duration-300"
         style={{
+          opacity: imageUrl && imageOk ? 0.35 : 1,
           background:
             `radial-gradient(ellipse 70vw 60vh at 12% -8%, ${gradient[0]}, transparent 62%),` +
             `radial-gradient(ellipse 70vw 60vh at 105% 105%, ${gradient[1]}, transparent 62%)`,

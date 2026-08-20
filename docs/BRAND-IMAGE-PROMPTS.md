@@ -67,8 +67,8 @@ in the lower half, no warm orange or yellow lighting, no daylight.
 ```
 
 **Aspect ratio:** 16:9
-**Resolution:** 3840 × 2160 (4K UHD) — downscale to 2560px wide before shipping
-**Format:** WebP, quality ~82, target under 400KB each
+**Resolution:** 3840 × 2160 (4K UHD)
+**Format:** WebP, full quality — see below
 
 ---
 
@@ -130,23 +130,32 @@ and using it implies an endorsement this site does not have.*
 
 ## Where the files go
 
-1. Save each as `packages/app/public/hubs/<id>.webp` — e.g.
-   `public/hubs/basketball.webp`. (`public/` does not exist yet; create it.)
-2. Set the matching `imageUrl` in config:
-   - Sports → `packages/app/lib/sportHubs.ts`, the `imageUrl` field on each hub
-   - BBN → `packages/app/lib/bbnTags.ts`, `BBN_HUB_ART.imageUrl`
+**The config is already wired.** All six `imageUrl` values are set. The only
+remaining step is dropping the files into `packages/app/public/hubs/` with
+these exact names:
 
-```ts
-basketball: {
-  …
-  imageUrl: '/hubs/basketball.webp',
-},
-```
+    bbn.webp  basketball.webp  tennis.webp  esports.webp  fight.webp  football.webp
 
-That is the only change needed. `ScrollFadeBackdrop` picks it up, layers the
-existing gradient art over it as a tint, and falls back silently to
-gradient-only if the file is ever missing — so a bad path degrades to the
-current look rather than to a broken frame.
+If your exports are `.png` or `.jpg`, either convert them or change the
+extension in `lib/sportHubs.ts` / `lib/bbnTags.ts` — the path string is the
+only thing that has to match.
+
+A missing or misnamed file degrades silently to the CSS gradient art, so check
+the page rather than the console — a wrong filename looks like "the image
+didn't change", not like an error.
+
+## No compression is applied
+
+`ScrollFadeBackdrop` renders with `unoptimized`, so Next.js passes the exact
+bytes through — no re-encode, no per-device resizing. What you put in
+`public/hubs/` is byte-for-byte what a user downloads.
+
+The tradeoff worth knowing: that also means a phone gets the full 4K file. A
+lossless 4K export can run 8-12MB, paid on the first visit to each hub, and
+most of this audience is on Nigerian mobile data. If any file lands very large,
+lossless WebP usually saves 30-50% over PNG at identical pixels — that
+compresses the *file* without touching the *image*, which is the version of
+compression worth doing.
 
 ---
 

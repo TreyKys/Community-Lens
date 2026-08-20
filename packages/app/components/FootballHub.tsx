@@ -3,8 +3,10 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { LEAGUES, LEAGUE_IDS, getLeague } from '@/lib/leagues';
+import { FOOTBALL_HUB_ART } from '@/lib/sportHubs';
 import { MarketList } from '@/components/MarketList';
 import { MarketsToolbar } from '@/components/MarketsToolbar';
+import { ScrollFadeBackdrop } from '@/components/ScrollFadeBackdrop';
 import { cn } from '@/lib/utils';
 
 /**
@@ -27,7 +29,12 @@ export function FootballHub() {
   }, [searchParams, router]);
 
   return (
-    <div className="flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
+    <div className="relative flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
+      <ScrollFadeBackdrop
+        gradient={FOOTBALL_HUB_ART.gradient}
+        imageUrl={FOOTBALL_HUB_ART.imageUrl}
+      />
+
       <div className="flex items-baseline gap-2">
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Football</h1>
         <span className="text-sm text-muted-foreground">Every league. One feed.</span>
