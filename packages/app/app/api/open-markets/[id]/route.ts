@@ -86,6 +86,16 @@ export async function GET(request: Request, { params }: { params: { id: string }
       category: m.category,
       outcomes: m.outcomes,
       prices,
+      // The raw book. Public by definition — `prices` above is computed from
+      // exactly these two and is already shown to everyone. The ticket needs
+      // them to convert a naira budget into a share count locally, so typing
+      // an amount doesn't cost a round trip per keystroke.
+      //
+      // Display and estimation only. Nothing here prices a real trade: the
+      // executing RPC recomputes under a row lock, and every order carries a
+      // limit, so a stale client-side number can never become a bad fill.
+      q: (m.q as any[]).map(Number),
+      b: Number(m.b),
       status: m.status,
       resolutionSource: m.resolution_source,
       resolutionDetail: m.resolution_detail,

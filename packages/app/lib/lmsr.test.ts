@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   lmsrCost, lmsrPrices, rawTradeCost, quoteTrade, wouldFormCompleteSet,
   proRataUnwind, bFromExposure, maxSubsidyNaira, expectedSubsidyNaira,
-  KOBO_PER_NAIRA, MIN_TRADE_KOBO, TRADE_FEE_PCT,
+  KOBO_PER_NAIRA, MIN_TRADE_KOBO, TRADE_FEE_PCT, sharesForBudget,
 } from './lmsr';
 
 // This engine prices real money and the house is the counterparty on every
@@ -303,5 +303,58 @@ describe('pro-rata is valid ONLY for a terminal whole-book unwind', () => {
     }
     const collected = lmsrCost([30_000, 0], b) - lmsrCost([0, 0], b);
     expect(total).toBeCloseTo(collected, 6);          // house-neutral, exactly
+  });
+});
+
+describe('sharesForBudget — naira in, shares out', () => {
+  const b = 10000;
+  const q = [0, 0];
+
+  it('never spends more than the budget', () => {
+    for (const budget of [100, 250, 1000, 5000, 25000, 100000]) {
+      const shares = sharesForBudget(q, b, 0, budget);
+      if (shares === 0) continue;
+      const cost = quoteTrade(q, b, 0, shares, 0).totalKobo / KOBO_PER_NAIRA;
+      expect(cost).toBeLessThanOrEqual(budget + 1e-9);
+    }
+  });
+
+  it('gets close to the budget rather than leaving most of it unspent', () => {
+    // A binary search that bailed early, or an off-by-one in the bound, would
+    // still "never overspend" while buying almost nothing — so cheapness on
+    // its own is not evidence the function works.
+    const budget = 5000;
+    const shares = sharesForBudget(q, b, 0, budget);
+    const cost = quoteTrade(q, b, 0, shares, 0).totalKobo / KOBO_PER_NAIRA;
+    expect(cost).toBeGreaterThan(budget * 0.99);
+  });
+
+  it('one more share would breach the budget', () => {
+    const budget = 3000;
+    const shares = sharesForBudget(q, b, 0, budget);
+    const over = quoteTrade(q, b, 0, shares + 1, 0).totalKobo / KOBO_PER_NAIRA;
+    expect(over).toBeGreaterThan(budget);
+  });
+
+  it('is monotonic — more money never buys fewer shares', () => {
+    let prev = 0;
+    for (const budget of [100, 500, 1000, 2000, 5000, 10000, 50000]) {
+      const shares = sharesForBudget(q, b, 0, budget);
+      expect(shares).toBeGreaterThanOrEqual(prev);
+      prev = shares;
+    }
+  });
+
+  it('buys fewer shares of an outcome the book has already bid up', () => {
+    const skewed = [40000, 0];   // outcome 0 is now expensive
+    const cheap = sharesForBudget(skewed, b, 1, 5000);
+    const dear = sharesForBudget(skewed, b, 0, 5000);
+    expect(dear).toBeLessThan(cheap);
+  });
+
+  it('returns 0 for nothing, negatives and nonsense rather than throwing', () => {
+    expect(sharesForBudget(q, b, 0, 0)).toBe(0);
+    expect(sharesForBudget(q, b, 0, -100)).toBe(0);
+    expect(sharesForBudget(q, b, 0, NaN)).toBe(0);
   });
 });
