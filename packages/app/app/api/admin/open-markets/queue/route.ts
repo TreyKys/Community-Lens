@@ -73,6 +73,7 @@ export async function GET(request: Request) {
       tradingClosesAt: r.trading_closes_at,
       status: r.status,
       createdAt: r.created_at,
+      eventTag: r.event_tag,
       creator: {
         id: r.created_by,
         handle: r.creator_handle,

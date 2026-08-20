@@ -3,10 +3,11 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import Link from 'next/link';
-import { Eye, ChevronLeft, Trophy, DoorOpen, Crown, Heart, Zap, Flame } from 'lucide-react';
+import { Eye, ChevronLeft, Trophy, DoorOpen, Crown, Heart, Zap, Flame, TrendingUp, ArrowRight } from 'lucide-react';
 import { BBN_TAGS, BBN_TAG_IDS, BBN_SPORT, getBbnTag } from '@/lib/bbnTags';
 import { MarketList } from '@/components/MarketList';
 import { MarketsToolbar } from '@/components/MarketsToolbar';
+import { OpenMarketCard, type OpenMarketCardRow } from '@/components/OpenMarketCard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -31,9 +32,13 @@ const ngn = (n: number) => `₦${Math.round(n).toLocaleString()}`;
 // PopularMarketsScroll already uses for category='entertainment' content, so
 // this reads as "the entertainment section, turned up" rather than a new
 // palette bolted onto the app.
-export function BBNHub({ openCount, upcomingCount, poolTngn, tagCounts }: {
+export function BBNHub({ openCount, upcomingCount, poolTngn, tagCounts,
+  tradingMarkets, tradingOpenCount, tradingVolumeTngn }: {
   openCount: number; upcomingCount: number; poolTngn: number;
   tagCounts: Record<string, number>;
+  tradingMarkets: OpenMarketCardRow[];
+  tradingOpenCount: number;
+  tradingVolumeTngn: number;
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -47,51 +52,99 @@ export function BBNHub({ openCount, upcomingCount, poolTngn, tagCounts }: {
     router.push(`/bbn?${next.toString()}`);
   }, [searchParams, router]);
 
+  const hasLocked = openCount > 0 || upcomingCount > 0;
+
   return (
     <div className="flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
-      <BBNHero openCount={openCount} upcomingCount={upcomingCount} poolTngn={poolTngn} />
-
-      {/* Market-type chips — scrollable on mobile like the football league
-          tabs, but icon-led rather than text-only. This is the one place on
-          the page that visually says "this isn't the sports hub." */}
-      <div className="-mx-3 md:mx-0 overflow-x-auto no-scrollbar">
-        <div className="flex gap-2 px-3 md:px-0 min-w-max">
-          <TagChip
-            icon={Flame}
-            label="Everything"
-            count={openCount}
-            isActive={selectedTagId === 'all'}
-            onClick={() => setTag('all')}
-          />
-          {BBN_TAG_IDS.map(id => {
-            const tag = BBN_TAGS[id];
-            const Icon = TAG_ICON[id];
-            const count = tagCounts[id] ?? 0;
-            // Only offer tags that have something in them. An empty chip a
-            // viewer can tap into and find nothing is worse than not
-            // offering it — it reads as a dead end, not a filter.
-            if (count === 0) return null;
-            return (
-              <TagChip
-                key={id}
-                icon={Icon}
-                label={tag.shortLabel}
-                count={count}
-                isActive={selectedTagId === id}
-                onClick={() => setTag(id)}
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      <MarketsToolbar />
-
-      <MarketList
-        leagueCode={selectedTag?.code}
-        sport={selectedTag ? undefined : BBN_SPORT}
-        scopeCategory="entertainment"
+      <BBNHero
+        openCount={openCount + tradingOpenCount}
+        upcomingCount={upcomingCount}
+        poolTngn={poolTngn + tradingVolumeTngn}
       />
+
+      {/* Trading-engine markets first, because they're the newer, more
+          engaging mode — you can sell out mid-season instead of waiting for
+          finale night. Kept as its OWN clearly-labelled section rather than
+          mixed into the locked-odds list below: a tradeable share and a
+          fixed bet behave differently, and pretending they're the same
+          thing in one feed would mislead, not simplify. */}
+      {tradingMarkets.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-fuchsia-400" />
+              <h2 className="text-sm font-semibold">Trade the season</h2>
+            </div>
+            <Link href="/open" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+              All trading markets <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+          <p className="text-[11px] text-muted-foreground -mt-1">
+            Prices move as the house shifts. Buy a side and sell any time — you don&rsquo;t have to wait for the eviction.
+          </p>
+          <div className="space-y-3">
+            {tradingMarkets.map(m => (
+              <OpenMarketCard key={m.id} market={m} hideCategory />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Locked-odds side. Only render its header + chips + list when it
+          actually has markets — otherwise a "Predict & hold" heading over an
+          empty list is the exact dead-end this hub is meant to avoid. */}
+      {hasLocked && (
+        <section className="space-y-3">
+          {tradingMarkets.length > 0 && (
+            <div className="flex items-center gap-2 pt-2">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-semibold">Predict &amp; hold</h2>
+            </div>
+          )}
+
+          {/* Market-type chips — scrollable on mobile like the football league
+              tabs, but icon-led rather than text-only. This is the one place on
+              the page that visually says "this isn't the sports hub." */}
+          <div className="-mx-3 md:mx-0 overflow-x-auto no-scrollbar">
+            <div className="flex gap-2 px-3 md:px-0 min-w-max">
+              <TagChip
+                icon={Flame}
+                label="Everything"
+                count={openCount}
+                isActive={selectedTagId === 'all'}
+                onClick={() => setTag('all')}
+              />
+              {BBN_TAG_IDS.map(id => {
+                const tag = BBN_TAGS[id];
+                const Icon = TAG_ICON[id];
+                const count = tagCounts[id] ?? 0;
+                // Only offer tags that have something in them. An empty chip a
+                // viewer can tap into and find nothing is worse than not
+                // offering it — it reads as a dead end, not a filter.
+                if (count === 0) return null;
+                return (
+                  <TagChip
+                    key={id}
+                    icon={Icon}
+                    label={tag.shortLabel}
+                    count={count}
+                    isActive={selectedTagId === id}
+                    onClick={() => setTag(id)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          <MarketsToolbar />
+
+          <MarketList
+            leagueCode={selectedTag?.code}
+            sport={selectedTag ? undefined : BBN_SPORT}
+            scopeCategory="entertainment"
+          />
+        </section>
+      )}
     </div>
   );
 }
