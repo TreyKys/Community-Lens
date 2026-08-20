@@ -1,36 +1,37 @@
 # Hub backdrop images
 
-Drop the generated hub art here, named EXACTLY as below. The filenames are
-referenced from `lib/sportHubs.ts` and `lib/bbnTags.ts`.
+Backdrop art for the hub pages. Referenced from `lib/sportHubs.ts`
+(`imageUrl` per hub, plus `FOOTBALL_HUB_ART`) and `lib/bbnTags.ts`
+(`BBN_HUB_ART`).
 
-    bbn.webp          Big Brother Naija   -> /bbn
-    basketball.webp   Basketball          -> /basketball
-    tennis.webp       Tennis              -> /tennis
-    esports.webp      Esports             -> /esports
-    fight.webp        Boxing & MMA        -> /fight
-    football.webp     Football            -> /football
+    bbn.jpeg          Big Brother Naija   -> /bbn
+    basketball.jpeg   Basketball          -> /basketball
+    tennis.jpeg       Tennis              -> /tennis
+    esports.jpeg      Esports             -> /esports
+    fight.jpeg        Boxing & MMA        -> /fight
+    football.jpeg     Football            -> /football
 
-## Format
+Currently 2752×1536 (≈16:9), ~2.5MB each. Generated with Google Flow — the
+prompts are in `docs/BRAND-IMAGE-PROMPTS.md` if any need regenerating, so a
+replacement matches the rest rather than drifting.
 
-`.webp` is what the config expects. If your files are `.png` or `.jpg`, either
-convert them or change the extension in the two config files — the path string
-is the only thing that needs to match.
+## Served without re-encoding
 
-## These are served UNCOMPRESSED, on purpose
+`ScrollFadeBackdrop` renders these with `unoptimized`, so Next.js passes the
+exact bytes through — no re-compression, no per-device resizing. What is in
+this folder is byte-for-byte what a user downloads.
 
-`ScrollFadeBackdrop` renders them with `unoptimized`, so Next.js passes the
-exact bytes through with no re-encode and no per-device resizing. Whatever you
-put here is what a user downloads.
+That is deliberate, and it means file size is a manual concern. ~2.5MB is
+acceptable for a full-bleed backdrop; if a future replacement lands much
+heavier, that cost is paid on every first visit to the hub, and most of this
+audience is on Nigerian mobile data.
 
-That preserves quality exactly, and it means FILE SIZE IS ON YOU. A 4K
-lossless export can run 8-12MB, and this is a backdrop on a site whose users
-are largely on Nigerian mobile data — that cost is paid on every first visit
-to the hub. Worth checking each file's size before shipping. If any come out
-very large, lossless WebP typically saves 30-50% over PNG with zero quality
-loss, which is compression of the file but not of the image.
+## Replacing one
 
-## Missing files are safe
+Keep the filename. Nothing else needs to change — the config points at these
+paths, not at any particular format or size. If you switch format (e.g. to
+`.webp`), update the matching `imageUrl` string in the two config files.
 
-A missing or broken path degrades silently to the CSS gradient art underneath
-(`ScrollFadeBackdrop` catches the load error). So a wrong filename shows the
-old look rather than a broken frame — check the page, not just the console.
+A missing or misnamed file degrades silently to the CSS gradient art underneath
+rather than showing a broken frame, so verify on the page itself — a wrong
+filename looks like "the image didn't change", not like an error.

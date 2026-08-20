@@ -56,9 +56,13 @@ export function BBNHub({ openCount, upcomingCount, poolTngn, tagCounts,
   const hasLocked = openCount > 0 || upcomingCount > 0;
 
   return (
-    <div className="relative flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
+    <>
       <ScrollFadeBackdrop gradient={BBN_HUB_ART.gradient} imageUrl={BBN_HUB_ART.imageUrl} />
 
+      {/* z-10 is load-bearing: the backdrop is a fixed z-0 layer, and
+          non-positioned in-flow content paints BELOW that, so the art would
+          cover the page without this. */}
+      <div className="relative z-10 flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
       <BBNHero
         openCount={openCount + tradingOpenCount}
         upcomingCount={upcomingCount}
@@ -148,7 +152,8 @@ export function BBNHub({ openCount, upcomingCount, poolTngn, tagCounts,
           />
         </section>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

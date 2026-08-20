@@ -77,7 +77,7 @@ export const BBN_TAG_IDS = Object.keys(BBN_TAGS);
 // its own until then, so the page is never waiting on this.
 export const BBN_HUB_ART: { gradient: [string, string]; imageUrl?: string } = {
   gradient: ['rgba(217,70,239,0.28)', 'rgba(245,158,11,0.20)'],
-  imageUrl: '/hubs/bbn.webp',
+  imageUrl: '/hubs/bbn.jpeg',
 };
 
 export function getBbnTag(id: string | null | undefined): BbnTag | null {

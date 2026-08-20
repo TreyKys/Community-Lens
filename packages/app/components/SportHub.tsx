@@ -45,7 +45,10 @@ export function SportHub({ hub }: { hub: SportHubConfig }) {
         alt=""
       />
 
-      <div className="relative flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
+      {/* z-10 is load-bearing, not decoration: the backdrop is a fixed z-0
+          layer, and non-positioned in-flow content paints BELOW that. Content
+          has to be positioned and above it or the art covers the page. */}
+      <div className="relative z-10 flex-1 min-w-0 px-3 py-4 md:p-6 space-y-4 md:space-y-5">
         <div className="flex items-baseline gap-2">
           <h1 className={cn('text-2xl md:text-3xl font-bold tracking-tight')}>{hub.label}</h1>
           <span className="text-sm text-muted-foreground">{hub.tagline}</span>

@@ -52,7 +52,7 @@ export const SPORT_HUBS: Record<string, SportHub> = {
     tagline: 'NBA nights and everything after the buzzer.',
     accentClass: 'text-orange-400',
     gradient: ['rgba(249,115,22,0.30)', 'rgba(120,53,15,0.22)'],
-    imageUrl: '/hubs/basketball.webp',
+    imageUrl: '/hubs/basketball.jpeg',
     competitions: [
       { id: 'nba', code: 'NBA', label: 'NBA' },
       { id: 'euroleague', code: 'EUROLEAGUE', label: 'EuroLeague' },
@@ -65,7 +65,7 @@ export const SPORT_HUBS: Record<string, SportHub> = {
     tagline: 'Every slam, every upset, point by point.',
     accentClass: 'text-lime-400',
     gradient: ['rgba(132,204,22,0.28)', 'rgba(21,94,60,0.22)'],
-    imageUrl: '/hubs/tennis.webp',
+    imageUrl: '/hubs/tennis.jpeg',
     competitions: [
       { id: 'ao', code: 'AO', label: 'Australian Open' },
       { id: 'rg', code: 'RG', label: 'Roland Garros' },
@@ -80,7 +80,7 @@ export const SPORT_HUBS: Record<string, SportHub> = {
     tagline: 'Majors, splits and grand finals.',
     accentClass: 'text-violet-400',
     gradient: ['rgba(139,92,246,0.30)', 'rgba(30,27,75,0.30)'],
-    imageUrl: '/hubs/esports.webp',
+    imageUrl: '/hubs/esports.jpeg',
     competitions: [
       { id: 'lol', code: 'LOL', label: 'League of Legends' },
       { id: 'csgo', code: 'CSGO', label: 'CS2' },
@@ -98,7 +98,7 @@ export const SPORT_HUBS: Record<string, SportHub> = {
     tagline: 'Fight week, decided.',
     accentClass: 'text-red-400',
     gradient: ['rgba(239,68,68,0.28)', 'rgba(69,10,10,0.30)'],
-    imageUrl: '/hubs/fight.webp',
+    imageUrl: '/hubs/fight.jpeg',
   },
 };
 
@@ -111,7 +111,7 @@ export const SPORT_HUB_IDS = Object.keys(SPORT_HUBS);
 // component file.
 export const FOOTBALL_HUB_ART: { gradient: [string, string]; imageUrl?: string } = {
   gradient: ['rgba(27,202,121,0.26)', 'rgba(6,78,59,0.26)'],
-  imageUrl: '/hubs/football.webp',
+  imageUrl: '/hubs/football.jpeg',
 };
 
 export function getSportHub(id: string | null | undefined): SportHub | null {

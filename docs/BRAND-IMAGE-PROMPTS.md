@@ -134,7 +134,7 @@ and using it implies an endorsement this site does not have.*
 remaining step is dropping the files into `packages/app/public/hubs/` with
 these exact names:
 
-    bbn.webp  basketball.webp  tennis.webp  esports.webp  fight.webp  football.webp
+    bbn.jpeg  basketball.jpeg  tennis.jpeg  esports.jpeg  fight.jpeg  football.jpeg
 
 If your exports are `.png` or `.jpg`, either convert them or change the
 extension in `lib/sportHubs.ts` / `lib/bbnTags.ts` — the path string is the

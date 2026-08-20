@@ -75,19 +75,43 @@ export function ScrollFadeBackdrop({ gradient, imageUrl, alt }: {
     <div
       ref={ref}
       aria-hidden
-      className="fixed inset-0 -z-10 pointer-events-none will-change-[opacity]"
+      // z-0, NOT a negative z-index. (app)/layout.tsx wraps page content in a
+      // div carrying an opaque `bg-background`, and CSS paints negative
+      // z-index descendants BEHIND the backgrounds of in-flow blocks — so a
+      // -z-10 backdrop here is invisible, with no error to hint at why. The
+      // root layout's .opinions-bg gets away with z-index:-1 because it sits
+      // directly under <body> with no opaque wrapper above it.
+      //
+      // md:left-64 clears the desktop sidebar (w-64). Without it a z-0 fixed
+      // layer would paint over the nav, since the sidebar is in-flow.
+      className="fixed inset-0 md:left-64 z-0 pointer-events-none will-change-[opacity]"
     >
       {imageUrl && imageOk && (
-        <Image
-          src={imageUrl}
-          alt={alt || ''}
-          fill
-          priority
-          unoptimized
-          sizes="100vw"
-          className="object-cover"
-          onError={() => setImageOk(false)}
-        />
+        // The art is 16:9. A phone viewport is roughly 1:2, so stretching it
+        // to `inset-0` and letting object-cover fill would scale it up by
+        // height and throw away ~60% of the width — the wide arena shot, which
+        // is the entire point of the composition, becomes an unrecognisable
+        // zoomed crop.
+        //
+        // So on mobile it keeps its own band at the top of the screen at close
+        // to native ratio, and fades into the page below. On desktop, where
+        // the viewport is already near 16:9, it fills normally.
+        <div className="absolute inset-x-0 top-0 h-[70vw] md:h-full">
+          <Image
+            src={imageUrl}
+            alt={alt || ''}
+            fill
+            priority
+            unoptimized
+            sizes="100vw"
+            className="object-cover object-center"
+            onError={() => setImageOk(false)}
+          />
+          {/* Softens the bottom edge of that band. Only needed on mobile —
+              on desktop the band is the full viewport, so there is no edge
+              mid-screen to hide. */}
+          <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-b from-transparent to-background md:hidden" />
+        </div>
       )}
 
       {/* Gradient art — two jobs depending on whether a photo loaded.
