@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote, Crown, LineChart, PenLine } from 'lucide-react';
+import { Trophy, Flame, Clock, BarChart3, ChevronDown, User, Receipt, Bitcoin, Vote, Crown, LineChart, PenLine, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -32,12 +32,24 @@ const CATEGORIES: Category[] = [
     icon: Trophy,
     color: 'text-yellow-500',
     subcategories: [
+      // Each of these has its own hub page now, so they route by href rather
+      // than through the markets-page category filter. Fights used to be
+      // `category: 'fight'` — it kept working, but a filtered list has no
+      // room for competition tabs or a backdrop, which is what the hub adds.
       { id: 'football', label: '⚽ Football', href: '/football' },
-      // Fights jumps straight to its own top-level category — never the
-      // sports+subcategory combo which buildCategoryFilter doesn't honor.
-      { id: 'fight', label: '🥊 Fights', category: 'fight' },
+      { id: 'basketball', label: '🏀 Basketball', href: '/basketball' },
+      { id: 'tennis', label: '🎾 Tennis', href: '/tennis' },
+      { id: 'esports', label: '🎮 Esports', href: '/esports' },
+      { id: 'fight', label: '🥊 Boxing & MMA', href: '/fight' },
     ],
   },
+  // Its own top-level entry, not a Sports/Economy subcategory: BBN isn't a
+  // sport and lumping it into "Everything Economy" (where entertainment
+  // otherwise lives) buries the one section built to feel like a live event.
+  // href routes straight to its own hub (like Football does), bypassing the
+  // markets-page category filter entirely — BBN markets are tagged
+  // category='entertainment' + sport='bbn', not category='bbn'.
+  { id: 'bbn', label: 'Big Brother Naija', icon: Eye, color: 'text-fuchsia-400', href: '/bbn' },
   { id: 'politics', label: 'Politics', icon: Vote, color: 'text-green-500' },
   { id: 'crypto', label: 'Crypto', icon: Bitcoin, color: 'text-amber-400' },
   { id: 'economy', label: 'Everything Economy', icon: BarChart3, color: 'text-emerald-500' },
@@ -143,12 +155,16 @@ export function Sidebar() {
               </CollapsibleTrigger>
               <CollapsibleContent className="pl-4 pr-2 py-1 space-y-1">
                 {category.subcategories?.map(sub => {
-                  // sub.category present → jump to that top-level category
-                  // (e.g. Fights → category=fight). Falls back to nested
-                  // subcategory routing only when no override is set.
-                  const isActive = sub.category
-                    ? currentCategory === sub.category
-                    : currentSubcategory === sub.id;
+                  // Active state has to be resolved the same way navigation
+                  // is, or the highlight lands on the wrong row: an href
+                  // subcategory leaves the markets page entirely, so its
+                  // ?category / ?subcategory params are gone and checking
+                  // them would never match.
+                  const isActive = sub.href
+                    ? !!pathname?.startsWith(sub.href)
+                    : sub.category
+                      ? currentCategory === sub.category
+                      : currentSubcategory === sub.id;
                   return (
                     <Button
                       key={sub.id}
@@ -173,9 +189,11 @@ export function Sidebar() {
         return (
           <Button
             key={category.id}
-            variant={isActive ? 'secondary' : 'ghost'}
-            className={cn('w-full justify-start gap-2 hover:bg-muted/50', isActive && 'bg-muted')}
-            onClick={() => handleNavigation(category.id)}
+            variant={category.href ? (pathname?.startsWith(category.href) ? 'secondary' : 'ghost')
+                                    : (isActive ? 'secondary' : 'ghost')}
+            className={cn('w-full justify-start gap-2 hover:bg-muted/50',
+              (category.href ? pathname?.startsWith(category.href) : isActive) && 'bg-muted')}
+            onClick={() => category.href ? router.push(category.href) : handleNavigation(category.id)}
           >
             {Icon && <Icon className={cn('h-4 w-4 drop-shadow-[0_0_8px_currentColor]', category.color)} />}
             <span className={!Icon ? 'ml-6' : ''}>{category.label}</span>

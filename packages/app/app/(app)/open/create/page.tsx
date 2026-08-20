@@ -41,6 +41,14 @@ const REJECT_REASONS = [
   'Something already decided',
 ];
 
+// Themed hub pages a market can land on, on top of the general /open browse
+// list — /bbn today, more as they get built. Adding the next one is one
+// entry here plus a hub page, not a schema change: event_tag is a free-text
+// column precisely so this list can grow without a migration.
+const EVENT_HUBS: Record<string, Array<{ id: string; label: string }>> = {
+  entertainment: [{ id: 'bbn', label: 'Big Brother Naija' }],
+};
+
 export default function CreateOpenMarketPage() {
   const { toast } = useToast();
   const router = useRouter();
@@ -54,6 +62,7 @@ export default function CreateOpenMarketPage() {
   const [sourceDetail, setSourceDetail] = useState('');
   const [closesAt, setClosesAt] = useState('');
   const [horizonAt, setHorizonAt] = useState('');
+  const [eventTag, setEventTag] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const setKindAndOutcomes = (k: 'binary' | 'multi') => {
@@ -106,6 +115,7 @@ export default function CreateOpenMarketPage() {
           resolutionDetail: sourceDetail.trim() || null,
           tradingClosesAt: closesAt ? new Date(closesAt).toISOString() : null,
           horizonAt: horizonAt ? new Date(horizonAt).toISOString() : null,
+          eventTag,
         }),
       });
       const d = await r.json();
@@ -230,12 +240,33 @@ export default function CreateOpenMarketPage() {
               <button key={c.id}
                       className={`px-3 py-1.5 rounded-full border text-[11px] transition-colors duration-150 ${
                         category === c.id ? 'border-emerald-500 bg-emerald-500/10' : 'border-border'}`}
-                      onClick={() => setCategory(c.id)}>
+                      onClick={() => { setCategory(c.id); setEventTag(null); }}>
                 {c.label}
               </button>
             ))}
           </div>
         </div>
+
+        {category && EVENT_HUBS[category] && (
+          <div className="space-y-1">
+            <p className="text-xs font-medium">
+              Feature this on a hub page <span className="text-muted-foreground font-normal">(optional)</span>
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {EVENT_HUBS[category].map(h => (
+                <button key={h.id}
+                        className={`px-3 py-1.5 rounded-full border text-[11px] transition-colors duration-150 ${
+                          eventTag === h.id ? 'border-fuchsia-500 bg-fuchsia-500/10 text-fuchsia-300' : 'border-border'}`}
+                        onClick={() => setEventTag(eventTag === h.id ? null : h.id)}>
+                  {h.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Puts your market on that page too, not instead of the general Open Markets list.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-1">
           <p className="text-xs font-medium">Who decides the answer?</p>

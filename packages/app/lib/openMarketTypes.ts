@@ -35,12 +35,16 @@ export type OpenMarketRow = {
   created_by: string | null;
   opened_at: string | null;
   resolved_at: string | null;
+  /** Routes this market onto a themed hub page (e.g. 'bbn' -> /bbn),
+      independent of category. Null for the overwhelming majority of
+      markets, which only ever show up on the general /open browse list. */
+  event_tag: string | null;
 };
 
 /** The subset the browse list needs — deliberately narrower than the full row. */
 export type OpenMarketListRow = Pick<OpenMarketRow,
   'id' | 'question' | 'description' | 'category' | 'outcomes' | 'q' | 'b' |
-  'status' | 'horizon_at' | 'trading_closes_at' | 'fees_collected' | 'opened_at'
+  'status' | 'horizon_at' | 'trading_closes_at' | 'fees_collected' | 'opened_at' | 'event_tag'
 > & { created_at: string };
 
 export type OpenPositionRow = {

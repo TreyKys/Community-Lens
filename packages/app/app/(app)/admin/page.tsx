@@ -1811,6 +1811,38 @@ function CreateMarketPanel() {
           </Select>
         </div>
 
+        {/* Hub-scoping fields for anything with its own dedicated hub page
+            (currently /football, /bbn). Below the odds-lookup importer,
+            these two are otherwise ONLY set by cloning an existing market —
+            there was no way to hand-type them for a fresh market, which
+            meant a brand-new BBN market had no way to land on its own hub.
+            Left blank, nothing changes: sport defaults to 'football' and
+            league_code to null exactly as before this was added. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label>Sport tag <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              value={clonedSport}
+              onChange={e => setClonedSport(e.target.value)}
+              placeholder="e.g. bbn"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Hub tag <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              value={clonedLeagueCode}
+              onChange={e => setClonedLeagueCode(e.target.value)}
+              placeholder="e.g. BBN_EVICTION"
+            />
+          </div>
+        </div>
+        {category === 'entertainment' && (
+          <p className="text-[11px] text-muted-foreground -mt-1">
+            For a market to show up on /bbn: sport tag <code className="bg-muted/40 px-1 py-0.5 rounded">bbn</code>,
+            plus a hub tag from <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_WINNER</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_EVICTION</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_HOH</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_SHIP</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_TWIST</code> if it fits one — leave it blank and it still shows under &ldquo;Everything&rdquo;.
+          </p>
+        )}
+
         <div className="space-y-2">
           <Label>Question</Label>
           <Textarea

@@ -45,6 +45,7 @@ export async function POST(request: Request) {
     p_resolution_detail: b?.resolutionDetail ? String(b.resolutionDetail) : null,
     p_horizon_at: b?.horizonAt || null,
     p_trading_closes_at: b?.tradingClosesAt || null,
+    p_event_tag: b?.eventTag ? String(b.eventTag) : null,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

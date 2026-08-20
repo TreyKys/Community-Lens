@@ -53,7 +53,7 @@ type Submission = {
   id: string; question: string; description: string | null; category: string;
   outcomes: string[]; resolutionSource: string; resolutionDetail: string | null;
   horizonAt: string | null; tradingClosesAt: string | null; status: string;
-  createdAt: string;
+  createdAt: string; eventTag: string | null;
   creator: { id: string | null; handle: string | null; email: string | null;
              resolved: number; rejected: number; voided: number; disputes: number };
   history: Array<{ decision: string; score: number | null; notes: string | null; created_at: string }>;
@@ -272,6 +272,9 @@ function SubmissionCard({ sub, expanded, onToggle, headroom, onDone }: {
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span className="uppercase">{sub.category}</span>
+            {sub.eventTag && (
+              <span className="text-fuchsia-400 font-medium">→ {sub.eventTag}</span>
+            )}
             <span>{sub.outcomes.length} outcomes</span>
             <span>{c.handle ? `@${c.handle}` : 'House'}</span>
             {c.id && (

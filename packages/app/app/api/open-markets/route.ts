@@ -23,21 +23,26 @@ const supabaseAdmin = createClient(
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category');
+  const eventTag = searchParams.get('eventTag');
   const limit = Math.min(Number(searchParams.get('limit') || 40), 100);
 
-  const base = supabaseAdmin
+  let base = supabaseAdmin
     .from('open_markets')
     .select('id, question, description, category, outcomes, q, b, status, ' +
-            'horizon_at, trading_closes_at, fees_collected, created_at, opened_at')
+            'horizon_at, trading_closes_at, fees_collected, created_at, opened_at, event_tag')
     // Only states a user can act on or learn from. pending_review and rejected
     // are deliberately invisible — an unapproved market must not be discoverable.
     .in('status', ['open', 'horizon_window', 'closed', 'pending_payout', 'resolved']);
 
   // Filter BEFORE .returns(): that call closes the builder, so any .eq() after
   // it no longer type-checks.
-  const filtered = category ? base.eq('category', category) : base;
+  if (category) base = base.eq('category', category);
+  // Hub pages (e.g. /bbn) pass this instead of/alongside category — it's the
+  // engine-agnostic routing tag, independent of the locked-odds sport/
+  // league_code mechanism this table doesn't have.
+  if (eventTag) base = base.eq('event_tag', eventTag.toLowerCase());
 
-  const { data, error } = await filtered
+  const { data, error } = await base
     .order('opened_at', { ascending: false, nullsFirst: false })
     .limit(limit)
     .returns<OpenMarketListRow[]>();
@@ -60,6 +65,7 @@ export async function GET(request: Request) {
       // public activity signal without exposing anyone's individual flow.
       volumeTngn: volumeFromFees(m.fees_collected),
       openedAt: m.opened_at,
+      eventTag: m.event_tag,
     };
   });
 
@@ -97,6 +103,7 @@ export async function POST(request: Request) {
     p_resolution_detail: b?.resolutionDetail ? String(b.resolutionDetail) : null,
     p_horizon_at: b?.horizonAt || null,
     p_trading_closes_at: b?.tradingClosesAt || null,
+    p_event_tag: b?.eventTag ? String(b.eventTag) : null,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
