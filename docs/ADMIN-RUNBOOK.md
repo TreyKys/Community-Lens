@@ -47,12 +47,18 @@ review queue.
 Either way it arrives at `pending_review` and is **invisible to the public**
 until approved. It is not live and no money is committed yet.
 
-The **creator field** on the admin form decides one thing:
+The **creator field** decides who *earns*, and nothing else:
 
-- **Blank = house market.** No creator, no fee share, and *anyone including
-  you* can trade it. Use this for testing and for house-authored markets.
-- **A user's UUID** = they earn 25% of fees above the threshold. They then
-  cannot trade it, and cannot review it.
+- **Blank = house market.** No creator, so no fee share is paid out.
+- **A user's UUID** = they earn 25% of fees above the threshold.
+
+**Who put it there is recorded separately and always.** Whoever submits a
+market — including a house market with no creator — cannot then review it,
+trade it, or resolve it. Four eyes holds whether or not anybody is being paid.
+
+That matters because a house market is the natural thing to reach for when
+testing, and it used to be the one configuration where all three of those
+guards fell open at once.
 
 ## 2.2 Approving one — `/admin/open-markets`
 
@@ -104,8 +110,8 @@ happens.
 public knowledge. Otherwise the book is still live while the result is
 knowable and the house is the counterparty to every informed trade.
 
-**Four eyes:** you cannot approve a market you created. Enforced in the
-database.
+**Four eyes:** you cannot approve a market you created *or submitted*. Both
+are enforced in the database, not just hidden in the UI.
 
 ## 2.3 Resolving one — `/admin/open-markets/resolve`
 
@@ -118,7 +124,8 @@ Order matters:
 4. Apply.
 
 **Resolution needs two people.** You paste a second admin's user UUID as
-confirmer. Neither of you may be the creator. Evidence link is required.
+confirmer. Neither of you may be the market's creator, and neither may be
+whoever submitted it. Evidence link is required.
 
 **Void has two kinds:**
 
@@ -193,6 +200,12 @@ Read this before your first live market.
 - **Resolving** with the wrong outcome pays the wrong people. Preview, and use
   the second pair of eyes properly rather than clicking through it.
 
+Not reversible either, and worth stating plainly: **nobody can trade a market
+they submitted.** If you want to take a position on something, get a colleague
+to put it up. That is not bureaucracy — an admin who can submit, approve,
+trade and resolve the same market is running an insider desk, and no amount of
+good intent makes the audit trail say otherwise.
+
 Reversible: pausing the engine, halting a market, sending back for revision,
 rejecting, and changing the fleet cap.
 
@@ -200,15 +213,22 @@ rejecting, and changing the fleet cap.
 
 # 6. First live market — suggested order
 
-1. `/admin/open-markets/new`, creator field **blank** (house market, so you
-   can trade it yourself)
-2. Approve it at Starter tier, close time a few hours out
-3. Open it from `/open`, buy ₦500 of one side
-4. Check `/open/portfolio` shows the position
-5. Sell half — confirm you get back less than you paid (fee twice plus the
-   price move; that is correct, not a bug)
-6. Close trading → resolve with a second admin UUID → preview → apply
-7. "Release payouts now" rather than waiting 24h
-8. Confirm the wallet balance moved and `/admin/open-markets/exposure` is clean
+**You need two accounts.** Not a limitation to work around — it is the
+control working. Whoever submits a market cannot approve, trade or resolve it.
+
+- **Admin A** submits. A is then locked out of this market entirely.
+- **Admins B and C** resolve it — resolution always needs two distinct people,
+  and neither may be A.
+- **Any ordinary account** (not A) does the trading.
+
+1. As **A**: `/admin/open-markets/new`. Creator blank for a house market.
+2. As **B**: approve at Starter tier, close time a few hours out.
+3. As **an ordinary user**: open it from `/open`, buy ₦500 of one side.
+4. Check `/open/portfolio` shows the position.
+5. Sell half — you get back less than you paid. That is the fee twice plus
+   your own price impact, and it is correct, not a bug.
+6. As **B**: close trading → resolve, confirmer **C** → preview → apply.
+7. "Release payouts now" rather than waiting out the dispute window.
+8. Confirm the wallet moved and `/admin/open-markets/exposure` is clean.
 
 Do this once end to end before any real user touches it.
