@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ChevronLeft, ShieldAlert, BarChart3, Gavel } from 'lucide-react';
+import { Loader2, ChevronLeft, ShieldAlert, BarChart3, Gavel, Plus } from 'lucide-react';
 
 // Open Markets review queue.
 //
@@ -140,11 +140,18 @@ export default function OpenMarketsReviewPage() {
         </div>
       </div>
 
-      <div>
-        <h1 className="text-xl font-bold">Open Markets review</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          Approving commits house money. Everything below the fold is the rubric.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">Open Markets review</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            Approving commits house money. Everything below the fold is the rubric.
+          </p>
+        </div>
+        <Link href="/admin/open-markets/new">
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500 shrink-0">
+            <Plus className="w-4 h-4 mr-1" /> New market
+          </Button>
+        </Link>
       </div>
 
       {/* Budget sits next to the queue because approving is what spends it.

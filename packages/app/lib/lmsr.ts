@@ -273,3 +273,91 @@ export function proRataUnwind(
   // distribution can never exceed the pool.
   return weights.map(w => payoutKoboFloor((pool * w) / totalWeight));
 }
+
+/**
+ * How many shares a naira BUDGET buys, fee included.
+ *
+ * The inverse of quoteTrade for buys. Needed because the trade ticket asks
+ * users for an amount of money, not a share count: "put ₦2,000 on Yes" is how
+ * someone actually thinks, and every other staking flow on this site takes
+ * naira. Making people compute a share count first is asking them to do the
+ * market maker's arithmetic.
+ *
+ * Solved by bisection rather than algebraically. The closed form is
+ * invertible for a single outcome, but the fee is applied to the rounded cost
+ * and the rounding is deliberately house-favourable, so an analytic answer
+ * would disagree with quoteTrade at the kobo — and quoteTrade is what the
+ * server actually charges. Bisecting ON quoteTrade means this cannot drift
+ * from the real price by construction.
+ *
+ * ALWAYS ROUNDS DOWN. The returned share count costs at most `budgetNaira`,
+ * never a kobo more, so a user who types their whole balance is not rejected
+ * for insufficient funds by a rounding step they cannot see.
+ *
+ * Returns 0 when the budget cannot buy a meaningful position — the caller
+ * should treat that as "too small", not as an error.
+ */
+export function sharesForBudget(
+  q: number[],
+  b: number,
+  outcomeIdx: number,
+  budgetNaira: number,
+): number {
+  if (!Number.isFinite(budgetNaira) || budgetNaira <= 0) return 0;
+  if (outcomeIdx < 0 || outcomeIdx >= q.length) throw new Error('outcome index out of range');
+
+  // quoteTrade works in KOBO, so the budget is converted once here rather
+  // than the comparison silently mixing units by a factor of 100.
+  const budgetKobo = budgetNaira * KOBO_PER_NAIRA;
+  // quoteTrade REJECTS anything below the ₦100 minimum, and bisection probes
+  // sizes far below that on its way up. A throw there is not an error, it is
+  // "this size is too small" — which for the search means affordable, so the
+  // interval moves upward. Swallowing it here is what lets the search start
+  // from zero at all.
+  const costOf = (shares: number) => {
+    try {
+      return quoteTrade(q, b, outcomeIdx, shares, 0).totalKobo;
+    } catch {
+      return 0;
+    }
+  };
+
+  // Upper bound: cost per share is always < 1 naira (a share can never be
+  // worth more than the ₦1 it pays out), so the budget can never buy more
+  // than budget/(1-fee) shares. Doubling from there is belt and braces for
+  // the fee edge.
+  let lo = 0;
+  let hi = Math.max(1, (budgetNaira / (1 - TRADE_FEE_PCT)) * 2);
+
+  // If even the upper bound is affordable something is wrong with the
+  // assumption above; fail closed by returning it rather than looping.
+  if (costOf(hi) <= budgetKobo) return hi;
+
+  // 60 iterations takes the interval below float precision for any realistic
+  // budget — this is not a hot path (one call per keystroke, debounced).
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (costOf(mid) <= budgetKobo) lo = mid; else hi = mid;
+  }
+
+  // lo is the largest size known to be affordable. Floor to whole shares:
+  // fractional share counts are noise in the UI and the extra precision buys
+  // nothing a user can perceive.
+  const whole = Math.floor(lo);
+  if (whole < 1) return 0;
+
+  // The search treats sub-minimum sizes as affordable, so a small budget can
+  // land on a share count that the server would refuse outright. Report that
+  // as 0 — "your budget is too small" — rather than handing back a number
+  // that fails at submit with a confusing error.
+  let finalKobo: number;
+  try {
+    finalKobo = quoteTrade(q, b, outcomeIdx, whole, 0).totalKobo;
+  } catch {
+    return 0;
+  }
+  if (finalKobo < MIN_TRADE_KOBO) return 0;
+
+  // Floor can only reduce cost, so this stays within budget.
+  return whole;
+}

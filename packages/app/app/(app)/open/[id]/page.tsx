@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { sharesForBudget } from '@/lib/lmsr';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +25,7 @@ import { Loader2, ChevronLeft, TrendingUp, TrendingDown, Info, Share2, Flag } fr
 
 type Mkt = {
   id: string; question: string; description?: string; outcomes: string[];
-  prices: number[]; status: string; resolutionSource: string;
+  prices: number[]; q: number[]; b: number; status: string; resolutionSource: string;
   horizonAt?: string; tradingClosesAt?: string; resolvedOutcome?: number | null;
   volumeTngn: number; isCreator: boolean; settlementLockedUntil?: string | null;
 };
@@ -47,7 +48,11 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
 
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [outcomeIdx, setOutcomeIdx] = useState(0);
+  // `amount` is always a SHARE count — it is what the quote and the trade RPC
+  // take. On a buy the user types naira into `budget` and this is derived
+  // from it; on a sell they size it directly.
   const [amount, setAmount] = useState('');
+  const [budget, setBudget] = useState('');
   const [quote, setQuote] = useState<any>(null);
   const [quoting, setQuoting] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -77,6 +82,26 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
   }, [params.id, toast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Naira in -> share count out, computed locally from the book. Debounced
+  // alongside the quote so a fast typist doesn't churn it.
+  //
+  // This is an ESTIMATE used to size the order. The authoritative price comes
+  // back from the quote endpoint below, and the order itself carries a limit,
+  // so being slightly stale here can never produce a fill the user didn't
+  // agree to.
+  useEffect(() => {
+    if (side !== 'buy') return;
+    const naira = Number(budget);
+    if (!mkt || !naira || naira <= 0) { if (side === 'buy') setAmount(''); return; }
+    const t = setTimeout(() => {
+      try {
+        const n = sharesForBudget(mkt.q, mkt.b, outcomeIdx, naira);
+        setAmount(n > 0 ? String(n) : '');
+      } catch { setAmount(''); }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [budget, outcomeIdx, side, mkt]);
 
   // Re-quote as the user types. Debounced, because every keystroke otherwise
   // hits the pricing function.
@@ -131,7 +156,7 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
           : `${ngn(Math.abs(d.totalTngn))} back in your wallet`,
       });
       newTradeId();          // next order gets a fresh key
-      setAmount(''); setQuote(null);
+      setAmount(''); setBudget(''); setQuote(null);
       load();
     } catch (e: any) {
       toast({ title: 'Trade failed', description: e.message, variant: 'destructive' });
@@ -147,6 +172,7 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
 
   const tradable = mkt.status === 'open' && !mkt.isCreator;
   const held = positions.find(p => p.outcomeIdx === outcomeIdx);
+  const shares = Number(amount) || 0;
 
   // A dispute only means anything while payouts are still held. Once money
   // lands in a withdrawable balance it cannot be taken back, so the button
@@ -293,15 +319,70 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
               </Button>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground">
-                Shares of <span className="text-foreground/80">{mkt.outcomes[outcomeIdx]}</span>
-                {side === 'sell' && held && <> · you hold {Math.round(held.shares).toLocaleString()}</>}
-              </label>
-              <Input type="number" inputMode="numeric" placeholder="e.g. 1000"
-                     value={amount} onChange={e => setAmount(e.target.value)} />
-            </div>
+            {/* BUY takes naira, not a share count.
+                "Put ₦2,000 on Yes" is how someone actually thinks, and every
+                other staking flow on this site asks for naira. Asking for
+                shares makes the user do the market maker's arithmetic before
+                they can place a bet. The share count is derived and shown
+                underneath, so nothing is hidden — it is just no longer the
+                thing you have to work out yourself.
 
+                SELL stays in shares, sized off the holding, because there the
+                natural question is "how much of my position do I want out
+                of" — and a naira target is not answerable in advance, since
+                the proceeds depend on how far your own sale moves the price. */}
+            {side === 'buy' ? (
+              <div className="space-y-2">
+                <label className="text-[11px] text-muted-foreground">
+                  How much on <span className="text-foreground/80">{mkt.outcomes[outcomeIdx]}</span>?
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
+                  <Input type="number" inputMode="numeric" placeholder="Amount (min ₦100)"
+                         className="pl-8 bg-transparent" min={100}
+                         value={budget} onChange={e => setBudget(e.target.value)} />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[500, 1000, 2000, 5000].map(v => (
+                    <button key={v} type="button"
+                            onClick={() => setBudget(String(v))}
+                            className={`px-2.5 py-1 rounded-full border text-[11px] transition-colors duration-150 ${
+                              Number(budget) === v
+                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
+                                : 'border-border/60 text-muted-foreground hover:border-emerald-500/40'}`}>
+                      ₦{v.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+                {Number(budget) > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {shares > 0
+                      ? <>That buys about <span className="text-foreground/80 tabular">{shares.toLocaleString()}</span> shares
+                          at today&rsquo;s price.</>
+                      : 'Too small to place — try at least ₦100.'}
+                  </p>
+                )}
+              </div>
+            ) : (
+            <div className="space-y-2">
+              <label className="text-[11px] text-muted-foreground">
+                Sell <span className="text-foreground/80">{mkt.outcomes[outcomeIdx]}</span>
+                {held && <> · you hold {Math.round(held.shares).toLocaleString()}</>}
+              </label>
+              <Input type="number" inputMode="numeric" placeholder="Shares to sell"
+                     value={amount} onChange={e => setAmount(e.target.value)} />
+              <div className="flex flex-wrap gap-1.5">
+                {[25, 50, 100].map(p => (
+                  <button key={p} type="button"
+                          disabled={!held}
+                          onClick={() => held && setAmount(String(Math.floor(held.shares * p / 100)))}
+                          className="px-2.5 py-1 rounded-full border border-border/60 text-[11px] text-muted-foreground hover:border-red-500/40 disabled:opacity-40">
+                    {p === 100 ? 'All' : `${p}%`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
             {quoting && <p className="text-xs text-muted-foreground flex items-center gap-2">
               <Loader2 className="w-3 h-3 animate-spin" /> Pricing…</p>}
 
