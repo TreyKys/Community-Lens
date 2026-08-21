@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -645,7 +645,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+function MarketCardBase({
   market,
   session,
   onBetPlaced,
@@ -1064,6 +1064,9 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   const slip = useSlip();
 
+
+
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem('opx_stake_intent');
@@ -1274,6 +1277,19 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    await fetchMarkets({ silent: true });
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [fetchMarkets, session?.user?.id, fetchStakedMarkets, setAutoSharePick]);
+
+
   // Restore scroll position when the same view re-mounts (e.g. user navigates
   // into /event/X and uses back, or hops between tabs and returns). Without
   // this Next.js dumps users at scrollY=0 every time, which is exhausting on
@@ -1346,21 +1362,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
@@ -1387,3 +1389,64 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     </div>
   );
 }
+
+
+// Custom equality check for React.memo to prevent stale closures and unnecessary re-renders.
+const areEqual = (prev: MarketCardProps, next: MarketCardProps) => {
+  // Compare scalar props
+  if (
+    prev.hideViewMore !== next.hideViewMore ||
+    prev.isStaked !== next.isStaked ||
+    prev.prefillOutcomeIndex !== next.prefillOutcomeIndex ||
+    prev.prefillStakeTngn !== next.prefillStakeTngn ||
+    prev.prefillEditStake !== next.prefillEditStake ||
+    prev.prefillFromShareId !== next.prefillFromShareId ||
+    prev.autoOpen !== next.autoOpen
+  ) {
+    return false;
+  }
+
+  // Check stable callbacks
+  if (prev.onBetPlaced !== next.onBetPlaced) {
+    return false;
+  }
+
+  // Compare session object and access token specifically
+  if (prev.session !== next.session || prev.session?.access_token !== next.session?.access_token) {
+    return false;
+  }
+
+  // Deep compare market object
+  if (!prev.market || !next.market) return prev.market === next.market;
+
+  const prevKeys = Object.keys(prev.market) as (keyof Market)[];
+  const nextKeys = Object.keys(next.market) as (keyof Market)[];
+
+  if (prevKeys.length !== nextKeys.length) return false;
+
+  for (const key of prevKeys) {
+    if (key === 'options') {
+      // Deep compare nested arrays (compare lengths and values)
+      const prevOpts = prev.market.options;
+      const nextOpts = next.market.options;
+
+      // If either isn't an array, or their lengths differ
+      if (!Array.isArray(prevOpts) || !Array.isArray(nextOpts) || prevOpts.length !== nextOpts.length) {
+        return false;
+      }
+
+      // Compare each element
+      for (let i = 0; i < prevOpts.length; i++) {
+        if (prevOpts[i] !== nextOpts[i]) return false;
+      }
+    } else {
+      if (prev.market[key] !== next.market[key]) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
+
+const MarketCard = React.memo(MarketCardBase, areEqual);
