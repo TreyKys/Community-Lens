@@ -5,6 +5,7 @@ import { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Sparkles, Clock, Trophy, Swords, Landmark, Coins,
+  Eye, TrendingUp, Gamepad2, CircleDot, Zap,
 } from 'lucide-react';
 
 // Tab model: Trending = admin-curated featured set (a few hot ones);
@@ -12,13 +13,31 @@ import {
 // from meaning "everything" — the hot Golden Boot / Messi / group
 // winner markets stay surfaced instead of getting buried by the long
 // tail of less popular markets.
+//
+// Two kinds of entry live in this rail, and the difference matters:
+//
+//   FILTERS (no href)  -- stay on /markets and set ?category=
+//   HUBS   (with href) -- leave for a dedicated page with its own backdrop
+//
+// The hubs were previously reachable only through the mobile Menu sheet, so in
+// practice nobody found them: /markets is the screen people actually open, and
+// it looked exactly as it always had. A hub nobody can reach is a hub that
+// does not exist.
+//
+// Hubs sit early -- right after Trending and New -- because they are the point
+// of difference, not an afterthought at the end of a scrolling rail.
 const TABS = [
   { id: 'trending', label: 'Trending', Icon: Sparkles },
-  { id: 'new', label: 'New', Icon: Clock },
-  { id: 'ball', label: 'Ball', Icon: Trophy },
-  { id: 'fight', label: 'Fight', Icon: Swords },
+  { id: 'new',      label: 'New',      Icon: Clock },
+  { id: 'open',     label: 'Trade',    Icon: TrendingUp, href: '/open',       accent: 'text-emerald-400' },
+  { id: 'bbn',      label: 'BBN',      Icon: Eye,        href: '/bbn',        accent: 'text-fuchsia-400' },
+  { id: 'ball',     label: 'Ball',     Icon: Trophy },
+  { id: 'basketball', label: 'Basketball', Icon: CircleDot, href: '/basketball', accent: 'text-orange-400' },
+  { id: 'tennis',   label: 'Tennis',   Icon: Zap,        href: '/tennis',     accent: 'text-lime-400' },
+  { id: 'esports',  label: 'Esports',  Icon: Gamepad2,   href: '/esports',    accent: 'text-violet-400' },
+  { id: 'fight',    label: 'Fight',    Icon: Swords,     href: '/fight',      accent: 'text-red-400' },
   { id: 'politics', label: 'Politics', Icon: Landmark },
-  { id: 'economy', label: 'Everything Economy', Icon: Coins },
+  { id: 'economy',  label: 'Everything Economy', Icon: Coins },
 ] as const;
 
 export function CategoryTabs() {
@@ -77,13 +96,16 @@ export function CategoryTabs() {
         ref={railRef}
         className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {TABS.map(({ id, label, Icon }) => {
-          const isActive = active === id;
+        {TABS.map((tab) => {
+          const { id, label, Icon } = tab;
+          const href = 'href' in tab ? tab.href : undefined;
+          const accent = 'accent' in tab ? tab.accent : undefined;
+          const isActive = !href && active === id;
           return (
             <button
               key={id}
               data-tab-id={id}
-              onClick={() => setCategory(id)}
+              onClick={() => href ? router.push(href) : setCategory(id)}
               className={cn(
                 'shrink-0 flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap',
                 isActive
@@ -91,7 +113,10 @@ export function CategoryTabs() {
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
               )}
             >
-              <Icon className="w-4 h-4" />
+              {/* Hubs keep their accent colour on the icon even when inactive.
+                  It is the only signal in the rail saying "this one goes
+                  somewhere else"; without it they read as more filters. */}
+              <Icon className={cn('w-4 h-4', !isActive && accent)} />
               {label}
             </button>
           );
