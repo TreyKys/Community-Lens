@@ -1064,6 +1064,7 @@ interface MarketListProps {
 
 export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport, scopeCategory = 'sports' }: MarketListProps) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const category = searchParams.get('category') || 'trending';
   const subcategory = searchParams.get('subcategory') || null;
 
@@ -1348,18 +1349,50 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
   }
 
   if (markets.length === 0) {
-    // Trending starts empty until admin flags a few featured markets;
-    // nudge users to the New tab so the empty Trending isn't a dead end.
+    // An empty state is a screen, not an error message. The old version was a
+    // grey sentence in a box — factually correct and a dead end, on what is
+    // often the FIRST thing a new user sees. Every branch now offers somewhere
+    // to actually go.
     const trendingEmpty = category === 'trending' && !filterChildrenOfParentId && !filterExactMarketId;
+    const searching = !!searchQuery;
+
+    if (filterChildrenOfParentId) {
+      return (
+        <div className="text-center p-10 border border-border/60 rounded-xl bg-card/40">
+          <p className="text-sm text-muted-foreground">No sub-markets for this event yet.</p>
+        </div>
+      );
+    }
+
     return (
-      <div className="text-center p-12 border border-muted rounded-xl bg-card/50">
-        <p className="text-muted-foreground">
-          {filterChildrenOfParentId
-            ? 'No sub-markets for this event.'
-            : trendingEmpty
-              ? "No featured markets right now. Tap 'New' for everything else."
-              : 'No markets in this category yet.'}
-        </p>
+      <div className="text-center px-6 py-10 border border-border/60 rounded-xl bg-card/40 space-y-3">
+        <div className="mx-auto w-12 h-12 rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/20 flex items-center justify-center">
+          <Sparkles className="w-5 h-5 text-emerald-400" />
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">
+            {searching ? 'Nothing matches that' : trendingEmpty ? 'Nothing featured right now' : 'Nothing here yet'}
+          </p>
+          <p className="text-xs text-muted-foreground max-w-[260px] mx-auto">
+            {searching
+              ? 'Try a shorter search, or browse everything that’s live.'
+              : trendingEmpty
+                ? 'Featured markets are hand-picked and change often. Everything else is one tap away.'
+                : 'This category is quiet. There’s plenty happening elsewhere.'}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 justify-center pt-1">
+          <Button size="sm" variant="outline"
+                  onClick={() => router.push('/markets?category=new')}>
+            Browse everything
+          </Button>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500"
+                  onClick={() => router.push('/open')}>
+            Try trading
+          </Button>
+        </div>
       </div>
     );
   }

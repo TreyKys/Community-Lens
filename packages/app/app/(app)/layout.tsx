@@ -3,6 +3,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ReferralBonusToast } from "@/components/ReferralBonusToast";
 import { SlipProvider } from "@/components/multiplier/SlipProvider";
 import { MultiplierSlip } from "@/components/multiplier/MultiplierSlip";
+import { AppModals } from "@/components/AppModals";
 
 export default function AppLayout({
   children,
@@ -29,6 +30,9 @@ export default function AppLayout({
         </div>
       </div>
       <MultiplierSlip />
+      {/* Return moments: at most one ever shows, and never over a flow.
+          See AppModals for why Welcome Back beats What's New on a tie. */}
+      <Suspense fallback={null}><AppModals /></Suspense>
     </SlipProvider>
   );
 }
