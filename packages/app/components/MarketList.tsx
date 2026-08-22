@@ -16,6 +16,7 @@ import { calculatePotentialPayout } from '@/lib/payout';
 import { displayFloorPayout } from '@/lib/displayMultiplier';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
 import { useSlip } from '@/components/multiplier/SlipProvider';
+import { StakeConfirmation } from '@/components/StakeConfirmation';
 import { SharePickModal } from '@/components/SharePickModal';
 import { PickPreviewModal } from '@/components/PickPreviewModal';
 import { getDisplayPool } from '@/lib/displayPool';
@@ -118,6 +119,12 @@ function BettingInterface({
   const [balance, setBalance] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<{ option: string; amount: number; percentage: number }[]>([]);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
+  // The post-stake celebration. Held here rather than in the parent so the
+  // numbers it shows come straight from the response that placed the bet.
+  const [confirm, setConfirm] = useState<{
+    pick: string; stakeTngn: number; returnsTngn: number | null;
+  } | null>(null);
+  const [pendingBetId, setPendingBetId] = useState<string | undefined>(undefined);
   // Multiplier slip — add the selected leg to the global slip.
   const { addLeg, hasMarket: slipHasMarket, setOpen: setSlipOpen } = useSlip();
   // Locked-odds config for this market, fetched alongside the
@@ -274,15 +281,22 @@ function BettingInterface({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Prediction failed');
 
-      toast({
-        title: '✅ Prediction locked!',
-        description: `₦${Number(amount).toLocaleString()} committed to ${market.options[parseInt(selectedOption)]}`,
+      // The confirmation moment, in place of a toast that read like "copied to
+      // clipboard". floorPayout is the server-guaranteed minimum on a
+      // locked-odds bet; on parimutuel the final number genuinely is not known
+      // until the pool closes, so nothing is claimed rather than a guess shown.
+      setConfirm({
+        pick: market.options[parseInt(selectedOption)],
+        stakeTngn: Number(amount),
+        returnsTngn: typeof data?.floorPayout === 'number' ? data.floorPayout : null,
       });
 
       // Pass the created bet id back so the parent can auto-open the
       // OPx Picks share modal — the user just made a pick and the
       // share prompt rides the dopamine of placing it.
-      onSuccess(data?.betId || data?.bet?.id || data?.id);
+      // Held until the confirmation closes: firing now would stack the share
+      // modal on top of the celebration and the user would see neither.
+      setPendingBetId(data?.betId || data?.bet?.id || data?.id);
     } catch (err: any) {
       toast({ title: 'Prediction failed', description: err.message, variant: 'destructive' });
     } finally {
@@ -292,6 +306,19 @@ function BettingInterface({
 
   return (
     <div className="space-y-4 pt-2 relative">
+      {confirm && (
+        <StakeConfirmation
+          pick={confirm.pick}
+          stakeTngn={confirm.stakeTngn}
+          returnsTngn={confirm.returnsTngn}
+          onDone={() => {
+            setConfirm(null);
+            // Now hand back to the parent, which pops the share modal. The
+            // order matters: celebrate the bet, then ask them to share it.
+            onSuccess(pendingBetId);
+          }}
+        />
+      )}
       {/* First-bet walkthrough — sits absolute over the form so the data
           loaders (balance, distribution) behind it run in parallel; user
           sees a populated form the moment they dismiss. Three plain

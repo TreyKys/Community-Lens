@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { StreaksCard } from '@/components/StreaksCard';
+import { RewardsCard } from '@/components/RewardsCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -277,6 +278,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        <RewardsCard />
         <StreaksCard />
 
         {isVip && (
