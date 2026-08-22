@@ -1,0 +1,3 @@
+## 2024-05-18 - Missing memoization for React list rendering components
+**Learning:** In list rendering where components are mapped over an array, wrapping the list items (like `MarketCard`) in `React.memo` with a custom deep equality comparison is crucial to prevent unnecessary re-renders, especially when the parent component reconstructs object references on state updates or when rendering items from external data stores like Supabase.
+**Action:** When working on lists that render many child components, inspect whether the child component is memoized. If not, add `React.memo` using deep comparison or checking specific field values. This avoids huge rendering overheads.
