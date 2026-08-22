@@ -9,6 +9,7 @@ import {
   TrendingUp, Clock, ChevronRight, Loader2, Lock, Share2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { StreaksCard } from '@/components/StreaksCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -212,6 +213,10 @@ export default function DashboardPage() {
 
   return (
     <div className="px-3 py-4 md:p-6 space-y-5 max-w-3xl mx-auto">
+      {/* Streaks sit directly under the balance, not at the bottom: they are
+          the reason to come back on a day with nothing riding, and a reason
+          nobody scrolls to is not a reason. Renders nothing until the user
+          has any streak state, so a brand-new account sees no empty shell. */}
       {/* Hero balance card */}
       <Card className={cn(
         'overflow-hidden border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent relative',
@@ -271,6 +276,8 @@ export default function DashboardPage() {
             </Link>
           </CardContent>
         </Card>
+
+        <StreaksCard />
 
         {isVip && (
           <Card className="border-amber-500/25">

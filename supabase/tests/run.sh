@@ -28,6 +28,7 @@ MIGRATIONS=(
   20260807020000_open_markets_creator_and_disputes
   20260807030000_open_markets_event_tag
   20260807040000_open_markets_submitter_accountability
+  20260807050000_streaks
 )
 
 psql_as() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $DB $*"; }
@@ -46,7 +47,7 @@ done
 echo "migrations loaded: ${#MIGRATIONS[@]}"
 
 fail=0
-for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market; do
+for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks; do
   echo
   echo "── $suite ──"
   # Each suite gets a fresh database: they both create users and markets, and
