@@ -228,34 +228,62 @@ and restarts — no editor, no rebuild, no redeploy.
 ssh YOUR_USER@YOUR_HOST 'bash -s' <<'REMOTE'
 set -euo pipefail
 cd ~/app
-grep -v -E '^VAPID_(PUBLIC_KEY|PRIVATE_KEY|SUBJECT)=' .env > .env.tmp 2>/dev/null || true
+
+# Refuse to touch anything unless .env is where we expect it. Without this a
+# wrong directory silently CREATES a .env holding nothing but these three keys
+# while the real one is never updated — which looks identical to keys that did
+# not work.
+[ -f .env ] || { echo "FAIL: no .env in $(pwd) — nothing changed"; exit 1; }
+
+cp -p .env ".env.bak.$(date +%Y%m%d-%H%M%S)"
+
+grep -v -E '^VAPID_(PUBLIC_KEY|PRIVATE_KEY|SUBJECT)=' .env > .env.tmp || true
 cat >> .env.tmp <<'EOF'
 VAPID_PUBLIC_KEY=PASTE_PUBLIC_KEY_HERE
 VAPID_PRIVATE_KEY=PASTE_PRIVATE_KEY_HERE
 VAPID_SUBJECT=mailto:support@opinionsng.com
 EOF
+
+# Every non-VAPID line that was in the old file must be in the new one. This is
+# what makes replacing the file safe: if anything truncated the rewrite, .env is
+# left exactly as it was.
+before=$(grep -cvE '^VAPID_(PUBLIC_KEY|PRIVATE_KEY|SUBJECT)=' .env || true)
+after=$(grep -cvE '^VAPID_(PUBLIC_KEY|PRIVATE_KEY|SUBJECT)=' .env.tmp || true)
+if [ "$after" -lt "$before" ]; then
+  echo "FAIL: $before other lines before, only $after after — .env NOT changed"
+  rm -f .env.tmp; exit 1
+fi
+
 mv .env.tmp .env && chmod 600 .env
+echo "OK: $before other lines preserved"
 docker compose up -d --force-recreate app
 REMOTE
 ```
 
-What the three odd-looking bits are doing:
+**Nothing else in `.env` is touched.** The rewrite drops only lines starting
+with `VAPID_PUBLIC_KEY=`, `VAPID_PRIVATE_KEY=` or `VAPID_SUBJECT=`; every other
+line is copied through byte for byte. There is a timestamped `.env.bak.*`
+either way.
 
-- The `grep -v` strips any VAPID lines already in the file before appending, so
-  running this twice replaces the keys rather than stacking a second copy. Every
-  other line in `.env` is left exactly as it was.
-- `chmod 600` restores the permissions after the temp-file swap. `.env` holds
-  the service-role key; it must not become world-readable.
-- `--force-recreate` because Compose does not reliably notice an `env_file`
-  change on its own, and a container that keeps running with the old
-  environment looks exactly like keys that did not work.
+Why the extra machinery, since this is "just adding three lines":
+
+- **Existence check** — a wrong working directory would otherwise create a
+  stray `.env` and leave the real one alone, with no error.
+- **The line-count guard** — the file is rebuilt and swapped in, so a rewrite
+  that truncated for any reason would replace the production secrets file with
+  a short one. The check compares before and after and aborts rather than
+  swapping.
+- **Stripping before appending** — makes it safe to run twice. A second run
+  replaces the keys instead of stacking a duplicate pair below the first, and
+  the later duplicate would win silently.
+- **`chmod 600`** — restores permissions after the swap. `.env` holds the
+  service-role key.
+- **`--force-recreate`** — Compose does not reliably notice an `env_file`
+  change, and a container still running the old environment is
+  indistinguishable from keys that did not work.
 
 These are runtime variables (`env_file: .env` in `docker-compose.yml` injects
 them into the container), which is why no rebuild is involved.
-
-*(These are deliberately not named `NEXT_PUBLIC_*`. Vars with that prefix are
-baked into the image at build time from GitHub secrets, which would have made
-this a full rebuild instead of a restart.)*
 
 **3. Check it worked.** Run the **Cron — Push notifications** workflow by hand
 (Actions → the workflow → Run workflow). The response should no longer say
