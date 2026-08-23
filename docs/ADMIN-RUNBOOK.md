@@ -199,14 +199,48 @@ Three behaviours worth knowing before you get a support ticket about them:
 
 ## Switching push on
 
-It ships **off**. Until the keys exist, `/api/cron/push` returns
-`{ skipped: "VAPID keys not configured" }` and nothing else changes.
+**What this actually is.** Phone notifications don't come from our server
+directly — they go through Google's, Apple's and Mozilla's push services, which
+deliver to the phone even when the browser is closed. Those services will not
+carry a message from just anybody, so we need an identity: a pair of
+cryptographic keys, generated once, that says "this really is Opinions.ng".
+The **public** key is handed to each browser when it subscribes; the **private**
+key signs every message we send. That pair is all the setup there is.
 
-1. `npx web-push generate-vapid-keys` — run it **once**.
-2. Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT`
-   in the hosting environment and redeploy.
-3. Confirm with `POST /api/cron/push` (workflow_dispatch on the Action) — it
-   should stop saying `skipped`.
+The code is already deployed and already switched off on purpose. It stays off
+until those keys exist — `/api/cron/push` just returns
+`{ skipped: "VAPID keys not configured" }` and nothing else in the app changes.
+
+**1. Generate the pair. Once, ever, on any machine:**
+
+```
+npx web-push generate-vapid-keys
+```
+
+It prints a `Public Key:` and a `Private Key:`. Keep both — put them in the
+password manager now, because step 2 is the only place they get stored.
+
+**2. Put them on the production server.** SSH in, open the `.env` file that
+docker-compose reads (the same one holding `SUPABASE_SERVICE_ROLE_KEY`), and
+add three lines:
+
+```
+VAPID_PUBLIC_KEY=<the Public Key it printed>
+VAPID_PRIVATE_KEY=<the Private Key it printed>
+VAPID_SUBJECT=mailto:support@opinionsng.com
+```
+
+**No rebuild and no redeploy** — these are read at runtime. Restart the
+container (`docker compose up -d`) and it picks them up.
+
+*(These are deliberately not named `NEXT_PUBLIC_*`. Vars with that prefix are
+baked into the image at build time from GitHub secrets, which would have made
+this a full rebuild instead of a restart.)*
+
+**3. Check it worked.** Run the **Cron — Push notifications** workflow by hand
+(Actions → the workflow → Run workflow). The response should no longer say
+`skipped`. Then open the site on a phone, place any stake, and accept the
+notification card that appears a few seconds after the confirmation.
 
 **Do not regenerate the keys later.** Every subscription already handed out is
 tied to that public key; a new pair silences every device until each person
@@ -216,6 +250,33 @@ Users are asked for permission only after they have staked something, never on
 page load — a browser permission denial is close to permanent, so an
 unexplained prompt costs that person forever rather than costing one
 notification. They can turn it off again on `/profile`.
+
+---
+
+# 3a. Migrations still to apply
+
+Run these in the Supabase dashboard → **SQL Editor**, one at a time, **top to
+bottom**. Order matters: each builds on the one above it.
+
+| # | File | What it adds |
+|---|---|---|
+| 1 | `20260807050000_streaks.sql` | The six streaks and their claim ledger |
+| 2 | `20260807060000_rewards_phone_and_socials.sql` | Phone + social follow bonuses |
+| 3 | `20260807070000_notify_on_bet_settlement.sql` | "You won ₦X" when a locked-odds bet settles |
+| 4 | `20260807080000_push_subscriptions.sql` | Phone-notification plumbing |
+| 5 | `20260807090000_referral_streak.sql` | The referral streak (needs #1) |
+
+Open each file from `supabase/migrations/`, paste the whole thing in, run it.
+
+**All five are safe to run twice.** Every table, index and policy in them is
+guarded, so if you are unsure whether one already went in, just run it — a
+second run changes nothing. This has been verified, not assumed.
+
+**#5 must come after #1** — it replaces a function that #1 creates. Running it
+first fails with "function does not exist", which is loud and harmless, but
+you'd then have to come back to it.
+
+Anything numbered `20260806*` or below is already live.
 
 ---
 

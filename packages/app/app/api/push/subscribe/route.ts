@@ -28,7 +28,7 @@ export async function GET() {
   return NextResponse.json(
     {
       configured: pushConfigured,
-      publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || null,
+      publicKey: process.env.VAPID_PUBLIC_KEY || null,
     },
     { headers: { 'Cache-Control': 'no-store' } },
   );

@@ -12,11 +12,19 @@ import webpush from 'web-push';
 //
 //   npx web-push generate-vapid-keys
 //
-// then set NEXT_PUBLIC_VAPID_PUBLIC_KEY (the browser needs it to subscribe),
-// VAPID_PRIVATE_KEY, and VAPID_SUBJECT (a mailto: for your own domain — push
-// services use it to reach you if you start flooding them).
+// then set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, and VAPID_SUBJECT (a mailto:
+// for your own domain — push services use it to reach you if you start
+// flooding them).
+//
+// NOT named NEXT_PUBLIC_*, even though the public key genuinely is public and
+// the browser genuinely does need it. In this deployment NEXT_PUBLIC_ vars are
+// baked into the Docker image at build time from GitHub secrets, so that name
+// would make switching push on a rebuild-and-redeploy instead of three lines
+// in the server's .env. Nothing client-side reads it directly — the browser
+// gets the key from GET /api/push/subscribe — so it can stay a plain runtime
+// variable and be turned on with a restart.
 
-const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
+const PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@opinionsng.com';
 
