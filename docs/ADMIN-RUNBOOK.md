@@ -220,18 +220,38 @@ npx web-push generate-vapid-keys
 It prints a `Public Key:` and a `Private Key:`. Keep both — put them in the
 password manager now, because step 2 is the only place they get stored.
 
-**2. Put them on the production server.** SSH in, open the `.env` file that
-docker-compose reads (the same one holding `SUPABASE_SERVICE_ROLE_KEY`), and
-add three lines:
+**2. Put them on the production server.** Paste the two keys into the two
+`PASTE_` lines below, then run the whole block. It edits `~/app/.env` in place
+and restarts — no editor, no rebuild, no redeploy.
 
-```
-VAPID_PUBLIC_KEY=<the Public Key it printed>
-VAPID_PRIVATE_KEY=<the Private Key it printed>
+```bash
+ssh YOUR_USER@YOUR_HOST 'bash -s' <<'REMOTE'
+set -euo pipefail
+cd ~/app
+grep -v -E '^VAPID_(PUBLIC_KEY|PRIVATE_KEY|SUBJECT)=' .env > .env.tmp 2>/dev/null || true
+cat >> .env.tmp <<'EOF'
+VAPID_PUBLIC_KEY=PASTE_PUBLIC_KEY_HERE
+VAPID_PRIVATE_KEY=PASTE_PRIVATE_KEY_HERE
 VAPID_SUBJECT=mailto:support@opinionsng.com
+EOF
+mv .env.tmp .env && chmod 600 .env
+docker compose up -d --force-recreate app
+REMOTE
 ```
 
-**No rebuild and no redeploy** — these are read at runtime. Restart the
-container (`docker compose up -d`) and it picks them up.
+What the three odd-looking bits are doing:
+
+- The `grep -v` strips any VAPID lines already in the file before appending, so
+  running this twice replaces the keys rather than stacking a second copy. Every
+  other line in `.env` is left exactly as it was.
+- `chmod 600` restores the permissions after the temp-file swap. `.env` holds
+  the service-role key; it must not become world-readable.
+- `--force-recreate` because Compose does not reliably notice an `env_file`
+  change on its own, and a container that keeps running with the old
+  environment looks exactly like keys that did not work.
+
+These are runtime variables (`env_file: .env` in `docker-compose.yml` injects
+them into the container), which is why no rebuild is involved.
 
 *(These are deliberately not named `NEXT_PUBLIC_*`. Vars with that prefix are
 baked into the image at build time from GitHub secrets, which would have made
