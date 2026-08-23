@@ -210,7 +210,7 @@ BEGIN
        LEAST(v_cats, 3),       3,  300::numeric, v_week),
       -- Drives adoption of the trading engine specifically, which is the
       -- newest and least understood thing here.
-      ('trader_5',  'Active trader',  'Make 5 Open Markets trades this week',
+      ('trader_5',  'Active trader',  'Make 5 trades this week',
        LEAST(v_trades, 5),     5,  400::numeric, v_week)
   )
   SELECT d.streak_id, d.label, d.detail, d.progress, d.target, d.reward_tngn, d.period_key,

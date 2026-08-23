@@ -293,7 +293,7 @@ function TreasuryPanel() {
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             </div>
             <div>
-              <p className="text-sm font-medium">Open Markets review</p>
+              <p className="text-sm font-medium">Trading review</p>
               <p className="text-xs text-muted-foreground">Approve submissions · exposure dashboard</p>
             </div>
           </div>

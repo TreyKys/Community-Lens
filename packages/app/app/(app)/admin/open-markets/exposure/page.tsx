@@ -130,7 +130,7 @@ export default function OpenMarketsExposurePage() {
       </div>
 
       <div>
-        <h1 className="text-xl font-bold">Open Markets exposure</h1>
+        <h1 className="text-xl font-bold">Trading exposure</h1>
         <p className="text-xs text-muted-foreground mt-1">
           Worst case is the most the house can lose across every live market — a fixed figure, not a forecast.
         </p>

@@ -22,7 +22,7 @@ export async function generateMetadata(
   { params }: { params: { id: string } },
 ): Promise<Metadata> {
   const fallback: Metadata = {
-    title: 'Open Market · Opinions.ng',
+    title: 'Trading · Opinions.ng',
     description: 'Real predictions, real money.',
   };
 

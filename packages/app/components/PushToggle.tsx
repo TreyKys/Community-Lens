@@ -18,7 +18,33 @@ import { pushSupported, subscribeToPush, unsubscribeFromPush } from '@/lib/pushC
 // who cannot find the off switch in the app uses the browser's instead — which
 // blocks the origin permanently and cannot be undone from in here.
 
-type State = 'loading' | 'unsupported' | 'off' | 'on' | 'blocked';
+// Five states, not three, because "you can't have this" has three genuinely
+// different causes and telling someone the wrong one sends them to fix the
+// wrong thing:
+//
+//   unsupported   — this browser has no Push API at all. Nothing to be done.
+//   unconfigured  — WE have not finished setting it up. Nothing THEY can do,
+//                   and saying "not available on this browser" here is a lie
+//                   that sends people hunting through their settings.
+//   needsInstall  — iOS only grants push to a site added to the Home Screen.
+//                   This is the one case where there is something to do, and
+//                   it is invisible unless we say it.
+type State = 'loading' | 'unsupported' | 'unconfigured' | 'needsInstall' | 'off' | 'on' | 'blocked';
+
+// iOS grants push only to a web app launched from the Home Screen. Safari on
+// iOS 16.4+ exposes PushManager either way, so feature detection alone reports
+// "supported" and then subscribing fails with nothing useful said.
+function iosNeedsInstall(): boolean {
+  if (typeof window === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(ua)
+    // iPadOS 13+ reports itself as a Mac; touch points are what give it away.
+    || (/Macintosh/.test(ua) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1);
+  if (!isIOS) return false;
+  const standalone = (window.navigator as any).standalone === true
+    || window.matchMedia('(display-mode: standalone)').matches;
+  return !standalone;
+}
 
 export function PushToggle() {
   const [state, setState] = useState<State>('loading');
@@ -28,14 +54,20 @@ export function PushToggle() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      if (!pushSupported()) { setState('unsupported'); return; }
+      // Server config is checked FIRST. If we have not switched push on, that
+      // is the true answer regardless of what browser they are using.
+      let key = '';
       try {
         const r = await fetch('/api/push/subscribe', { cache: 'no-store' });
         const j = await r.json();
         if (!alive) return;
-        if (!j?.configured || !j?.publicKey) { setState('unsupported'); return; }
-        setPublicKey(String(j.publicKey));
-      } catch { if (alive) setState('unsupported'); return; }
+        if (!j?.configured || !j?.publicKey) { setState('unconfigured'); return; }
+        key = String(j.publicKey);
+      } catch { if (alive) setState('unconfigured'); return; }
+
+      if (!pushSupported()) { setState(iosNeedsInstall() ? 'needsInstall' : 'unsupported'); return; }
+      if (iosNeedsInstall()) { setState('needsInstall'); return; }
+      setPublicKey(key);
 
       if (Notification.permission === 'denied') { setState('blocked'); return; }
 
@@ -70,14 +102,22 @@ export function PushToggle() {
   const on = state === 'on';
   const interactive = state === 'off' || state === 'on';
 
+  // Each message names the thing that would actually change the outcome. The
+  // old version said "not available on this browser" for all three, which is
+  // the wrong answer twice: it blames Chrome when the fault is ours, and it
+  // hides the one instruction that works on iPhone.
   const detail =
     state === 'blocked'
       ? 'Blocked in your browser settings — turn it back on there'
-      : state === 'unsupported'
-        ? 'Not available on this browser'
-        : on
-          ? 'Results, payouts and decisions — on this device'
-          : 'Get results and payouts on your phone';
+      : state === 'unconfigured'
+        ? 'Not switched on yet — coming shortly'
+        : state === 'needsInstall'
+          ? 'Add Opinions.ng to your Home Screen first, then come back here'
+          : state === 'unsupported'
+            ? 'This browser can’t do notifications'
+            : on
+              ? 'Results, payouts and decisions — on this device'
+              : 'Get results and payouts on your phone';
 
   return (
     <div className="flex items-center justify-between px-5 py-4">
