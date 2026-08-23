@@ -48,10 +48,22 @@ export const WHATS_NEW: WhatsNewItem[] = [
     cta: 'See streaks',
   },
   {
+    // Referrals are not new — they have been here all along and most people
+    // never noticed, which from the user's side is the same problem. Merged
+    // with the profile bonuses rather than listed separately: they are one
+    // thought ("there is money sitting there"), and two rows for one thought
+    // is how a five-item list turns into a changelog.
     emoji: '🎁',
     title: 'Free bonus, right now',
-    body: 'Add your number and follow us — up to ₦600 in bonus credit sitting there.',
-    href: '/dashboard',
+    body: 'Add your number and follow us for up to ₦600. Your invite link pays ₦200 a head on top — ₦200 to your friend too.',
+    href: '/dashboard#invite',
     cta: 'Claim it',
+  },
+  {
+    emoji: '🔔',
+    title: 'We can tell you when you win',
+    body: 'Turn on notifications and the result reaches your phone instead of waiting for you to check.',
+    href: '/profile',
+    cta: 'Turn on',
   },
 ];

@@ -5,8 +5,18 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Flame, Gift, Loader2, Check } from 'lucide-react';
+import { Flame, Gift, Loader2, Check, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// Where a streak can actually be worked on. Most of them are satisfied by
+// using the app normally and need no signpost, but "invite three friends" is
+// not something you can do from this card — and a goal with no visible next
+// step reads as a goal the product does not expect you to reach.
+const STREAK_ACTION: Record<string, { href: string; label: string }> = {
+  refer_3:  { href: '#invite', label: 'Get your link' },
+  explorer: { href: '/markets', label: 'Browse' },
+  trader_5: { href: '/open', label: 'Open Markets' },
+};
 
 // Streaks.
 //
@@ -108,6 +118,14 @@ export function StreaksCard() {
                 <div className="min-w-0">
                   <p className="text-xs font-medium leading-none">{s.label}</p>
                   <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{s.detail}</p>
+                  {/* Only while there is still something to do — a signpost on
+                      a finished streak is just noise. */}
+                  {!s.claimed && !s.claimable && STREAK_ACTION[s.id] && (
+                    <a href={STREAK_ACTION[s.id].href}
+                       className="inline-flex items-center gap-0.5 text-[10px] text-amber-300/90 hover:text-amber-200 mt-1">
+                      {STREAK_ACTION[s.id].label} <ArrowRight className="w-2.5 h-2.5" />
+                    </a>
+                  )}
                 </div>
 
                 {s.claimed ? (

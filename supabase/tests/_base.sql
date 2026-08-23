@@ -19,6 +19,10 @@ CREATE TABLE public.users(
   phone text, first_name text, points integer NOT NULL DEFAULT 0,
   bonus_expires_at timestamptz, last_active_at timestamptz,
   tngn_balance numeric DEFAULT 0, bonus_balance numeric DEFAULT 0,
+  -- Referral attribution (20240614000000). Self-referencing, and NOT NULL is
+  -- deliberately absent: most users have no referrer.
+  referred_by_user_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  referred_by_is_vip boolean NOT NULL DEFAULT false,
   created_at timestamptz DEFAULT now(),
   CONSTRAINT users_balances_nonneg
     CHECK (COALESCE(tngn_balance,0) >= 0 AND COALESCE(bonus_balance,0) >= 0)

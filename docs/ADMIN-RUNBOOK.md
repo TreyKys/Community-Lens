@@ -219,6 +219,47 @@ notification. They can turn it off again on `/profile`.
 
 ---
 
+# 3b. Bonus economics — what a signup costs us
+
+Everything below pays into **bonus_balance**, which is stake-only and subject
+to rollover. It is not cash out the door, but it is a real liability and it is
+worth knowing the ceiling.
+
+| Source | Pays | Verifiable? |
+|---|---|---|
+| Phone number | ₦200 | Yes — held until the number verifies, unique per account |
+| 4 social follows | ₦100 each (₦400) | **No.** Nothing can check a follow; the handle is the entire audit trail |
+| Referral, per head | ₦200 to each side | Yes — the referee is a real account with a real code |
+| Streaks | ₦200–₦500 each, 6 of them | Yes — all read from recorded activity |
+
+**Worst case for one determined new account: ₦600 immediately** (phone held
+until verified, plus four unverifiable follows). Socials are priced at ₦100
+rather than ₦200 precisely so all four together cannot beat the one thing that
+is actually checkable.
+
+## The referral streak, and the trap it avoids
+
+`refer_3` pays ₦500 for three referred friends. **What counts is a friend who
+has staked ₦1,000 of their own cash — not a friend who signed up.**
+
+This matters more than it looks. A signup already pays ₦200 to each side, so a
+milestone counting *signups* would make three burner accounts worth ₦1,700 in
+bonus to one person in about four minutes. Requiring real cash through the book
+means a fake account has to fund itself and risk money to be worth anything —
+at which point it is a customer, which is what we were trying to buy.
+
+Bonus credit is excluded from that ₦1,000 for the same reason: the signup bonus
+must not be able to pay for the qualification it is being tested against.
+
+To tune it, edit `c_qualifying_cash` in `get_streak_state`. Lowering it below
+about ₦400 reopens the farm.
+
+Streak claims are one row per `(user_id, streak_id, period_key)` in
+`streak_claims` — that unique index is what makes claiming twice impossible, so
+if you ever need to re-grant one, delete that row rather than crediting by hand.
+
+---
+
 # 4. Other tools
 
 | Screen | What it is for |
