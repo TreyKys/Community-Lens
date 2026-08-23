@@ -9,6 +9,8 @@ import {
   TrendingUp, Clock, ChevronRight, Loader2, Lock, Share2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { StreaksCard } from '@/components/StreaksCard';
+import { RewardsCard } from '@/components/RewardsCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -212,6 +214,10 @@ export default function DashboardPage() {
 
   return (
     <div className="px-3 py-4 md:p-6 space-y-5 max-w-3xl mx-auto">
+      {/* Streaks sit directly under the balance, not at the bottom: they are
+          the reason to come back on a day with nothing riding, and a reason
+          nobody scrolls to is not a reason. Renders nothing until the user
+          has any streak state, so a brand-new account sees no empty shell. */}
       {/* Hero balance card */}
       <Card className={cn(
         'overflow-hidden border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent relative',
@@ -272,6 +278,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        <RewardsCard />
+        <StreaksCard />
+
         {isVip && (
           <Card className="border-amber-500/25">
             <CardContent className="p-4">
@@ -297,14 +306,26 @@ export default function DashboardPage() {
           The code itself is still surfaced underneath in case the user
           wants to dictate it manually. */}
       {code && (
-        <Card className={cn('border', code.is_vip_code ? 'border-amber-500/30 bg-amber-500/[0.03]' : 'border-emerald-500/15')}>
+        // id="invite" is the target of the "Get your link" pointer on the
+        // referral streak. Without it that streak is a goal with no visible
+        // way to work on it — the link is on this page, but only someone who
+        // already knew that would scroll for it.
+        <Card id="invite" className={cn('border scroll-mt-20', code.is_vip_code ? 'border-amber-500/30 bg-amber-500/[0.03]' : 'border-emerald-500/15')}>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 {code.is_vip_code ? <Crown className="w-3.5 h-3.5 text-amber-400" /> : <Sparkles className="w-3.5 h-3.5 text-emerald-400" />}
                 {code.is_vip_code ? 'Your VIP Invite Link' : 'Your Invite Link'}
               </p>
-              <p className="text-[10px] text-muted-foreground">{code.uses_count} use{code.uses_count !== 1 ? 's' : ''}</p>
+              {/* Uses alone read as a stat about nothing. Paired with what
+                  they were worth, the same number is a reason to send another
+                  link — which is the only thing this card is for. */}
+              <p className="text-[10px] text-muted-foreground">
+                {code.uses_count} use{code.uses_count !== 1 ? 's' : ''}
+                {!code.is_vip_code && code.uses_count > 0 && (
+                  <span className="text-emerald-400 font-semibold"> · ₦{(code.uses_count * 200).toLocaleString()} earned</span>
+                )}
+              </p>
             </div>
 
             {/* The link — what they actually share. Truncated visually

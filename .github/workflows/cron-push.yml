@@ -1,0 +1,36 @@
+name: Cron — Push notifications
+
+# Delivers unpushed notifications to people's phones.
+#
+# Runs on its own schedule rather than inside the Open Markets tick because
+# LATENCY IS THE WHOLE POINT. "You won ₦4,200" is worth something within a few
+# minutes of the result and almost nothing the next morning, whereas the Open
+# Markets tick is sized for a 72-hour election window and runs every 15.
+#
+# Five minutes is GitHub's floor for scheduled workflows, and in practice its
+# scheduler drifts under load — a run can arrive several minutes late. That is
+# acceptable here (nothing in this queue is time-critical to the second) but if
+# it ever needs to be tighter, this belongs on the hosting platform's own cron
+# rather than on Actions.
+#
+# Safe to run when push is switched off: the route returns { skipped } when the
+# VAPID keys are absent instead of failing.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-push
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deliver pending push notifications
+        run: |
+          curl -sSf -X POST "${{ secrets.API_BASE_URL }}/api/cron/push" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

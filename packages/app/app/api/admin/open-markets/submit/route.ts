@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import { getAuthUser } from '@/lib/getAuthUser';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,25 @@ export async function POST(request: Request) {
   }
 
   const b = await request.json().catch(() => ({} as any));
+
+  // WHO submitted this, recorded separately from who earns from it.
+  //
+  // A house market has createdBy null so no fee share accrues — but every
+  // insider guard used to key off created_by alone, so null disabled all of
+  // them and one admin could submit, approve, trade and resolve the same
+  // market. submitted_by is what keeps four eyes meaningful when nobody is
+  // being paid a share. Refusing without it is deliberate: an unattributed
+  // house market is exactly the thing that hole was made of.
+  const sessionUser = await getAuthUser(supabaseAdmin, request);
+  const submittedBy = sessionUser?.id
+    || String(b?.submittedBy || '')
+    || process.env.ADMIN_REVIEWER_USER_ID
+    || '';
+  if (!submittedBy) {
+    return NextResponse.json({
+      error: 'No submitter identity. Sign in, or set ADMIN_REVIEWER_USER_ID.',
+    }, { status: 400 });
+  }
   const outcomes = Array.isArray(b?.outcomes)
     ? b.outcomes.map((o: unknown) => String(o))
     : [];
@@ -46,6 +66,7 @@ export async function POST(request: Request) {
     p_horizon_at: b?.horizonAt || null,
     p_trading_closes_at: b?.tradingClosesAt || null,
     p_event_tag: b?.eventTag ? String(b.eventTag) : null,
+    p_submitted_by: submittedBy,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

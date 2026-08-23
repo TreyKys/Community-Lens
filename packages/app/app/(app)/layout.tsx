@@ -3,6 +3,8 @@ import { Sidebar } from "@/components/Sidebar";
 import { ReferralBonusToast } from "@/components/ReferralBonusToast";
 import { SlipProvider } from "@/components/multiplier/SlipProvider";
 import { MultiplierSlip } from "@/components/multiplier/MultiplierSlip";
+import { AppModals } from "@/components/AppModals";
+import { PushGate } from "@/components/PushGate";
 
 export default function AppLayout({
   children,
@@ -29,6 +31,14 @@ export default function AppLayout({
         </div>
       </div>
       <MultiplierSlip />
+      {/* Return moments: at most one ever shows, and never over a flow.
+          See AppModals for why Welcome Back beats What's New on a tie. */}
+      <Suspense fallback={null}><AppModals /></Suspense>
+      {/* Keeps an existing push subscription alive on every visit, and asks
+          for permission only after someone has staked. Mounted inside the app
+          shell, never on the marketing pages: a permission prompt aimed at a
+          stranger is how an origin gets permanently blocked. */}
+      <PushGate />
     </SlipProvider>
   );
 }

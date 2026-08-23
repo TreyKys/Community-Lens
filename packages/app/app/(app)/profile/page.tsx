@@ -8,9 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import {
   TrendingUp, TrendingDown, Zap, BarChart3, Target,
-  Copy, Check, Shield, Bell, LogOut, ChevronRight, Trophy, Share2
+  Copy, Check, Shield, LogOut, ChevronRight, Trophy, Share2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { PushToggle } from '@/components/PushToggle';
 
 const AVATAR_THEME: [string, string, string, string][] = [
   ['#6366f1','#8b5cf6','#c4b5fd','◈'],['#0ea5e9','#38bdf8','#7dd3fc','◎'],
@@ -292,13 +293,9 @@ export default function ProfilePage() {
             </div>
             <Badge variant="outline" className="text-emerald-400 border-emerald-400/30 text-[10px]">Active</Badge>
           </div>
-          <div className="flex items-center justify-between px-5 py-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center"><Bell className="w-4 h-4 text-muted-foreground" /></div>
-              <div><p className="text-sm font-medium">Notifications</p><p className="text-xs text-muted-foreground">Prediction results, returns, deposits</p></div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          </div>
+          {/* Was a chevron that led nowhere. Now a real switch — see
+              PushToggle for why the off switch matters as much as the on. */}
+          <PushToggle />
           <button onClick={handleSignOut} className="w-full flex items-center gap-3 px-5 py-4 hover:bg-red-500/5 transition-colors text-red-400">
             <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center"><LogOut className="w-4 h-4" /></div>
             <span className="text-sm font-medium">Sign Out</span>

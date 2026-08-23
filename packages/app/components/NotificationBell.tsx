@@ -3,6 +3,45 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Bell } from 'lucide-react';
+
+// One table for both the list icon and the arrival toast. They were two
+// separate inline ternaries, which is how a type ends up with an icon in the
+// list and "Notification" as its toast title — visibly the same event
+// presented two different ways.
+const NOTIF_STYLE: Record<string, { icon: string; title: string }> = {
+  bet_won:                  { icon: '🎉', title: '🎉 You called it!' },
+  bet_lost:                 { icon: '💔', title: 'Result is in' },
+  bet_insurance_refund:     { icon: '🛡', title: '🛡 Protection Applied' },
+  first_bet_refund:         { icon: '🛡', title: '🛡 Protection Applied' },
+  share_staked:             { icon: '🔥', title: '🔥 Your pick is spreading!' },
+  deposit:                  { icon: '💰', title: 'Deposit' },
+  deposit_credited:         { icon: '💰', title: 'Money in' },
+  withdrawal:               { icon: '💸', title: 'Withdrawal' },
+  weekly_rebate:            { icon: '💎', title: 'Rebate' },
+  complaint_received:       { icon: '📨', title: 'We got your message' },
+  complaint_response:       { icon: '💬', title: 'Support replied' },
+  void_loss_recovery:       { icon: '↩️', title: 'Refunded' },
+  bonus_split_correction:   { icon: '⚖️', title: 'Balance corrected' },
+  multiplier_won:           { icon: '🎯', title: '🎯 Slip landed!' },
+  multiplier_lost:          { icon: '💔', title: 'Slip missed' },
+  multiplier_voided:        { icon: '↩️', title: 'Slip voided' },
+  welcome_match:            { icon: '🎁', title: '🎁 Bonus added' },
+  // Streaks, rewards and the trading engine. Without these every one of them
+  // arrived as a generic bell and the word "Notification" — the reward paths
+  // are the ones most meant to feel like something happened.
+  streak_reward:            { icon: '🔥', title: '🔥 Streak complete!' },
+  profile_reward:           { icon: '🎁', title: '🎁 Bonus added' },
+  open_market_payout:       { icon: '🎉', title: '🎉 You called it!' },
+  open_market_refund:       { icon: '↩️', title: 'Market voided' },
+  open_market_horizon:      { icon: '⏰', title: '⏰ Decision needed' },
+  open_market_submitted:    { icon: '📝', title: 'With our reviewers' },
+  open_market_approve:      { icon: '✅', title: '✅ Your market is live' },
+  open_market_revise:       { icon: '✏️', title: 'Changes needed' },
+  open_market_reject:       { icon: '🚫', title: 'Not approved' },
+  open_market_creator_payout: { icon: '💰', title: '💰 Creator earnings paid' },
+};
+
+const notifStyle = (type: string) => NOTIF_STYLE[type] ?? { icon: '🔔', title: 'Notification' };
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -63,10 +102,7 @@ export function NotificationBell() {
           setNotifications(prev => [newNotif, ...prev]);
           // Show toast for new notification
           toast({
-            title: newNotif.type === 'bet_won' ? '🎉 You called it!' :
-                   (newNotif.type === 'bet_insurance_refund' || newNotif.type === 'first_bet_refund') ? '🛡 Protection Applied' :
-                   newNotif.type === 'share_staked' ? '🔥 Your pick is spreading!' :
-                   'Notification',
+            title: notifStyle(newNotif.type).title,
             description: newNotif.message,
           });
         }
@@ -163,21 +199,7 @@ export function NotificationBell() {
                   >
                     <div className="flex items-start gap-2">
                       <span className="text-base leading-none mt-0.5">
-                        {n.type === 'bet_won' ? '🎉' :
-                         (n.type === 'bet_insurance_refund' || n.type === 'first_bet_refund') ? '🛡' :
-                         n.type === 'deposit' ? '💰' :
-                         n.type === 'withdrawal' ? '💸' :
-                         n.type === 'weekly_rebate' ? '💎' :
-                         n.type === 'complaint_received' ? '📨' :
-                         n.type === 'complaint_response' ? '💬' :
-                         n.type === 'void_loss_recovery' ? '↩️' :
-                         n.type === 'bonus_split_correction' ? '⚖️' :
-                         n.type === 'multiplier_won' ? '🎯' :
-                         n.type === 'multiplier_lost' ? '💔' :
-                         n.type === 'multiplier_voided' ? '↩️' :
-                         n.type === 'share_staked' ? '🔥' :
-                         n.type === 'deposit_credited' ? '💰' :
-                         n.type === 'welcome_match' ? '🎁' : '🔔'}
+                        {notifStyle(n.type).icon}
                       </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm leading-snug break-words">{n.message}</p>

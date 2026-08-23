@@ -49,6 +49,17 @@ export async function POST(request: Request) {
         password: bridgePassword,
       });
       if (updateError) throw updateError;
+
+      // The OTP just proved this number belongs to whoever is holding the
+      // phone, which is exactly the condition the ₦200 phone reward was held
+      // against. Releases it if one is pending, and is a no-op otherwise.
+      //
+      // Non-fatal on purpose: a failure here must not block a sign-in that has
+      // already succeeded. The reward stays pending and releases on the next
+      // verification.
+      try {
+        await supabaseAdmin.rpc('release_verified_phone_reward', { p_user_id: existing.id });
+      } catch { /* sign-in matters more than the bonus */ }
     } else {
       const { error: createError } = await supabaseAdmin.auth.admin.createUser({
         phone: phoneForAuth,

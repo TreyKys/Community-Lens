@@ -104,6 +104,9 @@ export async function POST(request: Request) {
     p_horizon_at: b?.horizonAt || null,
     p_trading_closes_at: b?.tradingClosesAt || null,
     p_event_tag: b?.eventTag ? String(b.eventTag) : null,
+    // Same person on a user submission — they are both the creator and
+    // the submitter, so both guards catch them.
+    p_submitted_by: user.id,
   });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -11,8 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Download, Share2, TrendingUp, TrendingDown,
   Clock, CheckCircle2, XCircle, Shield,
-  Trophy, AlertCircle, Target
-} from 'lucide-react';
+  Trophy, AlertCircle, Target, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { POOL_RAKE_PCT } from '@/lib/displayPool';
 import { SharePickModal } from '@/components/SharePickModal';
@@ -817,15 +816,33 @@ export default function BetsPage() {
                 {[...Array(3)].map((_, i) => <div key={i} className="h-40 bg-muted/30 rounded-xl animate-pulse" />)}
               </div>
             ) : t.items.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <AlertCircle className="w-10 h-10 text-muted-foreground/50 mb-3" />
-                <p className="text-muted-foreground">
-                  {t.id === 'active' ? 'No live predictions. Make your first call.' : `No ${t.label.toLowerCase()} predictions yet.`}
+              // An AlertCircle said "something is wrong" for a state that is
+              // completely normal — a new account has no predictions, that is
+              // not an error. It now reads as an invitation, and offers both
+              // engines rather than only the one that existed first.
+              <div className="flex flex-col items-center justify-center py-14 px-6 text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/20 flex items-center justify-center mb-3">
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
+                </div>
+                <p className="text-sm font-semibold">
+                  {t.id === 'active' ? 'No live predictions' : `Nothing ${t.label.toLowerCase()} yet`}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
+                  {t.id === 'active'
+                    ? 'Pick a side on something you have an opinion about — ₦100 is enough to start.'
+                    : 'This fills up as your predictions resolve.'}
                 </p>
                 {t.id === 'active' && (
-                  <a href="/markets" className="mt-3">
-                    <Button variant="outline" size="sm">Browse Markets</Button>
-                  </a>
+                  <div className="flex flex-wrap gap-2 justify-center mt-4">
+                    <a href="/markets">
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500">
+                        Find a market
+                      </Button>
+                    </a>
+                    <a href="/open">
+                      <Button variant="outline" size="sm">Try trading</Button>
+                    </a>
+                  </div>
                 )}
               </div>
             ) : (

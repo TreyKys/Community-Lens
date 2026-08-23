@@ -72,6 +72,32 @@ async function placeParimutuelBet(
   return { data, error };
 }
 
+
+// Streak credit for a completed stake.
+//
+// Called at every success path, not just the main one — a user whose bets all
+// go through the parimutuel branch would otherwise never build a staking
+// streak, and the bug would look like "streaks are broken for some people".
+//
+// Deliberately swallows its own errors: a streak is a nice-to-have layered on
+// top of a bet that has ALREADY been placed and paid for. Failing the response
+// here would tell the user their bet failed when it did not.
+async function recordStakeStreak(
+  supabaseAdmin: any, userId: string, marketId: any, stakeTngn: number,
+) {
+  try {
+    const { data: m } = await supabaseAdmin
+      .from('markets').select('category').eq('id', marketId).maybeSingle();
+    await supabaseAdmin.rpc('record_streak_activity', {
+      p_user_id: userId,
+      p_opened: true,
+      p_staked_tngn: stakeTngn,
+      p_is_trade: false,
+      p_category: m?.category ?? null,
+    });
+  } catch { /* never fail a placed bet over a streak counter */ }
+}
+
 export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get('Authorization');
@@ -185,6 +211,7 @@ export async function POST(request: Request) {
           }
           // If this stake came from a shared pick, notify the sharer.
           await notifyShareStake(supabaseAdmin, { fromShareId, stakerUserId: user.id });
+          await recordStakeStreak(supabaseAdmin, user.id, marketId, stakeNum);
           // Frontend shape matches the parimutuel branch below.
           return NextResponse.json({
             success: true,
@@ -222,6 +249,7 @@ export async function POST(request: Request) {
 
       // If this stake came from a shared pick, notify the sharer.
       await notifyShareStake(supabaseAdmin, { fromShareId, stakerUserId: user.id });
+      await recordStakeStreak(supabaseAdmin, user.id, marketId, stakeNum);
       // The locked-odds response carries extra fields the modal needs
       // for the confirmation receipt. The tier is NOT exposed to the
       // user-facing UI — it's there for analytics/debugging only.
@@ -273,6 +301,7 @@ export async function POST(request: Request) {
 
     // If this stake came from a shared pick, notify the sharer.
     await notifyShareStake(supabaseAdmin, { fromShareId, stakerUserId: user.id });
+    await recordStakeStreak(supabaseAdmin, user.id, marketId, stakeNum);
 
     return NextResponse.json({
       success: true,

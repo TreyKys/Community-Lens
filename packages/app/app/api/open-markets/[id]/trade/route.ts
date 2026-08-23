@@ -77,6 +77,26 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const row = Array.isArray(data) ? data[0] : data;
 
+  // Streak credit — only for a real fill. A replayed idempotency key is the
+  // SAME trade being reported again, so counting it would let one trade
+  // retried five times complete a five-trade streak.
+  if (row?.outcome === 'executed') {
+    try {
+      const { data: m } = await supabaseAdmin
+        .from('open_markets').select('category').eq('id', params.id).maybeSingle();
+      await supabaseAdmin.rpc('record_streak_activity', {
+        p_user_id: user.id,
+        p_opened: true,
+        // Buys only. A sell returns money rather than committing it, and
+        // counting both would make a buy-then-sell round trip look like two
+        // days' worth of staking appetite.
+        p_staked_tngn: Number(row?.total_tngn ?? 0) > 0 ? Number(row.total_tngn) : 0,
+        p_is_trade: true,
+        p_category: (m as any)?.category ?? null,
+      });
+    } catch { /* never fail a filled trade over a streak counter */ }
+  }
+
   return NextResponse.json({
     // 'already_executed' means the key was replayed — the trade happened once
     // and this is the recorded result, not a second fill.

@@ -31,6 +31,22 @@ export const metadata: Metadata = {
   },
   description: "Predict football, politics, pop culture and the economy. Smart-money traders. Instant Naira settlement. Cryptographically sealed on Polygon.",
   alternates: { canonical: '/' },
+  // Home-screen identity. iOS ignores the manifest's icons entirely and uses
+  // apple-touch-icon, and iOS is also the platform where installing to the
+  // Home Screen is the ONLY way to receive push at all — so a missing icon
+  // here is not cosmetic, it is the first step of the only path that works.
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180' }],
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'Opinions.ng',
+    statusBarStyle: 'black-translucent',
+  },
   openGraph: {
     type: 'website',
     locale: 'en_NG',
@@ -84,6 +100,9 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  // Matches the manifest's background so an installed app does not flash white
+  // on launch and does not show a light browser chrome around a dark page.
+  themeColor: '#050A08',
 };
 
 export default function RootLayout({
