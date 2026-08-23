@@ -268,6 +268,32 @@ bottom**. Order matters: each builds on the one above it.
 
 Open each file from `supabase/migrations/`, paste the whole thing in, run it.
 
+**Or run all five at once**, from the repo root, without opening anything:
+
+```bash
+psql "postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" \
+  -v ON_ERROR_STOP=1 --single-transaction \
+  -f supabase/migrations/20260807050000_streaks.sql \
+  -f supabase/migrations/20260807060000_rewards_phone_and_socials.sql \
+  -f supabase/migrations/20260807070000_notify_on_bet_settlement.sql \
+  -f supabase/migrations/20260807080000_push_subscriptions.sql \
+  -f supabase/migrations/20260807090000_referral_streak.sql
+```
+
+The connection string is in Supabase → **Project Settings → Database →
+Connection string → URI**. Use the **direct connection on port 5432**, not the
+transaction pooler on 6543 — the pooler cannot hold one transaction across five
+files.
+
+The two flags are the whole safety story:
+
+- `ON_ERROR_STOP=1` — stop at the first error instead of ploughing on through
+  the remaining files. Without it psql reports the error and keeps going.
+- `--single-transaction` — all five land, or none of them do. There is no
+  half-applied state to unpick.
+
+Silence and an exit code of 0 means it worked.
+
 **All five are safe to run twice.** Every table, index and policy in them is
 guarded, so if you are unsure whether one already went in, just run it — a
 second run changes nothing. This has been verified, not assumed.
