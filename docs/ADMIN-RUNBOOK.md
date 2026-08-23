@@ -177,6 +177,46 @@ same two the other crons use. If those are missing it fails silently and none
 of the above happens: horizons never fire, cash-outs are never paid, and
 settled money sits unreleased forever. Worth confirming once.
 
+`cron-push.yml`, every 5 minutes. Delivers notifications to people's phones.
+
+It is a **sweeper**, not a hook: every notification row carries a `pushed_at`,
+and this sends whatever is unpushed. That means anything anywhere in the app
+that writes a notification gets a phone notification for free — including code
+that does not exist yet. Nothing needs wiring up per feature.
+
+Three behaviours worth knowing before you get a support ticket about them:
+
+- **Nothing older than 24 hours is ever pushed.** After an outage the backlog
+  is delivered to the in-app bell only. Buzzing someone's phone twenty times at
+  6am about things that already happened is how an app gets uninstalled.
+- **A notification is marked pushed even if a device rejected it.** Retrying
+  per-notification would re-send to that person's *working* devices every time
+  one dead device failed.
+- **Dead devices are retired, not deleted** (`push_subscriptions.failed_at`).
+  If someone says they stopped getting notifications, look there first — a
+  `410` means their browser threw the subscription away, and it comes back on
+  its own the next time they open the app.
+
+## Switching push on
+
+It ships **off**. Until the keys exist, `/api/cron/push` returns
+`{ skipped: "VAPID keys not configured" }` and nothing else changes.
+
+1. `npx web-push generate-vapid-keys` — run it **once**.
+2. Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT`
+   in the hosting environment and redeploy.
+3. Confirm with `POST /api/cron/push` (workflow_dispatch on the Action) — it
+   should stop saying `skipped`.
+
+**Do not regenerate the keys later.** Every subscription already handed out is
+tied to that public key; a new pair silences every device until each person
+next opens the app.
+
+Users are asked for permission only after they have staked something, never on
+page load — a browser permission denial is close to permanent, so an
+unexplained prompt costs that person forever rather than costing one
+notification. They can turn it off again on `/profile`.
+
 ---
 
 # 4. Other tools

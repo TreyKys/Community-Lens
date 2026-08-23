@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Check, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { notePushMoment } from '@/lib/pushClient';
 
 // The confirmation moment.
 //
@@ -36,6 +37,11 @@ export function StakeConfirmation({ pick, stakeTngn, returnsTngn, onDone }: {
     // the same frame the browser skips straight to the end state.
     const raf = requestAnimationFrame(() => setShown(true));
     const t = setTimeout(onDone, VISIBLE_MS);
+    // This is the moment the notification ask earns its keep: someone has just
+    // put money on something that has not happened yet, so "we'll tell you the
+    // moment it settles" needs no explaining. PushGate waits for this and then
+    // waits a few seconds more, so it never lands on top of the celebration.
+    notePushMoment();
     return () => { cancelAnimationFrame(raf); clearTimeout(t); };
   }, [onDone]);
 
