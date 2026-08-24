@@ -28,20 +28,36 @@ const supabaseAdmin = createClient(
 
 const BATCH = 200;
 
+// Which deployment answered this call.
+//
+// A cron reaches whatever API_BASE_URL points at, and that is a secret, so it
+// is masked in the workflow log. When the box demonstrably has the right
+// config and the cron still reports the wrong thing, the missing fact is
+// WHICH SERVER REPLIED — and nothing in the response said. That question cost
+// a long round of guessing; it should never be unanswerable again.
+//
+// APP_IMAGE_TAG is the deployed commit, injected via env_file, and HOSTNAME is
+// the container id. Neither is a secret, and together they identify the build
+// exactly.
+const build = () => ({
+  image: process.env.APP_IMAGE_TAG || null,
+  host: process.env.HOSTNAME || null,
+});
+
 export async function POST(request: Request) {
   if (!safeSecretMatch(request.headers.get('x-cron-secret'), process.env.CRON_SECRET)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Not an error. This ships before the VAPID keys exist and must stay quiet
-  // until they do, or the cron logs fill with failures for a feature that was
-  // deliberately left switched off.
+  // Not an error — push ships switched off and must stay quiet until the keys
+  // exist, or the cron logs fill with failures for a deliberate decision.
+  //
   // Reports the SPECIFIC reason, not a generic "not configured". This response
   // is the only diagnostic an operator gets, and "not configured" reads as
   // "you have not set the variables" even when they are set and simply wrong —
   // which sends someone to re-add values that are already there.
   if (!pushConfigured) {
-    return NextResponse.json({ skipped: pushConfigError, sent: 0 });
+    return NextResponse.json({ skipped: pushConfigError, sent: 0, build: build() });
   }
 
   const { data, error } = await supabaseAdmin.rpc('pending_push_notifications', {
@@ -62,7 +78,7 @@ export async function POST(request: Request) {
   }>;
 
   if (rows.length === 0) {
-    return NextResponse.json({ sent: 0, failed: 0, retired: 0, notifications: 0 });
+    return NextResponse.json({ sent: 0, failed: 0, retired: 0, notifications: 0, build: build() });
   }
 
   let sent = 0;
@@ -135,5 +151,6 @@ export async function POST(request: Request) {
     // the next tick picks it up, and a self-looping cron that falls behind
     // turns into a route that never returns.
     more: rows.length >= BATCH,
+    build: build(),
   });
 }
