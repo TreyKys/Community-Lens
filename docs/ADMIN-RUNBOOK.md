@@ -285,6 +285,19 @@ Why the extra machinery, since this is "just adding three lines":
 These are runtime variables (`env_file: .env` in `docker-compose.yml` injects
 them into the container), which is why no rebuild is involved.
 
+**If push stays off**, `POST /api/cron/push` now names the reason rather than
+saying "not configured" for everything. The one worth knowing about:
+
+```
+VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are the wrong way round
+```
+
+The generator prints **Public Key first**, and the two are easy to transpose
+because both are opaque base64. Telling them apart takes one glance: the
+**public** key is **87 characters and starts with `B`**; the **private** key is
+**43 characters**. If they are swapped, exchange the two values in `.env` and
+recreate the container — nothing else needs doing.
+
 **3. Check it worked.** Run the **Cron — Push notifications** workflow by hand
 (Actions → the workflow → Run workflow). The response should no longer say
 `skipped`. Then open the site on a phone, place any stake, and accept the

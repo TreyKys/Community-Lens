@@ -28,11 +28,50 @@ const PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@opinionsng.com';
 
-export const pushConfigured = Boolean(PUBLIC_KEY && PRIVATE_KEY);
+// Why push is off, in words, when it is off.
+//
+// The first version of this ran setVapidDetails() at module scope guarded only
+// by "are both strings non-empty". web-push VALIDATES the key shapes and
+// throws, so a pair that is present but wrong — the commonest mistake being
+// the public and private values entered the wrong way round, since one is 87
+// characters and the other 43 and both are opaque base64 — took down every
+// route that imports this file with an unexplained 500. The operator sees a
+// broken endpoint and no hint that the cause is two values in the wrong order.
+//
+// A misconfiguration must be REPORTED, never thrown. Push staying off is a
+// degraded feature; a module that throws on import is an outage.
 
-if (pushConfigured) {
-  webpush.setVapidDetails(SUBJECT, PUBLIC_KEY, PRIVATE_KEY);
+function describe(): string | null {
+  if (!PUBLIC_KEY && !PRIVATE_KEY) return 'VAPID keys not configured';
+  if (!PUBLIC_KEY) return 'VAPID_PUBLIC_KEY is not set';
+  if (!PRIVATE_KEY) return 'VAPID_PRIVATE_KEY is not set';
+
+  // Lengths are the giveaway and are safe to report: a P-256 public key is 65
+  // bytes (87 base64url chars) and a private key is 32 bytes (43 chars).
+  const swapped = PUBLIC_KEY.length === 43 && PRIVATE_KEY.length === 87;
+  if (swapped) {
+    return 'VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are the wrong way round '
+      + '(public should be 87 characters and start with B, private 43) — swap them in .env';
+  }
+  if (PUBLIC_KEY.length !== 87) {
+    return `VAPID_PUBLIC_KEY is ${PUBLIC_KEY.length} characters, expected 87`;
+  }
+  if (PRIVATE_KEY.length !== 43) {
+    return `VAPID_PRIVATE_KEY is ${PRIVATE_KEY.length} characters, expected 43`;
+  }
+
+  try {
+    webpush.setVapidDetails(SUBJECT, PUBLIC_KEY, PRIVATE_KEY);
+    return null;
+  } catch (e: any) {
+    // Its own message names the specific problem and contains no key material.
+    return `VAPID keys rejected: ${String(e?.message || e).slice(0, 160)}`;
+  }
 }
+
+/** Null when push is usable; otherwise a sentence naming what to fix. */
+export const pushConfigError: string | null = describe();
+export const pushConfigured = pushConfigError === null;
 
 export type PushTarget = {
   subscriptionId: string;

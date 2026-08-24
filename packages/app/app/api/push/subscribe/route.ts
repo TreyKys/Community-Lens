@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthUser } from '@/lib/getAuthUser';
-import { pushConfigured } from '@/lib/push';
+import { pushConfigured, pushConfigError } from '@/lib/push';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +28,13 @@ export async function GET() {
   return NextResponse.json(
     {
       configured: pushConfigured,
-      publicKey: process.env.VAPID_PUBLIC_KEY || null,
+      // Only handed out when the pair actually validates. Serving a key that
+      // we cannot sign with would let browsers create subscriptions nothing
+      // can ever push to — a table full of dead rows and no error anywhere.
+      publicKey: pushConfigured ? (process.env.VAPID_PUBLIC_KEY || null) : null,
+      // Names what to fix. Says nothing about the key VALUES beyond their
+      // length, and the public key is public anyway.
+      reason: pushConfigError,
     },
     { headers: { 'Cache-Control': 'no-store' } },
   );
