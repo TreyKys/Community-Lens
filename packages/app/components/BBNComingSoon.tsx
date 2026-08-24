@@ -50,7 +50,7 @@ export function BBNComingSoon() {
           </Link>
         </div>
         <p className="text-[11px] text-white/40 max-w-xs">
-          Open Markets let anyone create a question and earn from it once it takes off —
+          Trading lets anyone create a question and earn from it once it takes off —
           get ahead of the season.
         </p>
       </div>

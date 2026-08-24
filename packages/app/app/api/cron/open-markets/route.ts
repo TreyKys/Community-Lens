@@ -253,7 +253,7 @@ export async function POST(request: Request) {
       await supabaseAdmin.from('notifications').insert({
         user_id: null,
         type: 'admin_alert',
-        message: `Open Markets health: ${critical.length} critical — `
+        message: `Trading health: ${critical.length} critical — `
           + critical.slice(0, 3).map((c: any) => c.check_name).join(', '),
       });
     }

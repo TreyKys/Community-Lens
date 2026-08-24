@@ -24,7 +24,7 @@ export default function OpenMarketsPage() {
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-4">
       <div>
-        <h1 className="text-xl font-bold">Open Markets</h1>
+        <h1 className="text-xl font-bold">Trading</h1>
         <p className="text-xs text-muted-foreground mt-1">
           Buy a share for what the crowd thinks it&rsquo;s worth. It pays ₦1 if it happens, ₦0 if it doesn&rsquo;t —
           and unlike a bet, you can sell any time instead of waiting for the answer.
@@ -42,7 +42,7 @@ export default function OpenMarketsPage() {
         </div>
       ) : rows.length === 0 ? (
         <Card><CardContent className="p-8 text-center space-y-2">
-          <p className="text-sm font-medium">No open markets yet</p>
+          <p className="text-sm font-medium">Nothing trading yet</p>
           <p className="text-xs text-muted-foreground">
             These are for questions without a fixed end date. The first ones land soon.
           </p>

@@ -167,7 +167,7 @@ BEGIN
        LEAST(v_cats, 3),       3,  300::numeric, v_week),
       -- Drives adoption of the trading engine specifically, which is the
       -- newest and least understood thing here.
-      ('trader_5',  'Active trader',  'Make 5 Open Markets trades this week',
+      ('trader_5',  'Active trader',  'Make 5 trades this week',
        LEAST(v_trades, 5),     5,  400::numeric, v_week),
       -- Referrals. NO MONTH OR WEEK IN THE PERIOD KEY — the bucket is the
       -- count itself, so three friends pay once and the fourth claim needs

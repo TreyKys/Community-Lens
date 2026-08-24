@@ -170,7 +170,7 @@ export default function OpenPortfolioPage() {
       {open.length === 0 && closed.length === 0 ? (
         <Card><CardContent className="p-8 text-center space-y-2">
           <p className="text-sm font-medium">Nothing here yet</p>
-          <p className="text-xs text-muted-foreground">Buy a share in an open market and it&rsquo;ll show up here.</p>
+          <p className="text-xs text-muted-foreground">Buy a share in a trading market and it&rsquo;ll show up here.</p>
           <Link href="/open"><Button size="sm" variant="outline" className="mt-2">Browse markets</Button></Link>
         </CardContent></Card>
       ) : (

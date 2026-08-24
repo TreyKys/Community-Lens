@@ -221,7 +221,7 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
     <div className="max-w-2xl mx-auto p-4 space-y-4">
       <div className="flex items-center justify-between">
         <Link href="/open" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground">
-          <ChevronLeft className="w-4 h-4" /> All open markets
+          <ChevronLeft className="w-4 h-4" /> All trading markets
         </Link>
         <button onClick={share}
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">

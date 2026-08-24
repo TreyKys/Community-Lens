@@ -22,7 +22,7 @@ export const WHATS_NEW: WhatsNewItem[] = [
   {
     emoji: '📈',
     title: 'Buy and sell, not just bet',
-    body: 'Open Markets move with the crowd. Buy a side and sell any time — you don’t have to wait for the answer.',
+    body: 'Trading moves with the crowd. Buy a side and sell any time — you don’t have to wait for the answer.',
     href: '/open',
     cta: 'Try it',
   },

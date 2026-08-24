@@ -118,7 +118,7 @@ export default function ResolveOpenMarketsPage() {
       </div>
 
       <div>
-        <h1 className="text-xl font-bold">Resolve Open Markets</h1>
+        <h1 className="text-xl font-bold">Resolve trading markets</h1>
         <p className="text-xs text-muted-foreground mt-1">
           Every action previews before it pays. Resolving needs a second person.
         </p>

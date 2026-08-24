@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 const STREAK_ACTION: Record<string, { href: string; label: string }> = {
   refer_3:  { href: '#invite', label: 'Get your link' },
   explorer: { href: '/markets', label: 'Browse' },
-  trader_5: { href: '/open', label: 'Open Markets' },
+  trader_5: { href: '/open', label: 'Trading' },
 };
 
 // Streaks.

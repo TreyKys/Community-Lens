@@ -263,7 +263,7 @@ export default function CreateOpenMarketPage() {
               ))}
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Puts your market on that page too, not instead of the general Open Markets list.
+              Puts your market on that page too, not instead of the general trading list.
             </p>
           </div>
         )}

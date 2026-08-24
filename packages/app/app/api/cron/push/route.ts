@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { safeSecretMatch } from '@/lib/safeCompare';
-import { sendPush, pushConfigured, pushTitle } from '@/lib/push';
+import { sendPush, pushConfigured, pushConfigError, pushTitle } from '@/lib/push';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -36,8 +36,12 @@ export async function POST(request: Request) {
   // Not an error. This ships before the VAPID keys exist and must stay quiet
   // until they do, or the cron logs fill with failures for a feature that was
   // deliberately left switched off.
+  // Reports the SPECIFIC reason, not a generic "not configured". This response
+  // is the only diagnostic an operator gets, and "not configured" reads as
+  // "you have not set the variables" even when they are set and simply wrong —
+  // which sends someone to re-add values that are already there.
   if (!pushConfigured) {
-    return NextResponse.json({ skipped: 'VAPID keys not configured', sent: 0 });
+    return NextResponse.json({ skipped: pushConfigError, sent: 0 });
   }
 
   const { data, error } = await supabaseAdmin.rpc('pending_push_notifications', {

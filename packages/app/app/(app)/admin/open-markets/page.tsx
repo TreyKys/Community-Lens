@@ -142,7 +142,7 @@ export default function OpenMarketsReviewPage() {
 
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">Open Markets review</h1>
+          <h1 className="text-xl font-bold">Trading market review</h1>
           <p className="text-xs text-muted-foreground mt-1">
             Approving commits house money. Everything below the fold is the rubric.
           </p>
@@ -182,7 +182,7 @@ export default function OpenMarketsReviewPage() {
       {config && config.trading_enabled === false && (
         <Card className="border-amber-500/40 bg-amber-500/[0.05]">
           <CardContent className="p-3 text-xs text-amber-200">
-            Open Markets are paused ({config.disabled_reason || 'no reason given'}). Approvals are blocked until you resume.
+            Trading is paused ({config.disabled_reason || 'no reason given'}). Approvals are blocked until you resume.
           </CardContent>
         </Card>
       )}

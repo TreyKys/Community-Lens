@@ -53,9 +53,20 @@ export function AppModals() {
       const gap = lastSeen ? now - lastSeen : 0;
       try { localStorage.setItem(LAST_SEEN_KEY, String(now)); } catch {}
 
-      // A first-ever visitor gets neither: there is nothing to be "back" from
-      // and nothing they have missed.
-      if (!lastSeen) {
+      // "Brand new" is decided by whether they have an ACCOUNT, not by
+      // localStorage.
+      //
+      // This key is written only by this component, which did not exist before
+      // this release. So on the first load after shipping, every user in the
+      // product — including someone who has been here since launch — has no
+      // key and looks brand new. The previous version took that at face value,
+      // showed nothing, and marked What's New as read on the way out. The
+      // result was a modal that could never be seen by anybody, which is
+      // exactly what happened.
+      //
+      // A signed-in session is the honest signal: you cannot have an account
+      // and be a first-time visitor.
+      if (!lastSeen && !session?.user) {
         try { localStorage.setItem(SEEN_RELEASE_KEY, WHATS_NEW_RELEASE); } catch {}
         return;
       }
