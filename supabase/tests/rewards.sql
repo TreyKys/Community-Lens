@@ -26,15 +26,21 @@ BEGIN
   ------------------------------------------------------------------ catalogue
   PERFORM pg_temp.check('five rewards in the catalogue',
     (SELECT count(*) FROM public.reward_catalogue()) = 5);
-  PERFORM pg_temp.check('socials are ₦100, phone is ₦200',
-    (SELECT reward_tngn FROM public.reward_catalogue() WHERE reward_id='phone') = 200
-    AND (SELECT count(*) FROM public.reward_catalogue()
-          WHERE reward_id <> 'phone' AND reward_tngn = 100) = 4);
-  -- The whole point of pricing socials low: four unverifiable claims must not
-  -- add up to more than the one verifiable one is worth twice over.
-  PERFORM pg_temp.check('all unverifiable claims together cap at ₦400',
-    (SELECT COALESCE(SUM(reward_tngn),0) FROM public.reward_catalogue()
-      WHERE reward_id <> 'phone') = 400);
+  PERFORM pg_temp.check('socials are ₦100',
+    (SELECT count(*) FROM public.reward_catalogue()
+      WHERE reward_id <> 'phone' AND reward_tngn = 100) = 4);
+  -- The phone reward is OFF. There is no SMS provider, so the verification it
+  -- was contingent on cannot happen, and a reward that cannot pay is a debt
+  -- rather than a promotion.
+  PERFORM pg_temp.check('the phone reward pays nothing',
+    (SELECT reward_tngn FROM public.reward_catalogue() WHERE reward_id='phone') = 0);
+  PERFORM pg_temp.check('but the phone row is still offered',
+    EXISTS (SELECT 1 FROM public.reward_catalogue() WHERE reward_id='phone'));
+  PERFORM pg_temp.check('and it no longer promises anything',
+    (SELECT detail FROM public.reward_catalogue() WHERE reward_id='phone')
+      NOT LIKE '%₦%');
+  PERFORM pg_temp.check('everything on offer together caps at ₦400',
+    (SELECT COALESCE(SUM(reward_tngn),0) FROM public.reward_catalogue()) = 400);
 
   ------------------------------------------------------------------ phone
   SELECT * INTO r FROM public.claim_profile_reward(u, 'phone', NULL, NULL);
@@ -43,11 +49,26 @@ BEGIN
   SELECT bonus_balance INTO bal FROM public.users WHERE id=u;
   SELECT * INTO r FROM public.claim_profile_reward(u, 'phone', NULL, '08031234567');
   PERFORM pg_temp.check('phone claim is accepted', r.applied, r.reason);
-  PERFORM pg_temp.check('but held PENDING, not paid', r.status = 'pending', r.status);
-  PERFORM pg_temp.check('and nothing was credited yet',
-    (SELECT bonus_balance FROM public.users WHERE id=u) = bal);
-  PERFORM pg_temp.check('the number was stored anyway — that was the goal',
+  PERFORM pg_temp.check('the number is stored — that was the whole point',
     (SELECT phone FROM public.users WHERE id=u) = '08031234567');
+
+  -- Everything below is the zero-value path behaving like a record rather than
+  -- a payment. Each of these was a real way for ₦0 to look like money.
+  PERFORM pg_temp.check('it settles terminally, nothing left pending',
+    r.status = 'paid', r.status);
+  PERFORM pg_temp.check('nothing pending anywhere for this user',
+    NOT EXISTS (SELECT 1 FROM public.profile_rewards
+                 WHERE user_id=u AND status='pending'));
+  PERFORM pg_temp.check('it reports ₦0, not the old ₦200',
+    r.reward_tngn = 0, r.reward_tngn::text);
+  PERFORM pg_temp.check('no balance moved',
+    (SELECT bonus_balance FROM public.users WHERE id=u) = bal);
+  PERFORM pg_temp.check('no ₦0 treasury row was written',
+    NOT EXISTS (SELECT 1 FROM public.treasury_log
+                 WHERE user_id=u AND type='profile_reward'));
+  PERFORM pg_temp.check('and nobody was told "₦0 bonus added"',
+    NOT EXISTS (SELECT 1 FROM public.notifications
+                 WHERE user_id=u AND type='profile_reward'));
 
   -- Same number on a second account must be refused. This is the cheapest
   -- brake there is on one person signing up ten times.
@@ -58,20 +79,21 @@ BEGIN
     r.reason NOT ILIKE '%already%registered%' AND r.reason NOT ILIKE '%taken%', r.reason);
 
   ------------------------------------------------------------------ release
+  -- The release path is deliberately still here and still callable, so that
+  -- restoring the reward later is a number change rather than a rebuild. With
+  -- nothing pending it must be a clean no-op — not an error, and above all not
+  -- a payment.
   SELECT bonus_balance INTO bal FROM public.users WHERE id=u;
   SELECT * INTO r FROM public.release_verified_phone_reward(u);
-  PERFORM pg_temp.check('verifying releases the held reward',
-    r.applied AND r.reward_tngn = 200);
-  PERFORM pg_temp.check('now it is credited — to BONUS',
-    (SELECT bonus_balance FROM public.users WHERE id=u) = bal + 200
-    AND (SELECT tngn_balance FROM public.users WHERE id=u) = 0);
-  PERFORM pg_temp.check('and marked paid',
+  PERFORM pg_temp.check('releasing finds nothing to release', NOT r.applied);
+  PERFORM pg_temp.check('and pays nothing',
+    (SELECT bonus_balance FROM public.users WHERE id=u) = bal);
+  PERFORM pg_temp.check('the row stays paid',
     (SELECT status FROM public.profile_rewards
       WHERE user_id=u AND reward_id='phone') = 'paid');
 
-  -- Verifying twice must not pay twice.
   SELECT * INTO r FROM public.release_verified_phone_reward(u);
-  PERFORM pg_temp.check('a second verify pays nothing', NOT r.applied);
+  PERFORM pg_temp.check('a second call still pays nothing', NOT r.applied);
   PERFORM pg_temp.check('still exactly one phone reward row',
     (SELECT count(*) FROM public.profile_rewards
       WHERE user_id=u AND reward_id='phone') = 1);
@@ -103,8 +125,11 @@ BEGIN
   PERFORM public.claim_profile_reward(u, 'ig_opinions', '@alpha', NULL);
   PERFORM public.claim_profile_reward(u, 'x_neuro',     '@alpha', NULL);
   PERFORM public.claim_profile_reward(u, 'ig_neuro',    '@alpha', NULL);
-  PERFORM pg_temp.check('everything claimed totals ₦600, not more',
-    (SELECT bonus_balance FROM public.users WHERE id=u) = 600,
+  -- ₦400, not the ₦600 this used to be: the phone reward is off, so the most
+  -- a brand-new account can extract from this card is the four social claims.
+  -- This is the number that bounds the whole feature's exposure per signup.
+  PERFORM pg_temp.check('everything claimed totals ₦400, not more',
+    (SELECT bonus_balance FROM public.users WHERE id=u) = 400,
     (SELECT bonus_balance FROM public.users WHERE id=u)::text);
 
   PERFORM pg_temp.check('state reflects what was claimed',

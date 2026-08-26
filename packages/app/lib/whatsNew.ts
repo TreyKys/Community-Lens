@@ -55,7 +55,7 @@ export const WHATS_NEW: WhatsNewItem[] = [
     // is how a five-item list turns into a changelog.
     emoji: '🎁',
     title: 'Free bonus, right now',
-    body: 'Add your number and follow us for up to ₦600. Your invite link pays ₦200 a head on top — ₦200 to your friend too.',
+    body: 'Follow us on X and Instagram for ₦100 each. Your invite link pays ₦200 a head on top — ₦200 to your friend too.',
     href: '/dashboard#invite',
     cta: 'Claim it',
   },

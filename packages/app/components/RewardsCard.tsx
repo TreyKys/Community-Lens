@@ -10,10 +10,13 @@ import { Gift, Loader2, Check, Clock, Phone, ExternalLink } from 'lucide-react';
 
 // One-off profile rewards: phone number and four social follows.
 //
-// The phone reward is COLLECTED now and PAID on verification, and the card
-// says so in as many words. Showing "₦200" next to a button that pays nothing
-// today would be a promise the product cannot keep this week, and a user who
-// discovers that themselves has been misled by omission.
+// The phone row PAYS NOTHING and no longer claims to. It was collect-now,
+// pay-on-verification — but with no SMS provider the verification could never
+// happen, so the ₦200 could never be paid. The number is still worth
+// collecting for account recovery, so the field stayed and the promise went.
+//
+// Anything worth ₦0 renders as "Add" rather than "₦0". A currency amount of
+// zero on a button reads as a broken price, not as "this one is free".
 //
 // Social claims ask for the handle before paying. Nothing can check a follow —
 // neither platform exposes it — so the handle is the entire audit trail, and
@@ -68,14 +71,14 @@ export function RewardsCard() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Could not claim');
 
-      toast(d.status === 'pending'
+      toast(d.rewardTngn > 0
         ? {
-            title: 'Number saved',
-            description: `₦${d.rewardTngn} is waiting — we'll add it once your number is verified.`,
-          }
-        : {
             title: `₦${d.rewardTngn} bonus added`,
             description: 'Bonus credit — stake it to turn it into winnings.',
+          }
+        : {
+            title: 'Number saved',
+            description: 'Thanks — that makes getting your account back much easier.',
           });
       setOpen(null); setValue('');
       load();
@@ -136,7 +139,7 @@ export function RewardsCard() {
                   <Button size="sm"
                           className="h-7 px-2.5 text-[11px] bg-emerald-600 hover:bg-emerald-500 shrink-0"
                           onClick={() => { setOpen(open === rw.id ? null : rw.id); setValue(''); }}>
-                    ₦{rw.rewardTngn}
+                    {rw.rewardTngn > 0 ? `₦${rw.rewardTngn}` : 'Add'}
                   </Button>
                 )}
               </div>
@@ -167,8 +170,8 @@ export function RewardsCard() {
                   </div>
                   {rw.id === 'phone' && (
                     <p className="text-[10px] text-muted-foreground">
-                      We&rsquo;ll save it now and add the ₦{rw.rewardTngn} once it&rsquo;s verified.
-                      One account per number.
+                      Used to get your account back if you&rsquo;re locked out, and to
+                      keep withdrawals secure. One account per number.
                     </p>
                   )}
                 </div>

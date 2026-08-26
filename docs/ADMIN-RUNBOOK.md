@@ -375,15 +375,23 @@ worth knowing the ceiling.
 
 | Source | Pays | Verifiable? |
 |---|---|---|
-| Phone number | ₦200 | Yes — held until the number verifies, unique per account |
+| Phone number | **₦0** — collected, not rewarded | n/a |
 | 4 social follows | ₦100 each (₦400) | **No.** Nothing can check a follow; the handle is the entire audit trail |
 | Referral, per head | ₦200 to each side | Yes — the referee is a real account with a real code |
 | Streaks | ₦200–₦500 each, 6 of them | Yes — all read from recorded activity |
 
-**Worst case for one determined new account: ₦600 immediately** (phone held
-until verified, plus four unverifiable follows). Socials are priced at ₦100
-rather than ₦200 precisely so all four together cannot beat the one thing that
-is actually checkable.
+**Worst case for one determined new account: ₦400** — the four unverifiable
+follows, and nothing else on this card.
+
+**The phone reward is switched off.** It paid ₦200 on SMS verification, there
+is no SMS provider, so the verification could never happen and the money could
+never be paid — every claim was quietly booking a promise the product had no
+way to keep. The number is still collected (account recovery and withdrawal
+security both want it) and nothing is promised for it.
+
+Turning it back on, if an SMS provider is ever added, is one number in
+`reward_catalogue()`. The release path (`release_verified_phone_reward`) and
+the OTP verify route that calls it were both left in place for exactly that.
 
 ## The referral streak, and the trap it avoids
 

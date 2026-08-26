@@ -33,6 +33,7 @@ MIGRATIONS=(
   20260807070000_notify_on_bet_settlement
   20260807080000_push_subscriptions
   20260807090000_referral_streak
+  20260807100000_phone_reward_off
 )
 
 psql_as() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $DB $*"; }
