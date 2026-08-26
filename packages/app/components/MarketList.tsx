@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -672,7 +672,40 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+function marketCardPropsAreEqual(prev: MarketCardProps, next: MarketCardProps) {
+  if (prev.session?.access_token !== next.session?.access_token) return false;
+  if (prev.hideViewMore !== next.hideViewMore) return false;
+  if (prev.isStaked !== next.isStaked) return false;
+  if (prev.prefillOutcomeIndex !== next.prefillOutcomeIndex) return false;
+  if (prev.prefillStakeTngn !== next.prefillStakeTngn) return false;
+  if (prev.prefillEditStake !== next.prefillEditStake) return false;
+  if (prev.prefillFromShareId !== next.prefillFromShareId) return false;
+  if (prev.autoOpen !== next.autoOpen) return false;
+  // Stable callback check
+  if (prev.onBetPlaced !== next.onBetPlaced) return false;
+
+  // Shallow compare market properties dynamically
+  const prevKeys = Object.keys(prev.market) as (keyof Market)[];
+  const nextKeys = Object.keys(next.market) as (keyof Market)[];
+  if (prevKeys.length !== nextKeys.length) return false;
+
+  for (const key of prevKeys) {
+    if (key === 'options') {
+      const prevOpts = prev.market.options || [];
+      const nextOpts = next.market.options || [];
+      if (prevOpts.length !== nextOpts.length) return false;
+      for (let i = 0; i < prevOpts.length; i++) {
+        if (prevOpts[i] !== nextOpts[i]) return false;
+      }
+    } else {
+      if (prev.market[key] !== next.market[key]) return false;
+    }
+  }
+
+  return true;
+}
+
+const MemoizedMarketCard = memo(function MarketCard({
   market,
   session,
   onBetPlaced,
@@ -937,7 +970,7 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+}, marketCardPropsAreEqual);
 
 type CategoryFilter = {
   category: string | null;
@@ -1061,6 +1094,7 @@ interface MarketListProps {
       empty list that looks like "no markets yet" forever. */
   scopeCategory?: string;
 }
+
 
 export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leagueCode, sport, scopeCategory = 'sports' }: MarketListProps) {
   const searchParams = useSearchParams();
@@ -1402,7 +1436,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       {markets.map((market) => {
         const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
         return (
-          <MarketCard
+          <MemoizedMarketCard
             key={market.id}
             market={market}
             session={session}
