@@ -52,7 +52,7 @@ done
 echo "migrations loaded: ${#MIGRATIONS[@]}"
 
 fail=0
-for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak; do
+for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media; do
   echo
   echo "── $suite ──"
   # Each suite gets a fresh database: they both create users and markets, and
@@ -61,6 +61,16 @@ for suite in open_markets_e2e open_markets_cron open_markets_creator open_market
   su postgres -c "dropdb --if-exists $DB && createdb $DB" >/dev/null 2>&1
   psql_as < "$HERE/_base.sql" >/dev/null 2>&1
   for f in "${MIGRATIONS[@]}"; do psql_as -f "$MIG/$f.sql" >/dev/null 2>&1; done
+
+  # The social suite exercises a different slice of the schema, so it loads
+  # the social migrations on top rather than pretending one migration list
+  # covers the whole product.
+  if [ "$suite" = "social_media" ]; then
+    for f in 20260804000000_social_pipeline 20260805100000_social_control \
+             20260807000000_social_briefed_drafts 20260807120000_social_media_preview; do
+      psql_as -f "$MIG/$f.sql" >/dev/null 2>&1
+    done
+  fi
 
   out=$(su postgres -c "psql -q -d $DB" < "$HERE/$suite.sql" 2>&1 | sed 's/^psql:<stdin>:[0-9]*: //')
   echo "$out" | grep -E "PASS|FAIL|ERROR"

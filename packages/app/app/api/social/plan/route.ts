@@ -133,6 +133,14 @@ export async function POST(request: Request) {
         channel: 'x',
         kind,
         body,
+        // media_kind AND media_url must be set together. The
+        // social_posts_media_consistency_chk constraint enforces it, and
+        // media_kind defaults to 'none' — so an insert that sets only the
+        // URL is rejected outright. That is what silently killed every
+        // planner run: the constraint arrived in 20260807120000 and this
+        // insert, written before it, was never updated. Queued: 0, every
+        // day, with the reason buried in a Telegram error line.
+        media_kind: 'auto_card',
         // Rendered on demand from live pool data at publish time — so
         // the image can never quote a split that has since moved.
         media_url: `${getBaseUrl()}/api/social/card/${m.id}`,
