@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, User as UserIcon, Wallet, TrendingUp, ArrowDownToLine, ArrowUpFromLine, Users as UsersIcon, Award, Activity, Bell, Layers, CheckCircle2, XCircle, Shield, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
 
 interface Props {
   userId: string | null;
@@ -111,7 +112,20 @@ export function UserDetailDrawer({ userId, onClose }: Props) {
               <TabsContent value="overview" className="p-6 space-y-5 mt-0">
                 <Section title="Wallet">
                   <Stat label="tNGN balance" value={f(data.user.tngn_balance)} color="text-emerald-400" />
-                  <Stat label="Bonus balance" value={f(data.user.bonus_balance)} color="text-amber-400" />
+                  {/* Spendable, not the raw bonus_balance column. bonus_balance
+                      expires 7 days after each credit — this used to show the
+                      raw column here, so a support admin could see a healthy
+                      bonus figure for an account whose OWN dashboard already
+                      reports it as zero. Whatever a user sees, this must show
+                      the same number. */}
+                  <Stat
+                    label="Bonus balance"
+                    value={f(spendableBonus(data.user.bonus_balance, data.user.bonus_expires_at))
+                      + (bonusExpiryNote(data.user.bonus_balance, data.user.bonus_expires_at)
+                          ? ` (${bonusExpiryNote(data.user.bonus_balance, data.user.bonus_expires_at)})`
+                          : '')}
+                    color="text-amber-400"
+                  />
                   <Stat label="Points" value={(data.user.points || 0).toLocaleString()} color="text-violet-300" />
                 </Section>
 
