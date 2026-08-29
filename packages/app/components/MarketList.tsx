@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -672,7 +672,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+const MarketCard = memo(function MarketCard({
   market,
   session,
   onBetPlaced,
@@ -937,7 +937,7 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+});
 
 type CategoryFilter = {
   category: string | null;
@@ -1302,6 +1302,23 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 
+  // Optimization: Stable reference for the bet placement callback to avoid MarketCard re-renders
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    // Silent refetch (no skeleton) + re-anchor to the card the user
+    // just bet on so they stay in context. Without the scrollIntoView
+    // the silent refetch reorders cards (pool changed) and users
+    // would be looking at a different market at the same scrollY.
+    await fetchMarkets({ silent: true });
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [fetchMarkets, session?.user?.id, fetchStakedMarkets]);
+
   // Restore scroll position when the same view re-mounts (e.g. user navigates
   // into /event/X and uses back, or hops between tabs and returns). Without
   // this Next.js dumps users at scrollY=0 every time, which is exhausting on
@@ -1406,21 +1423,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
