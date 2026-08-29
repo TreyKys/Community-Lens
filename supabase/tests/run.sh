@@ -34,6 +34,7 @@ MIGRATIONS=(
   20260807080000_push_subscriptions
   20260807090000_referral_streak
   20260807100000_phone_reward_off
+  20260807130000_purge_unstaked_auto_fetched_markets
 )
 
 psql_as() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $DB $*"; }
@@ -52,7 +53,7 @@ done
 echo "migrations loaded: ${#MIGRATIONS[@]}"
 
 fail=0
-for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media; do
+for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media purge_markets; do
   echo
   echo "── $suite ──"
   # Each suite gets a fresh database: they both create users and markets, and
