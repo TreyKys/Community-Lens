@@ -68,6 +68,10 @@ CREATE TABLE public.markets(
   league_code text,
   total_pool numeric DEFAULT 0,
   parent_market_id bigint,
+  -- Set only by the seed bot (20240503000000). The admin panel and the AI
+  -- bulk generator both leave it NULL — this is the marker that decides
+  -- what "auto-fetched" means to the purge function in 20260807130000.
+  fixture_id bigint,
   closes_at timestamptz,
   created_at timestamptz DEFAULT now());
 

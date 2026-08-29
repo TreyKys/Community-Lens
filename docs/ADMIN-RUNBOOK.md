@@ -416,6 +416,62 @@ if you ever need to re-grant one, delete that row rather than crediting by hand.
 
 ---
 
+# 3c. Clearing the auto-fetched backlog
+
+The seed bot has been creating a market for every fixture across up to twelve
+leagues since it was wired up (now three — see the league restriction below).
+Most of that never drew a stake. `purge_unstaked_auto_fetched_markets()`
+clears it, and it is deliberately narrow: it deletes an auto-fetched market
+**only if nothing anywhere references it** — no bet, no Multiplier leg, no VIP
+earning, no bet-insurance event, no on-chain commit.
+
+**What it will NOT do, on purpose:** touch a market someone currently holds a
+live position on. That fixture is still going to be played whether or not we
+keep offering its league — the honest thing is to let it resolve and pay out
+normally through the existing auto-resolve cron (see below), not to
+unilaterally cancel a bet placed in good faith because of a business decision
+that has nothing to do with whether the bet is good. Those are reported by
+the function, never touched.
+
+**Run it — dry run first, always:**
+
+```sql
+select * from purge_unstaked_auto_fetched_markets(true);   -- preview, changes nothing
+select * from purge_unstaked_auto_fetched_markets(false);  -- the real thing
+```
+
+Three rows come back either way:
+
+| phase | meaning |
+|---|---|
+| `sub-markets` | BTTS / Over-Under rows cleared first |
+| `parents` | match-winner rows, cleared once every child under them is gone |
+| `left in place — has real activity` | what survived, and why — `sample_ids` names up to 20 |
+
+Safe to run more than once — a second pass reports zero candidates rather than
+erroring. `fixture_id IS NOT NULL` is what "auto-fetched" means here: it is
+the one column only the seed bot ever sets — the admin panel and the AI bulk
+generator both leave it NULL, so nothing made by a human is ever a candidate.
+
+## Auto-resolve and payout — already running, nothing to switch on
+
+`cron-oracle-resolve.yml`, every 5 minutes, hits `/api/markets/resolve-due`.
+For every locked sports market past its close time, it looks up the real
+result (football via football-data.org then a team-name fallback; basketball
+and tennis via API-Sports; esports via PandaScore) and, the moment it finds
+one, resolves and pays out through the same path an admin's manual resolve
+uses — same settlement math, same `settle_bet_outcome`, no separate code path
+that could drift from what a human does by hand.
+
+It does not distinguish by league — it always has covered every auto-fetched
+market regardless of which of the (now three) leagues seeded it, and continues
+to for anything already on the board under a scrapped league. A market it
+cannot resolve retries every 5 minutes for up to 48 hours (576 attempts) before
+it stops trying and raises an admin alert instead of retrying forever against
+a result that will never come.
+
+---
+
 # 4. Other tools
 
 | Screen | What it is for |

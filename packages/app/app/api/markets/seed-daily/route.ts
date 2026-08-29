@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { safeSecretMatch } from '@/lib/safeCompare';
 import {
   FOOTBALL_LEAGUES,
+  selectSeedableFixtures,
   BASKETBALL_LEAGUES,
   fetchFootballFixtures,
   fetchApiSportsFixtures,
@@ -13,7 +14,7 @@ import {
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-type SourceStat = { fetched: number; created: number; skipped: number; errors: string[] };
+type SourceStat = { fetched: number; seedable?: number; created: number; skipped: number; errors: string[] };
 const blank = (): SourceStat => ({ fetched: 0, created: 0, skipped: 0, errors: [] });
 
 function bump(stat: SourceStat, r: { success?: boolean; skipped?: boolean; error?: string }) {
@@ -35,8 +36,16 @@ export async function POST(request: Request) {
   // Football
   for (const code of FOOTBALL_LEAGUES) {
     const stat = football[code] = blank();
-    const fixtures = await fetchFootballFixtures(code);
-    stat.fetched = fixtures.length;
+    const allFixtures = await fetchFootballFixtures(code);
+    // La Liga is narrowed to its big three here; every other league passes
+    // through untouched. selectSeedableFixtures owns that rule.
+    const fixtures = selectSeedableFixtures(code, allFixtures);
+    // fetched = what the API returned, seedable = what survived the filter.
+    // Kept distinct so a quiet La Liga week reads as "9 fetched, 0 seedable"
+    // — the big three simply were not playing — rather than looking like the
+    // fetch failed.
+    stat.fetched = allFixtures.length;
+    stat.seedable = fixtures.length;
     for (const match of fixtures.slice(0, 4)) {
       try {
         const home = match.homeTeam?.shortName || match.homeTeam?.name || 'Home';

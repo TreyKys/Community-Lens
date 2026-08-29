@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   try {
     const { data: vips } = await supabaseAdmin
       .from('users')
-      .select('id, email, created_at, is_vip, bonus_balance, points, last_active_at')
+      .select('id, email, created_at, is_vip, bonus_balance, bonus_expires_at, points, last_active_at')
       .eq('is_vip', true)
       .order('created_at', { ascending: false })
       .limit(30);

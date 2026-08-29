@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
   let query = db
     .from('users')
-    .select('id, email, username, tngn_balance, bonus_balance, created_at, last_active_at', { count: 'exact' });
+    .select('id, email, username, tngn_balance, bonus_balance, bonus_expires_at, created_at, last_active_at', { count: 'exact' });
 
   if (search) {
     const safe = search.replace(/[%_]/g, ''); // strip wildcards from raw input
@@ -82,6 +82,7 @@ export async function GET(request: Request) {
     username: u.username || null,
     tngn_balance: Number(u.tngn_balance || 0),
     bonus_balance: Number(u.bonus_balance || 0),
+    bonus_expires_at: u.bonus_expires_at || null,
     lifetime_credits: creditsByUser[u.id] || 0,
     created_at: u.created_at || null,
     last_active_at: u.last_active_at || null,

@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
+import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
 import Link from 'next/link';
 
 // Admin auth is now cookie-based: POST /api/admin/auth sets an httpOnly cookie
@@ -3807,6 +3808,7 @@ type UserRow = {
   username: string | null;
   tngn_balance: number;
   bonus_balance: number;
+  bonus_expires_at: string | null;
   lifetime_credits: number;
   created_at: string | null;
   last_active_at: string | null;
@@ -3848,9 +3850,16 @@ function UsersPanel() {
   useEffect(() => { load(); }, [load]);
 
   const exportCsv = () => {
-    const header = ['id', 'email', 'username', 'tngn_balance', 'bonus_balance', 'lifetime_credits', 'created_at', 'last_active_at'];
+    // Both bonus columns, not just one. bonus_balance_spendable matches what
+    // the Bonus column on screen shows (and what the user's own dashboard
+    // shows); bonus_balance_raw is the underlying ledger figure, which a
+    // reconciliation still legitimately needs. Picking only one would make
+    // this export wrong for whichever use it was not picked for.
+    const header = ['id', 'email', 'username', 'tngn_balance', 'bonus_balance_raw', 'bonus_balance_spendable', 'lifetime_credits', 'created_at', 'last_active_at'];
     const lines = rows.map((r) =>
-      [r.id, r.email ?? '', r.username ?? '', r.tngn_balance, r.bonus_balance, r.lifetime_credits, r.created_at ?? '', r.last_active_at ?? '']
+      [r.id, r.email ?? '', r.username ?? '', r.tngn_balance, r.bonus_balance,
+       spendableBonus(r.bonus_balance, r.bonus_expires_at),
+       r.lifetime_credits, r.created_at ?? '', r.last_active_at ?? '']
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(',')
     );
@@ -3912,9 +3921,24 @@ function UsersPanel() {
       render: (u) => <span className="font-medium">₦{u.tngn_balance.toLocaleString()}</span>,
     },
     {
+      // Spendable, not raw. bonus_balance expires 7 days after each credit
+      // (trg_users_bonus_expires); the raw column was shown here with no
+      // regard for that, so an admin looking up a user with lapsed bonus saw
+      // a live-looking number the user's own dashboard already reports as
+      // zero — support staff would tell someone their bonus is fine while
+      // the wallet screen right in front of them says it expired.
       key: 'bonus_balance', label: 'Bonus', sortable: true,
-      sortValue: (u) => u.bonus_balance,
-      render: (u) => <span className="text-amber-400 font-medium">₦{u.bonus_balance.toLocaleString()}</span>,
+      sortValue: (u) => spendableBonus(u.bonus_balance, u.bonus_expires_at),
+      render: (u) => {
+        const live = spendableBonus(u.bonus_balance, u.bonus_expires_at);
+        const note = bonusExpiryNote(u.bonus_balance, u.bonus_expires_at);
+        return (
+          <span className="text-amber-400 font-medium">
+            ₦{live.toLocaleString()}
+            {note && <span className="ml-1 text-[10px] text-muted-foreground font-normal">({note})</span>}
+          </span>
+        );
+      },
     },
     {
       key: 'lifetime_credits', label: 'Lifetime credits', sortable: true,
@@ -4716,7 +4740,11 @@ function VIPPanel() {
                   </div>
                   <div className="text-right shrink-0 ml-3">
                     <p className="text-xs text-muted-foreground">Bonus</p>
-                    <p className="text-sm font-bold tabular-nums">₦{Number(v.bonus_balance || 0).toLocaleString()}</p>
+                    {/* Spendable, not raw — see the note on the Users table's
+                        Bonus column for why the raw column reads wrong. */}
+                    <p className="text-sm font-bold tabular-nums">
+                      ₦{spendableBonus(v.bonus_balance, v.bonus_expires_at).toLocaleString()}
+                    </p>
                   </div>
                 </div>
               );
