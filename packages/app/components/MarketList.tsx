@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -1050,6 +1050,46 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
   return base;
 }
 
+
+function areEqual(prev: MarketCardProps, next: MarketCardProps) {
+  if (prev.session !== next.session || prev.session?.access_token !== next.session?.access_token) return false;
+  if (prev.onBetPlaced !== next.onBetPlaced) return false;
+  if (prev.hideViewMore !== next.hideViewMore) return false;
+  if (prev.isStaked !== next.isStaked) return false;
+  if (prev.prefillOutcomeIndex !== next.prefillOutcomeIndex) return false;
+  if (prev.prefillStakeTngn !== next.prefillStakeTngn) return false;
+  if (prev.prefillEditStake !== next.prefillEditStake) return false;
+  if (prev.prefillFromShareId !== next.prefillFromShareId) return false;
+  if (prev.autoOpen !== next.autoOpen) return false;
+
+  const m1 = prev.market;
+  const m2 = next.market;
+  if (!m1 || !m2) return m1 === m2;
+
+  const keys1 = Object.keys(m1) as (keyof Market)[];
+  const keys2 = Object.keys(m2) as (keyof Market)[];
+
+  if (keys1.length !== keys2.length) return false;
+
+  for (const key of keys1) {
+    const val1 = m1[key];
+    const val2 = m2[key];
+
+    if (Array.isArray(val1) && Array.isArray(val2)) {
+      if (val1.length !== val2.length) return false;
+      for (let i = 0; i < val1.length; i++) {
+        if (val1[i] !== val2[i]) return false;
+      }
+    } else if (val1 !== val2) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+const MarketCardMemo = memo(MarketCard, areEqual);
+
 interface MarketListProps {
   filterExactMarketId?: number;
   filterChildrenOfParentId?: number;
@@ -1306,6 +1346,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     }
   }, [filterExactMarketId, filterChildrenOfParentId, category, subcategory, leagueCode, sport, scopeCategory, sortParam, statusParam, searchQuery]);
 
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    // Silent refetch (no skeleton) + re-anchor to the card the user
+    // just bet on so they stay in context. Without the scrollIntoView
+    // the silent refetch reorders cards (pool changed) and users
+    // would be looking at a different market at the same scrollY.
+    await fetchMarkets({ silent: true });
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [fetchMarkets, fetchStakedMarkets, session?.user?.id, setAutoSharePick]);
+
   useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
 
   // Restore scroll position when the same view re-mounts (e.g. user navigates
@@ -1408,25 +1464,11 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       {markets.map((market) => {
         const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
         return (
-          <MarketCard
+          <MarketCardMemo
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
