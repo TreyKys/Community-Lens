@@ -1,0 +1,3 @@
+## 2023-11-20 - React.memo deep equality on reconstructed objects
+**Learning:** Supabase queries dynamically reconstruct object instances on every fetch, returning entirely new memory references for arrays and objects like `market.options`. This defeats standard shallow comparison in `React.memo` and causes massive unneeded re-renders in mapped lists like `MarketList`.
+**Action:** Always write a custom `areEqual` deep comparator when memoizing list items that receive Supabase objects as props. Explicitly check inner array values (like `options`) and stabilize the item's callback props (like `onBetPlaced`) via `useCallback` in the parent.
