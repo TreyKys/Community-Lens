@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -672,7 +672,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+const MarketCard = memo(function MarketCard({
   market,
   session,
   onBetPlaced,
@@ -937,7 +937,21 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+}, (prevProps, nextProps) => {
+  if (prevProps.isStaked !== nextProps.isStaked) return false;
+  if (prevProps.hideViewMore !== nextProps.hideViewMore) return false;
+  if (prevProps.prefillOutcomeIndex !== nextProps.prefillOutcomeIndex) return false;
+  if (prevProps.prefillStakeTngn !== nextProps.prefillStakeTngn) return false;
+  if (prevProps.prefillEditStake !== nextProps.prefillEditStake) return false;
+  if (prevProps.prefillFromShareId !== nextProps.prefillFromShareId) return false;
+  if (prevProps.autoOpen !== nextProps.autoOpen) return false;
+  if (prevProps.session?.user?.id !== nextProps.session?.user?.id) return false;
+
+  return prevProps.market.id === nextProps.market.id &&
+         prevProps.market.total_pool === nextProps.market.total_pool &&
+         prevProps.market.status === nextProps.market.status &&
+         prevProps.market.resolved_outcome === nextProps.market.resolved_outcome;
+});
 
 type CategoryFilter = {
   category: string | null;
@@ -1338,6 +1352,22 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     };
   }, [scrollKey]);
 
+  const handleBetPlaced = useCallback(async (id: number, betId?: string) => {
+    // Silent refetch (no skeleton) + re-anchor to the card the user
+    // just bet on so they stay in context. Without the scrollIntoView
+    // the silent refetch reorders cards (pool changed) and users
+    // would be looking at a different market at the same scrollY.
+    await fetchMarkets({ silent: true });
+    if (session?.user?.id) fetchStakedMarkets(session.user.id);
+    requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if (betId) {
+      setAutoSharePick({ type: 'bet', id: betId });
+    }
+  }, [fetchMarkets, session?.user?.id, fetchStakedMarkets, setAutoSharePick]);
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -1397,6 +1427,8 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
     );
   }
 
+
+
   return (
     <div className="space-y-3">
       {markets.map((market) => {
@@ -1406,21 +1438,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
             key={market.id}
             market={market}
             session={session}
-            onBetPlaced={async (id, betId) => {
-              // Silent refetch (no skeleton) + re-anchor to the card the user
-              // just bet on so they stay in context. Without the scrollIntoView
-              // the silent refetch reorders cards (pool changed) and users
-              // would be looking at a different market at the same scrollY.
-              await fetchMarkets({ silent: true });
-              if (session?.user?.id) fetchStakedMarkets(session.user.id);
-              requestAnimationFrame(() => {
-                const card = document.querySelector<HTMLElement>(`[data-market-id="${id}"]`);
-                card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              });
-              if (betId) {
-                setAutoSharePick({ type: 'bet', id: betId });
-              }
-            }}
+            onBetPlaced={handleBetPlaced}
             hideViewMore={filterExactMarketId !== undefined || filterChildrenOfParentId !== undefined}
             isStaked={stakedMarketIds.has(market.id)}
             prefillOutcomeIndex={isPickTarget ? stakeIntent!.outcomeIndex : undefined}
