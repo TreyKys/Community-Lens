@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PushToggle } from '@/components/PushToggle';
+import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
 
 const AVATAR_THEME: [string, string, string, string][] = [
   ['#6366f1','#8b5cf6','#c4b5fd','◈'],['#0ea5e9','#38bdf8','#7dd3fc','◎'],
@@ -233,8 +234,12 @@ export default function ProfilePage() {
             <span className="text-4xl font-black tracking-tighter">₦{(profile?.tngn_balance || 0).toLocaleString()}</span>
             <span className="text-base text-muted-foreground mb-1">tNGN</span>
           </div>
-          {(profile?.bonus_balance || 0) > 0 && (
-            <p className="text-sm text-amber-400 mb-4">+₦{profile.bonus_balance.toLocaleString()} bonus credit 🛡</p>
+          {spendableBonus(profile?.bonus_balance, profile?.bonus_expires_at) > 0 && (
+            <p className="text-sm text-amber-400 mb-4">
+              +₦{spendableBonus(profile?.bonus_balance, profile?.bonus_expires_at).toLocaleString()} bonus credit 🛡
+              {bonusExpiryNote(profile?.bonus_balance, profile?.bonus_expires_at)
+                && ` · ${bonusExpiryNote(profile?.bonus_balance, profile?.bonus_expires_at)}`}
+            </p>
           )}
           <div className="mt-4"><WalletModal /></div>
         </div>

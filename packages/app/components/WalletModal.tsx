@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Wallet, Loader2, Shield, AlertTriangle, RefreshCw } from 'lucide-react';
 import { APPROVED_BANKS } from '@/lib/banks';
+import { spendableBonus } from '@/lib/bonus';
 
 export function WalletModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -43,12 +44,12 @@ export function WalletModal() {
   const fetchBalance = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('users')
-      .select('tngn_balance, bonus_balance')
+      .select('tngn_balance, bonus_balance, bonus_expires_at')
       .eq('id', userId)
       .single();
     if (data) {
       setBalance(data.tngn_balance || 0);
-      setBonusBalance(data.bonus_balance || 0);
+      setBonusBalance(spendableBonus(data.bonus_balance, data.bonus_expires_at));
     }
   }, []);
 

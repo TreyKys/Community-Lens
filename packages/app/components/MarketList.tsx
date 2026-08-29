@@ -20,6 +20,7 @@ import { StakeConfirmation } from '@/components/StakeConfirmation';
 import { SharePickModal } from '@/components/SharePickModal';
 import { PickPreviewModal } from '@/components/PickPreviewModal';
 import { getDisplayPool } from '@/lib/displayPool';
+import { spendableBalance } from '@/lib/bonus';
 
 interface Market {
   id: number;
@@ -219,11 +220,16 @@ function BettingInterface({
     if (session?.user?.id) {
       supabase
         .from('users')
-        .select('tngn_balance, bonus_balance')
+        .select('tngn_balance, bonus_balance, bonus_expires_at')
         .eq('id', session.user.id)
         .single()
         .then(({ data }) => {
-          if (data) setBalance((data.tngn_balance || 0) + (data.bonus_balance || 0));
+          // Expired bonus is not money. The staking RPCs zero it before
+          // checking affordability, so counting it here would let someone
+          // build a stake the server is certain to refuse.
+          if (data) setBalance(spendableBalance(
+            data.tngn_balance, data.bonus_balance, data.bonus_expires_at,
+          ));
         });
     }
 

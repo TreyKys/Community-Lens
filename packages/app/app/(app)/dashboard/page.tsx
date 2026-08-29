@@ -19,11 +19,13 @@ import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { getDisplayPool } from '@/lib/displayPool';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
 
 interface DashboardProfile {
   id: string;
   tngn_balance: number;
   bonus_balance: number;
+  bonus_expires_at: string | null;
   points: number;
   is_vip: boolean;
 }
@@ -76,7 +78,7 @@ export default function DashboardPage() {
 
       const [{ data: prof }, { data: codeRow }, { data: stakeRows }, { data: earnings }] = await Promise.all([
         supabase.from('users')
-          .select('id, tngn_balance, bonus_balance, points, is_vip')
+          .select('id, tngn_balance, bonus_balance, points, is_vip, bonus_expires_at')
           .eq('id', uid).single(),
         supabase.from('referral_codes')
           .select('code, is_vip_code, rake_share_pct, uses_count')
@@ -115,7 +117,7 @@ export default function DashboardPage() {
           filter: `id=eq.${uid}`,
         }, async () => {
           const { data: fresh } = await supabase.from('users')
-            .select('id, tngn_balance, bonus_balance, points, is_vip')
+            .select('id, tngn_balance, bonus_balance, points, is_vip, bonus_expires_at')
             .eq('id', uid).single();
           if (fresh) setProfile(fresh as DashboardProfile);
         })
@@ -210,7 +212,12 @@ export default function DashboardPage() {
   }
 
   const isVip = profile.is_vip;
-  const totalBalance = (profile.tngn_balance || 0) + (profile.bonus_balance || 0);
+  // Expired bonus is excluded from BOTH figures. It used to be added to the
+  // total and shown in full in the Bonus tile, so someone whose bonus had
+  // lapsed saw money on this screen that every staking engine would refuse.
+  const liveBonus = spendableBonus(profile.bonus_balance, profile.bonus_expires_at);
+  const totalBalance = (profile.tngn_balance || 0) + liveBonus;
+  const expiryNote = bonusExpiryNote(profile.bonus_balance, profile.bonus_expires_at);
 
   return (
     <div className="px-3 py-4 md:p-6 space-y-5 max-w-3xl mx-auto">
@@ -252,9 +259,18 @@ export default function DashboardPage() {
                 <Gift className="w-3 h-3" /> Bonus
               </p>
               <p className="text-lg font-bold mt-1 tabular-nums">
-                ₦<AnimatedNumber value={profile.bonus_balance || 0} />
+                ₦<AnimatedNumber value={liveBonus} />
               </p>
-              <p className="text-[10px] text-muted-foreground/70">Predict to unlock</p>
+              {/* The deadline, but only once it is close enough to matter —
+                  see bonusExpiryNote. Silence here is what turned a lapsed
+                  bonus into an unexplained "Insufficient balance". */}
+              <p className={cn(
+                'text-[10px]',
+                expiryNote === 'Expired' ? 'text-red-400'
+                  : expiryNote ? 'text-amber-400' : 'text-muted-foreground/70',
+              )}>
+                {expiryNote || 'Predict to unlock'}
+              </p>
             </div>
           </div>
         </CardContent>
