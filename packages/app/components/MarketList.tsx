@@ -973,10 +973,12 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
   //   fight    -> sports.sport='fight' (boxing, MMA, UFC)
   //   politics -> politics + geo (world events)
   //   economy  -> economics + finance + crypto + tech (everything money-adjacent)
+  // Football is EPL, La Liga and Champions League only (see lib/leagues.ts) —
+  // the nine other leagues were scrapped, and their tabs no longer render, so
+  // mapping their codes here would only be a dead entry that outlives the
+  // decision.
   const LEAGUE_CODE_MAP: Record<string, string> = {
-    pl: 'PL', pd: 'PD', sa: 'SA', bl1: 'BL1', fl1: 'FL1',
-    cl: 'CL', wc: 'WC', ec: 'EC', ded: 'DED', bsa: 'BSA',
-    ppl: 'PPL', elc: 'ELC',
+    pl: 'PL', pd: 'PD', cl: 'CL',
     nba: 'NBA', euroleague: 'EUROLEAGUE',
     lol: 'LOL', csgo: 'CSGO', dota2: 'DOTA2', valorant: 'VAL', r6s: 'R6S',
   };

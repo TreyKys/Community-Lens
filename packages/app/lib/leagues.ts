@@ -8,6 +8,17 @@ export type League = {
   tagline: string;
 };
 
+// THREE LEAGUES, matching FOOTBALL_LEAGUES in lib/oracle.ts.
+//
+// The board used to carry twelve — Serie A, Bundesliga, Ligue 1, Eredivisie,
+// the Brazilian league, the Championship, and the rest. Each one is a market
+// the house prices and stands behind, and most drew almost no volume from a
+// Nigerian audience that follows the Premier League, La Liga's big clubs, and
+// the Champions League. The other nine were scrapped at source (seeding) and
+// here (the hub), so no league tile leads to a page that never fills.
+//
+// These two lists MUST agree: a code here with no counterpart in
+// FOOTBALL_LEAGUES is a hub tile for a league that never seeds a fixture.
 export const LEAGUES: Record<string, League> = {
   pl: {
     id: 'pl',
@@ -25,34 +36,9 @@ export const LEAGUES: Record<string, League> = {
     shortLabel: 'LaLiga',
     logoUrl: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRUGbQamPAx5pFfixle596BNKgC--U5GbodfQ&s',
     accent: '#ee8707',
-    tagline: 'Spain’s top flight.',
-  },
-  sa: {
-    id: 'sa',
-    code: '[SA]',
-    label: 'Serie A',
-    shortLabel: 'Serie A',
-    logoUrl: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSRgnsfLeiWXmP3qc5iQ-YGYlvLm0_jX7MW2Q&s',
-    accent: '#008fd7',
-    tagline: 'Italy’s tactical masterclass.',
-  },
-  bl1: {
-    id: 'bl1',
-    code: '[BL1]',
-    label: 'Bundesliga',
-    shortLabel: 'Bundesliga',
-    logoUrl: 'https://assets.bundesliga.com/logos/bundesliga.jpg?fit=512,512',
-    accent: '#d20515',
-    tagline: 'Germany’s goal machine.',
-  },
-  fl1: {
-    id: 'fl1',
-    code: '[FL1]',
-    label: 'Ligue 1',
-    shortLabel: 'Ligue 1',
-    logoUrl: 'https://1000logos.net/wp-content/uploads/2019/01/French-Ligue-1-Logo-2020-1.png',
-    accent: '#091c3e',
-    tagline: 'France’s flair on display.',
+    // The board only carries the big clubs' fixtures, and the tagline should
+    // not promise more than that.
+    tagline: 'Madrid, Barça, Atléti — the games that matter.',
   },
   cl: {
     id: 'cl',
@@ -62,60 +48,6 @@ export const LEAGUES: Record<string, League> = {
     logoUrl: 'https://ktsportdesign.com/articles/the-evolution-of-the-champions-league-logo/ktsport-article-home.webp',
     accent: '#00326e',
     tagline: 'Europe’s biggest nights.',
-  },
-  ded: {
-    id: 'ded',
-    code: '[DED]',
-    label: 'Eredivisie',
-    shortLabel: 'Eredivisie',
-    logoUrl: 'https://sassets.knvb.nl/sites/knvb.com/files/styles/ls-1920x1080/public/eredivisie.jpg?itok=mss_gX9N',
-    accent: '#e31c23',
-    tagline: 'The Dutch proving ground.',
-  },
-  bsa: {
-    id: 'bsa',
-    code: '[BSA]',
-    label: 'Brasileirão',
-    shortLabel: 'Brasileirão',
-    logoUrl: 'https://1000marcas.net/wp-content/uploads/2020/03/Campeonato-Brasileiro-S%C3%A9rie-A-logo.png',
-    accent: '#009c3b',
-    tagline: 'Brazil’s top flight samba.',
-  },
-  ppl: {
-    id: 'ppl',
-    code: '[PPL]',
-    label: 'Primeira Liga',
-    shortLabel: 'Primeira Liga',
-    logoUrl: 'https://1000logos.net/wp-content/uploads/2022/01/Portuguese-Primeira-Liga-logo.jpg',
-    accent: '#006633',
-    tagline: 'Portugal’s top-tier drama.',
-  },
-  wc: {
-    id: 'wc',
-    code: '[WC]',
-    label: 'World Cup',
-    shortLabel: 'World Cup',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/2026_FIFA_World_Cup_emblem.svg/1024px-2026_FIFA_World_Cup_emblem.svg.png',
-    accent: '#0a2240',
-    tagline: 'The world stops to watch.',
-  },
-  ec: {
-    id: 'ec',
-    code: '[EC]',
-    label: 'Euros',
-    shortLabel: 'Euros',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/0/04/UEFA_Euro_2024_Logo.svg/1024px-UEFA_Euro_2024_Logo.svg.png',
-    accent: '#003399',
-    tagline: 'Europe’s grand stage.',
-  },
-  elc: {
-    id: 'elc',
-    code: '[ELC]',
-    label: 'Championship',
-    shortLabel: 'EFL',
-    logoUrl: 'https://upload.wikimedia.org/wikipedia/en/thumb/5/5d/EFL_Championship.svg/1024px-EFL_Championship.svg.png',
-    accent: '#172983',
-    tagline: 'The road to the Premier League.',
   },
 };
 

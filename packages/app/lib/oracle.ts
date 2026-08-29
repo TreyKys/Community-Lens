@@ -19,7 +19,55 @@ export function cronHeaders() {
 }
 
 // ── SPORT DATA PROVIDERS ──────────────────────────────────────────────────
-export const FOOTBALL_LEAGUES = ['PL', 'CL', 'PD', 'SA', 'BL1', 'FL1', 'DED', 'PPL', 'BSA', 'EC', 'WC', 'ELC'];
+//
+// FOOTBALL IS DELIBERATELY THREE COMPETITIONS, NOT TWELVE.
+//
+// Seeding every league football-data.org offers filled the board with
+// fixtures a Nigerian audience does not follow — Eredivisie mid-table, the
+// Brazilian Série A, the EFL Championship — each one a market the house has to
+// price and stand behind for almost no volume. The rule now: the two leagues
+// people here actually watch, plus the competition everyone watches.
+//
+//   PL — Premier League, in full
+//   CL — Champions League, in full
+//   PD — La Liga, but only the fixtures that are events (see LA_LIGA_BIG_3)
+//
+// To add a league back, it goes here AND in lib/leagues.ts (the hub's own
+// list) — the two must agree or the hub shows a league that never seeds.
+export const FOOTBALL_LEAGUES = ['PL', 'CL', 'PD'];
+
+// La Liga earns its place on the strength of three clubs. A Girona v Getafe
+// fixture is a real match and a dead market here; a Clásico is an event. So PD
+// is seeded only when one of these is playing.
+//
+// Matched by football-data.org's stable team IDs first (exact, survives any
+// naming change), with a name fallback so a wrong ID degrades to "still
+// probably catches it" rather than "silently seeds nothing".
+const LA_LIGA_BIG_3_IDS = new Set([86, 81, 78]); // Real Madrid, Barcelona, Atlético
+const LA_LIGA_BIG_3_NAMES = ['real madrid', 'barcelona', 'atlético', 'atletico', 'barça', 'barca'];
+
+function involvesLaLigaBig3(match: any): boolean {
+  const teams = [match?.homeTeam, match?.awayTeam];
+  for (const t of teams) {
+    if (t?.id && LA_LIGA_BIG_3_IDS.has(Number(t.id))) return true;
+    const name = `${t?.name || ''} ${t?.shortName || ''}`.toLowerCase();
+    if (LA_LIGA_BIG_3_NAMES.some(n => name.includes(n))) return true;
+  }
+  return false;
+}
+
+/**
+ * Which fixtures from a competition are worth a market.
+ *
+ * Everything in FOOTBALL_LEAGUES seeds every fixture EXCEPT La Liga, which is
+ * narrowed to its big three. Kept as one function so the "which matches" rule
+ * lives in exactly one place rather than being an `if (code === 'PD')` buried
+ * in the seed loop.
+ */
+export function selectSeedableFixtures(code: string, fixtures: any[]): any[] {
+  if (code === 'PD') return fixtures.filter(involvesLaLigaBig3);
+  return fixtures;
+}
 
 export const BASKETBALL_LEAGUES: { code: string; apiSportsId: number }[] = [
   { code: 'NBA', apiSportsId: 12 },
