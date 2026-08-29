@@ -99,11 +99,52 @@ SELECT total_tngn, floor_tngn,
 
 -- Clamps at zero exactly like production. This is why the trade path debits
 -- inline under the user lock instead of calling this.
-CREATE FUNCTION public.credit_user(p_user_id uuid, p_tngn_delta numeric, p_bonus_delta numeric)
-RETURNS void LANGUAGE plpgsql AS $$
+--
+-- RETURNS jsonb, NOT void. Production has returned jsonb since 20240621100000
+-- and this stub said void, so every test that claimed to prove a credit had
+-- happened was exercising a function with a different signature from the one
+-- that actually runs. PERFORM hides the difference, which is exactly why it
+-- went unnoticed — and a stub that disagrees with production is worth less
+-- than no stub at all, because it produces confident green ticks.
+--
+-- It also RAISES on a missing user, like production, rather than silently
+-- updating zero rows.
+CREATE FUNCTION public.credit_user(p_user_id uuid, p_tngn_delta numeric DEFAULT 0, p_bonus_delta numeric DEFAULT 0)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE v_tngn numeric; v_bonus numeric;
 BEGIN
   UPDATE public.users
      SET tngn_balance  = GREATEST(0, COALESCE(tngn_balance,0)  + p_tngn_delta),
          bonus_balance = GREATEST(0, COALESCE(bonus_balance,0) + p_bonus_delta)
-   WHERE id = p_user_id;
+   WHERE id = p_user_id
+   RETURNING tngn_balance, bonus_balance INTO v_tngn, v_bonus;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'User not found' USING ERRCODE = 'P0002';
+  END IF;
+  RETURN jsonb_build_object('tngn_balance', v_tngn, 'bonus_balance', v_bonus);
 END$$;
+
+-- Bonus expiry, mirrored from 20260630200000. Without it the stub cannot see
+-- the interaction that produced the reported "₦5,000 on screen, insufficient
+-- balance on every stake" — every credit path in these migrations relies on
+-- this trigger to stamp an expiry, and none of them sets one itself.
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_expires_at timestamptz;
+CREATE OR REPLACE FUNCTION public.set_bonus_expires_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF COALESCE(NEW.bonus_balance, 0) > 0 THEN
+      NEW.bonus_expires_at := now() + INTERVAL '7 days';
+    END IF;
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF COALESCE(NEW.bonus_balance, 0) > COALESCE(OLD.bonus_balance, 0) THEN
+      NEW.bonus_expires_at := GREATEST(
+        COALESCE(OLD.bonus_expires_at, now()), now() + INTERVAL '7 days');
+    END IF;
+  END IF;
+  RETURN NEW;
+END$$;
+DROP TRIGGER IF EXISTS trg_users_bonus_expires ON public.users;
+CREATE TRIGGER trg_users_bonus_expires
+  BEFORE INSERT OR UPDATE ON public.users
+  FOR EACH ROW EXECUTE FUNCTION public.set_bonus_expires_at();

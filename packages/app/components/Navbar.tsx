@@ -9,6 +9,7 @@ import { AnimatedNumber } from '@/components/AnimatedNumber';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import Link from 'next/link';
+import { spendableBonus } from '@/lib/bonus';
 
 export function Navbar() {
   const [session, setSession] = useState<any>(null);
@@ -27,12 +28,13 @@ export function Navbar() {
     const fetchBalances = async () => {
       const { data } = await supabase
         .from('users')
-        .select('tngn_balance, bonus_balance')
+        .select('tngn_balance, bonus_balance, bonus_expires_at')
         .eq('id', session.user.id)
         .single();
       if (data) {
         setCashBalance(data.tngn_balance || 0);
-        setBonusBalance(data.bonus_balance || 0);
+        // Expired bonus reads as zero here, because that is what it is worth.
+        setBonusBalance(spendableBonus(data.bonus_balance, data.bonus_expires_at));
       }
     };
 
