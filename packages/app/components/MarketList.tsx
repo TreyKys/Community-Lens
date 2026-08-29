@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -672,7 +672,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+const MarketCard = React.memo(function MarketCard({
   market,
   session,
   onBetPlaced,
@@ -937,7 +937,43 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+}, (prev, next) => {
+  // 1. Primitive props & stable references
+  if (prev.hideViewMore !== next.hideViewMore) return false;
+  if (prev.isStaked !== next.isStaked) return false;
+  if (prev.prefillOutcomeIndex !== next.prefillOutcomeIndex) return false;
+  if (prev.prefillStakeTngn !== next.prefillStakeTngn) return false;
+  if (prev.prefillEditStake !== next.prefillEditStake) return false;
+  if (prev.prefillFromShareId !== next.prefillFromShareId) return false;
+  if (prev.autoOpen !== next.autoOpen) return false;
+  if (prev.onBetPlaced !== next.onBetPlaced) return false;
+  // compare both ref and token as instructed in AGENTS.md
+  if (prev.session !== next.session || prev.session?.access_token !== next.session?.access_token) return false;
+
+  // 2. Market object (shallow iteration, except array)
+  if (prev.market === next.market) return true;
+  if (!prev.market || !next.market) return false;
+
+  const prevKeys = Object.keys(prev.market) as (keyof Market)[];
+  const nextKeys = Object.keys(next.market) as (keyof Market)[];
+  if (prevKeys.length !== nextKeys.length) return false;
+
+  for (const key of prevKeys) {
+    if (key === 'options') {
+      const prevOpts = prev.market.options;
+      const nextOpts = next.market.options;
+      if (prevOpts === nextOpts) continue;
+      if (!prevOpts || !nextOpts || prevOpts.length !== nextOpts.length) return false;
+      for (let i = 0; i < prevOpts.length; i++) {
+        if (prevOpts[i] !== nextOpts[i]) return false;
+      }
+    } else {
+      if (prev.market[key] !== next.market[key]) return false;
+    }
+  }
+
+  return true;
+});
 
 type CategoryFilter = {
   category: string | null;
