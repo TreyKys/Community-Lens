@@ -1,0 +1,3 @@
+## 2026-08-30 - Optimize MarketList rendering
+**Learning:** Supabase queries dynamically reconstruct object instances, returning entirely new memory references which cause excessive React re-renders in mapped lists if not carefully memoized. Using `JSON.stringify()` for deep equality in `React.memo` is a slow synchronous anti-pattern.
+**Action:** When memoizing Supabase data components, use a custom `areEqual` comparison that explicitly checks stable callback props, `session?.access_token`, and dynamically iterates over `Object.keys` to apply deep equality to nested arrays, avoiding hardcoded subsets or stringification.
