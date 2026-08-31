@@ -2,9 +2,12 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
+import Link from 'next/link';
+import { TrendingUp, ArrowRight } from 'lucide-react';
 import { MarketList } from '@/components/MarketList';
 import { MarketsToolbar } from '@/components/MarketsToolbar';
 import { ScrollFadeBackdrop } from '@/components/ScrollFadeBackdrop';
+import { OpenMarketCard, type OpenMarketCardRow } from '@/components/OpenMarketCard';
 import type { SportHub as SportHubConfig } from '@/lib/sportHubs';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +26,15 @@ import { cn } from '@/lib/utils';
  * carries twelve leagues with logos and per-league landing pages, and
  * flattening that into the generic shape would lose things it actually uses.
  */
-export function SportHub({ hub }: { hub: SportHubConfig }) {
+export function SportHub({ hub, tradingMarkets = [] }: {
+  hub: SportHubConfig;
+  /** Trading (Open Markets) rows tagged event_tag = hub.sport. Fetched
+      server-side by the page (see lib/sportHubData.ts) rather than here —
+      SportHub stays a client component so the competition-tab URL state
+      keeps working the way it always has, and one server fetch beats every
+      one of the four hubs re-implementing its own loading state for this. */
+  tradingMarkets?: OpenMarketCardRow[];
+}) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const selectedId = searchParams.get('competition') || 'all';
@@ -76,6 +87,38 @@ export function SportHub({ hub }: { hub: SportHubConfig }) {
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Trading section, own header, never mixed into the locked-odds
+            list below — a tradeable share and a fixed bet behave
+            differently, and blurring that in one feed would mislead, not
+            simplify. Mirrors the BBN hub's dual-section layout exactly. */}
+        {tradingMarkets.length > 0 && (
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TrendingUp className={cn('w-4 h-4', hub.accentClass)} />
+                <h2 className="text-sm font-semibold">Trading</h2>
+              </div>
+              <Link href="/open" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+                All trading markets <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              Prices move as the house shifts. Buy a side and sell any time — you don&rsquo;t have to wait for the result.
+            </p>
+            <div className="space-y-3">
+              {tradingMarkets.map(m => (
+                <OpenMarketCard key={m.id} market={m} hideCategory />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {tradingMarkets.length > 0 && (
+          <div className="flex items-center gap-2 pt-2">
+            <h2 className="text-sm font-semibold">Predict &amp; hold</h2>
           </div>
         )}
 

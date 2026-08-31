@@ -472,6 +472,39 @@ a result that will never come.
 
 ---
 
+# 3d. Creating a market for the new hubs — Basketball, Tennis, Esports, Fight, BBN
+
+Two separate creation forms exist because the two engines are separate
+products underneath (see §1 and §2). Each had the same gap: nothing pointed
+at the four newer hubs, so tagging a market for one meant hand-typing a sport
+and hub code from memory with no validation — a typo produced a market that
+saved fine and then showed up nowhere, silently.
+
+**Locked Odds — `/admin` → Create Market.** A **"Show on a hub"** dropdown now
+sits above the Sport tag / Hub tag fields, grouped by hub (Football, each of
+Basketball / Tennis / Esports / Fight, Big Brother Naija). Picking an option
+sets category, sport tag and hub tag together — correctly, including forcing
+category to `entertainment` for BBN, which a free-text field could never
+enforce and getting it wrong is exactly what makes a market invisible on its
+hub. **Custom** at the top of the list leaves the two fields free-text, for
+anything that doesn't fit one of these yet.
+
+**Trading (Open Markets) — `/admin/open-markets/new`, or `/open/create` for a
+user.** The **"Also feature on a hub"** picker now offers Basketball, Tennis,
+Esports and Fight alongside BBN. Sets `event_tag`, which is the only thing
+that decides whether a trading market shows up on that hub's page — the same
+value the hub page itself matches on, so tagging it here is the whole job.
+
+**One thing that changed underneath both hub pickers:** the four newer sport
+hubs (`/basketball`, `/tennis`, `/esports`, `/fight`) previously only ever
+showed Locked Odds markets — the trading engine had nothing wired up on the
+display side at all. A market correctly `event_tag`'d for one of them would
+have had nowhere to appear. They now show a **Trading** section exactly like
+`/bbn` already did, so tagging a trading market for one of these hubs from
+either creation form actually does something.
+
+---
+
 # 4. Other tools
 
 | Screen | What it is for |

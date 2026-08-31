@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { SportHub } from '@/components/SportHub';
 import { SPORT_HUBS } from '@/lib/sportHubs';
+import { getSportHubTradingState } from '@/lib/sportHubData';
 
 // Thin route wrapper. Everything about this sport — label, accent, backdrop
 // art, competitions — lives in lib/sportHubs.ts, so adding another hub is a
@@ -14,7 +15,8 @@ export const metadata = {
   description: HUB.tagline,
 };
 
-export default function BasketballPage() {
+export default async function BasketballPage() {
+  const { tradingMarkets } = await getSportHubTradingState(HUB);
   return (
     <div className="relative flex flex-col min-h-screen pb-20 md:pb-0">
       <Suspense fallback={<div className="p-4 space-y-4">
@@ -26,7 +28,7 @@ export default function BasketballPage() {
           ))}
         </div>
       </div>}>
-        <SportHub hub={HUB} />
+        <SportHub hub={HUB} tradingMarkets={tradingMarkets} />
       </Suspense>
     </div>
   );

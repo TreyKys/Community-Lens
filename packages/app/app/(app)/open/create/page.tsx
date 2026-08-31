@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, ChevronLeft, Plus, X, Check } from 'lucide-react';
+import { SPORT_HUBS, SPORT_HUB_IDS } from '@/lib/sportHubs';
 
 // Create a market.
 //
@@ -45,8 +46,16 @@ const REJECT_REASONS = [
 // list — /bbn today, more as they get built. Adding the next one is one
 // entry here plus a hub page, not a schema change: event_tag is a free-text
 // column precisely so this list can grow without a migration.
+// Sourced from SPORT_HUBS rather than hardcoded a second time — this is the
+// exact bug an admin flagged: the four newer hubs (basketball/tennis/esports/
+// fight) existed on the display side with nothing here to tag a trading
+// market for them, so a market could be created and simply have nowhere to
+// ever appear. event_tag values are SPORT_HUBS keys, matched against
+// hub.sport by getSportHubTradingState — one vocabulary, not two lists that
+// can quietly stop agreeing with each other.
 const EVENT_HUBS: Record<string, Array<{ id: string; label: string }>> = {
   entertainment: [{ id: 'bbn', label: 'Big Brother Naija' }],
+  sport: SPORT_HUB_IDS.map(id => ({ id, label: SPORT_HUBS[id].label })),
 };
 
 export default function CreateOpenMarketPage() {
