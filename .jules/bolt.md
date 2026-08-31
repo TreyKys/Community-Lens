@@ -1,0 +1,3 @@
+## 2026-08-31 - [Supabase Object Reconstruction Re-Renders]
+**Learning:** Supabase queries dynamically reconstruct object instances upon fetching, returning entirely new memory references even if the underlying data hasn't changed. This causes React arrays containing Supabase objects to bypass standard `React.memo` shallow equality checks.
+**Action:** When memoizing React components that consume Supabase data (like list items), use a custom `areEqual` function that dynamically iterates over object keys (`Object.keys`) to check deep equality (especially for nested arrays) instead of using slow `JSON.stringify` or hardcoding keys which risks stale closures. Additionally, stable functions used as props and session parameters must be explicitly checked.
