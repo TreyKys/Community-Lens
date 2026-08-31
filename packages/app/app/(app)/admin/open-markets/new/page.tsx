@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, ChevronLeft, Plus, X, ShieldAlert } from 'lucide-react';
+import { SPORT_HUBS, SPORT_HUB_IDS } from '@/lib/sportHubs';
 
 // Admin: create a trading (Open Markets) market.
 //
@@ -34,8 +35,16 @@ const CATEGORIES = [
 
 // Hubs a market can additionally surface on. Mirrors the list in
 // /open/create — see lib/sportHubs.ts for why event_tag is free text.
+// Sourced from SPORT_HUBS rather than hardcoded a second time — this is the
+// exact bug an admin flagged: the four newer hubs (basketball/tennis/esports/
+// fight) existed on the display side with nothing here to tag a trading
+// market for them, so a market could be created and simply have nowhere to
+// ever appear. event_tag values are SPORT_HUBS keys, matched against
+// hub.sport by getSportHubTradingState — one vocabulary, not two lists that
+// can quietly stop agreeing with each other.
 const EVENT_HUBS: Record<string, Array<{ id: string; label: string }>> = {
   entertainment: [{ id: 'bbn', label: 'Big Brother Naija' }],
+  sport: SPORT_HUB_IDS.map(id => ({ id, label: SPORT_HUBS[id].label })),
 };
 
 export default function AdminNewOpenMarketPage() {

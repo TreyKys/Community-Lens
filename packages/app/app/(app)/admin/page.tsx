@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
@@ -22,6 +22,7 @@ import { findBankByCode } from '@/lib/banks';
 import { pollWhileVisible } from '@/lib/pollWhileVisible';
 import { calculateLockedOdds } from '@/lib/lockedOdds';
 import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
+import { groupedLockedOddsHubOptions, getLockedOddsHubOption } from '@/lib/lockedOddsHubOptions';
 import Link from 'next/link';
 
 // Admin auth is now cookie-based: POST /api/admin/auth sets an httpOnly cookie
@@ -1409,6 +1410,12 @@ function CreateMarketPanel() {
   const [clonedAwayTeam, setClonedAwayTeam] = useState('');
   const [clonedLeagueCode, setClonedLeagueCode] = useState('');
   const [clonedDescription, setClonedDescription] = useState('');
+  // Which hub picker option is selected, if any — '' means "custom", which
+  // falls through to the free-text Sport tag / Hub tag inputs below. Kept
+  // separate from clonedSport/clonedLeagueCode so picking a hub can drive
+  // both of those AND category together in one place, rather than an admin
+  // having to get sport, league_code and category right independently.
+  const [hubOptionId, setHubOptionId] = useState('');
 
   // Saved market "shapes" for one-click reuse — see market_templates.
   const [templates, setTemplates] = useState<any[]>([]);
@@ -1800,7 +1807,10 @@ function CreateMarketPanel() {
 
         <div className="space-y-2">
           <Label>Category</Label>
-          <Select value={category} onValueChange={setCategory}>
+          <Select
+            value={category}
+            onValueChange={v => { setCategory(v); setHubOptionId(''); }}
+          >
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="sports">Sports</SelectItem>
@@ -1812,19 +1822,65 @@ function CreateMarketPanel() {
           </Select>
         </div>
 
-        {/* Hub-scoping fields for anything with its own dedicated hub page
-            (currently /football, /bbn). Below the odds-lookup importer,
-            these two are otherwise ONLY set by cloning an existing market —
-            there was no way to hand-type them for a fresh market, which
-            meant a brand-new BBN market had no way to land on its own hub.
-            Left blank, nothing changes: sport defaults to 'football' and
-            league_code to null exactly as before this was added. */}
+        {/* Which hub, if any. Picking one sets category + sport + league_code
+            together from lib/lockedOddsHubOptions.ts — the exact same config
+            the hub pages read to decide what to show. Before this there were
+            two free-text inputs and a hint written only for BBN; an admin
+            typing "basketball" from memory with no validation is exactly how
+            a market ends up saved and permanently invisible on its hub. The
+            free-text pair stays below as "Custom" for anything that does not
+            fit one of these yet. */}
+        <div className="space-y-2">
+          <Label>Show on a hub <span className="text-muted-foreground font-normal">(optional)</span></Label>
+          <Select
+            // Radix's Select refuses an empty-string item value, so "Custom"
+            // is the sentinel 'none' here — same convention this form
+            // already uses for "no parent market" below.
+            value={hubOptionId || 'none'}
+            onValueChange={id => {
+              if (id === 'none') { setHubOptionId(''); return; } // leave the free-text fields as they are
+              setHubOptionId(id);
+              const opt = getLockedOddsHubOption(id);
+              if (!opt) return;
+              setCategory(opt.category);
+              setClonedSport(opt.sport);
+              setClonedLeagueCode(opt.leagueCode || '');
+            }}
+          >
+            <SelectTrigger><SelectValue placeholder="Custom (type sport/hub tags below)" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Custom (type sport/hub tags below)</SelectItem>
+              {groupedLockedOddsHubOptions().map(({ groupLabel, options }) => (
+                <SelectGroup key={groupLabel}>
+                  <SelectLabel>{groupLabel}</SelectLabel>
+                  {options.map(o => <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>)}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          {hubOptionId && (() => {
+            const opt = getLockedOddsHubOption(hubOptionId);
+            return opt ? (
+              <p className="text-[11px] text-muted-foreground">
+                Sets category <code className="bg-muted/40 px-1 py-0.5 rounded">{opt.category}</code>,
+                sport tag <code className="bg-muted/40 px-1 py-0.5 rounded">{opt.sport}</code>
+                {opt.leagueCode && <>, hub tag <code className="bg-muted/40 px-1 py-0.5 rounded">{opt.leagueCode}</code></>}.
+              </p>
+            ) : null;
+          })()}
+        </div>
+
+        {/* Custom sport/hub tags — the escape hatch. Auto-filled and left
+            editable when a hub above is picked, or hand-typed when "Custom"
+            is selected. Left blank, nothing changes: sport defaults to
+            'football' and league_code to null, same as before either of
+            these fields existed. */}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
             <Label>Sport tag <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
               value={clonedSport}
-              onChange={e => setClonedSport(e.target.value)}
+              onChange={e => { setClonedSport(e.target.value); setHubOptionId(''); }}
               placeholder="e.g. bbn"
             />
           </div>
@@ -1832,17 +1888,11 @@ function CreateMarketPanel() {
             <Label>Hub tag <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
               value={clonedLeagueCode}
-              onChange={e => setClonedLeagueCode(e.target.value)}
+              onChange={e => { setClonedLeagueCode(e.target.value); setHubOptionId(''); }}
               placeholder="e.g. BBN_EVICTION"
             />
           </div>
         </div>
-        {category === 'entertainment' && (
-          <p className="text-[11px] text-muted-foreground -mt-1">
-            For a market to show up on /bbn: sport tag <code className="bg-muted/40 px-1 py-0.5 rounded">bbn</code>,
-            plus a hub tag from <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_WINNER</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_EVICTION</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_HOH</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_SHIP</code> / <code className="bg-muted/40 px-1 py-0.5 rounded">BBN_TWIST</code> if it fits one — leave it blank and it still shows under &ldquo;Everything&rdquo;.
-          </p>
-        )}
 
         <div className="space-y-2">
           <Label>Question</Label>
