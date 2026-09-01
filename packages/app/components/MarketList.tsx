@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -678,7 +678,57 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   );
 }
 
-function MarketCard({
+const areMarketCardsEqual = (prev: MarketCardProps, next: MarketCardProps) => {
+  if (prev.onBetPlaced !== next.onBetPlaced) return false;
+  if (prev.hideViewMore !== next.hideViewMore) return false;
+  if (prev.isStaked !== next.isStaked) return false;
+  if (prev.prefillOutcomeIndex !== next.prefillOutcomeIndex) return false;
+  if (prev.prefillStakeTngn !== next.prefillStakeTngn) return false;
+  if (prev.prefillEditStake !== next.prefillEditStake) return false;
+  if (prev.prefillFromShareId !== next.prefillFromShareId) return false;
+  if (prev.autoOpen !== next.autoOpen) return false;
+
+  // Session reference or access_token check
+  if (prev.session !== next.session && prev.session?.access_token !== next.session?.access_token) return false;
+
+  const prevMarket = prev.market as any;
+  const nextMarket = next.market as any;
+
+  if (prevMarket === nextMarket) return true;
+  if (!prevMarket || !nextMarket) return false;
+
+  const keys = Object.keys(prevMarket);
+  if (keys.length !== Object.keys(nextMarket).length) return false;
+
+  for (const key of keys) {
+    const pVal = prevMarket[key];
+    const nVal = nextMarket[key];
+
+    if (Array.isArray(pVal) && Array.isArray(nVal)) {
+      if (pVal.length !== nVal.length) return false;
+      for (let i = 0; i < pVal.length; i++) {
+        const item1 = pVal[i];
+        const item2 = nVal[i];
+        if (typeof item1 === 'object' && item1 !== null && typeof item2 === 'object' && item2 !== null) {
+          const k1 = Object.keys(item1);
+          const k2 = Object.keys(item2);
+          if (k1.length !== k2.length) return false;
+          for (const k of k1) {
+            if (item1[k] !== item2[k]) return false;
+          }
+        } else if (item1 !== item2) {
+          return false;
+        }
+      }
+    } else if (pVal !== nVal) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const MarketCard = React.memo(function MarketCard({
   market,
   session,
   onBetPlaced,
@@ -943,7 +993,7 @@ function MarketCard({
       </CardFooter>
     </Card>
   );
-}
+}, areMarketCardsEqual);
 
 type CategoryFilter = {
   category: string | null;
