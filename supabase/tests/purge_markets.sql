@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS public.bet_insurance_events(
   trigger_reason text NOT NULL);
 CREATE TABLE IF NOT EXISTS public.merkle_commits(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  market_id bigint NOT NULL REFERENCES public.markets(id));
+  market_id bigint NOT NULL REFERENCES public.markets(id),
+  bet_count integer DEFAULT 0);
 
 CREATE OR REPLACE FUNCTION pg_temp.check(label text, ok boolean, detail text DEFAULT '')
 RETURNS void LANGUAGE plpgsql AS $$
@@ -52,7 +53,8 @@ DECLARE
   m_has_leg        bigint;  -- auto-fetched, one multiplier_legs row — survive
   m_has_vip        bigint;  -- vip_referral_earnings row — survive
   m_has_insurance  bigint;  -- bet_insurance_events row — survive
-  m_has_merkle     bigint;  -- merkle_commits row — survive
+  m_has_merkle     bigint;  -- merkle_commits row, real bet_count — survive
+  m_zero_lock      bigint;  -- merkle_commits row, bet_count 0 (routine lock) — must go
   parent_clean     bigint;  -- parent whose only child is itself unstaked
   child_clean      bigint;
   parent_dirty     bigint;  -- parent whose child HAS a bet
@@ -93,7 +95,17 @@ BEGIN
 
   INSERT INTO public.markets(question,fixture_id,parent_market_id)
   VALUES ('Has an on-chain commit',9006,NULL) RETURNING id INTO m_has_merkle;
-  INSERT INTO public.merkle_commits(market_id) VALUES (m_has_merkle);
+  INSERT INTO public.merkle_commits(market_id,bet_count) VALUES (m_has_merkle, 3);
+
+  -- The false positive that hit production: /api/markets/lock writes a
+  -- merkle_commits row for EVERY market that reaches its close time, whether
+  -- or not anyone ever staked on it. bet_count is 0 in that case. The very
+  -- first real run of this function protected 729 of 765 candidates almost
+  -- entirely on this signal — a market that simply ran its course untouched,
+  -- not one anyone had money on.
+  INSERT INTO public.markets(question,fixture_id,parent_market_id)
+  VALUES ('Locked with zero bets, like most of the backlog',9010,NULL) RETURNING id INTO m_zero_lock;
+  INSERT INTO public.merkle_commits(market_id,bet_count) VALUES (m_zero_lock, 0);
 
   -- A clean parent/child pair: neither has activity.
   INSERT INTO public.markets(question,fixture_id,parent_market_id)
@@ -127,8 +139,8 @@ BEGIN
   SELECT sum(deleted) INTO after_count
     FROM public.purge_unstaked_auto_fetched_markets(true)
    WHERE phase IN ('sub-markets','parents');
-  PERFORM pg_temp.check('dry run reports exactly the two clean rows',
-    after_count = 2, after_count::text);
+  PERFORM pg_temp.check('dry run reports exactly the three clean rows',
+    after_count = 3, after_count::text);
 
   ------------------------------------------------------------------ the run
   before_count := (SELECT count(*) FROM public.markets);
@@ -150,6 +162,8 @@ BEGIN
     EXISTS (SELECT 1 FROM public.markets WHERE id = m_has_insurance));
   PERFORM pg_temp.check('a market with an on-chain commit survives',
     EXISTS (SELECT 1 FROM public.markets WHERE id = m_has_merkle));
+  PERFORM pg_temp.check('but a routine lock commit with zero bets does NOT protect it — the production bug',
+    NOT EXISTS (SELECT 1 FROM public.markets WHERE id = m_zero_lock));
 
   ------------------------------------------------------- parent/child logic
   PERFORM pg_temp.check('a clean parent+child pair is fully cleared',
