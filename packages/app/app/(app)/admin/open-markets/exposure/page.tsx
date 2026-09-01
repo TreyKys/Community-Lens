@@ -39,9 +39,13 @@ export default function OpenMarketsExposurePage() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [capInput, setCapInput] = useState('');
+  // Same shared key the submit/review/resolve screens use — typed once
+  // anywhere on the Open Markets admin pages, remembered everywhere.
+  const [adminId, setAdminId] = useState('');
 
   useEffect(() => {
     fetch('/api/admin/auth').then(r => { if (r.ok) setIsAdmin(true); }).finally(() => setChecking(false));
+    try { setAdminId(localStorage.getItem('opinionsng_admin_reviewer_id') || ''); } catch {}
   }, []);
 
   const login = async () => {
@@ -254,6 +258,49 @@ export default function OpenMarketsExposurePage() {
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : data.tradingEnabled ? 'Pause' : 'Resume'}
               </Button>
             </div>
+
+            {/* Solo operator mode. Four-eyes assumes a second person exists
+                to hand a submission to — on a single-admin platform that is
+                simply not true, and a control that can never pass is not a
+                control. This lets the same person submit-and-approve, or
+                resolve-and-confirm, a HOUSE market only (never one with a
+                creator earning a fee share), and every time it fires it is
+                stamped on the market's own record — visible above as a
+                "self-reviewed" badge, never silently indistinguishable from
+                real second-person oversight. */}
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <div>
+                <p className="text-xs font-medium">
+                  Solo operator mode {data.soloOperatorMode ? 'is on' : 'is off'}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  {data.soloOperatorMode
+                    ? 'You may submit-and-approve, or resolve-and-confirm, your own house markets. Never a market with a creator.'
+                    : 'Submitting and reviewing a market always needs two different people, even for house markets.'}
+                </p>
+                {data.soloOperatorSetAt && (
+                  <p className="text-[10px] text-muted-foreground/70">
+                    Last changed {new Date(data.soloOperatorSetAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              <Button size="sm" disabled={!!busy || !adminId.trim()}
+                      variant={data.soloOperatorMode ? 'outline' : 'default'}
+                      className={data.soloOperatorMode
+                        ? 'border-red-500/40 text-red-400 hover:bg-red-500/10 shrink-0'
+                        : 'bg-amber-600 hover:bg-amber-500 shrink-0'}
+                      onClick={() => act(
+                        { action: 'set_solo_mode', enabled: !data.soloOperatorMode, adminId: adminId.trim() },
+                        data.soloOperatorMode ? 'Solo mode off' : 'Solo mode on')}>
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : data.soloOperatorMode ? 'Turn off' : 'Turn on'}
+              </Button>
+            </div>
+            {!adminId.trim() && (
+              <p className="text-[10px] text-amber-400">
+                Type your user ID on the New Market, review or resolve screen first — this
+                button needs it too, and they all share the same one.
+              </p>
+            )}
 
             <div className="flex items-end gap-2 pt-2 border-t border-border">
               <div className="flex-1">

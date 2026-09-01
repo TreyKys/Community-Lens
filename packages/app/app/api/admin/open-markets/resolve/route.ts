@@ -40,7 +40,7 @@ export async function GET(request: Request) {
             'resolution_detail, resolved_outcome, resolved_by, resolution_confirmed_by, ' +
             'resolution_evidence_url, trading_closes_at, horizon_at, horizon_count, ' +
             'dispute_window_hours, settlement_locked_until, payout_phase, pending_kind, ' +
-            'created_by, halted_reason, max_hold_until, opened_at')
+            'created_by, halted_reason, max_hold_until, opened_at, self_reviewed')
     .in('status', ['open', 'closed', 'halted', 'pending_payout', 'horizon_window'])
     .order('trading_closes_at', { ascending: true, nullsFirst: false });
 
@@ -100,6 +100,7 @@ export async function GET(request: Request) {
       pendingKind: m.pending_kind,
       haltedReason: m.halted_reason,
       isHouse: !m.created_by,
+      selfReviewed: !!m.self_reviewed,
       createdBy: m.created_by,
       openHolders: holders[m.id]?.positions || 0,
       openShares: holders[m.id]?.shares || 0,
