@@ -41,6 +41,25 @@ its hub page. That is all they do — routing, nothing else.
 **You create it:** `/admin/open-markets/new` → **New market** button on the
 review queue.
 
+**"Your user ID" is required, and it is not the admin password.** The admin
+login (`/admin`'s "Admin secret" screen) is one shared secret with no idea
+which specific person is using it — so submit, review and resolve each ask
+for *your own* opinions.ng account UUID by hand, in a plain text box, right
+on the screen. Type it once anywhere on the Open Markets admin pages and it
+is remembered in that browser for the other two — they share one
+localStorage key.
+
+**Find your UUID once:** sign into your own opinions.ng account (a real one,
+not the admin login) → `/profile` → the small ID line under your name has a
+copy button. This is what four-eyes actually checks against: submit a
+market under your ID and you will not be able to review, trade or resolve
+it under that same ID later.
+
+*(There is a server-side `ADMIN_REVIEWER_USER_ID` env var these screens fall
+back to if the field is left blank. It exists for cron/automation, not for
+people — everyone sharing that one ID makes four-eyes meaningless, since it
+is the same identity submitting, reviewing and resolving. Type your own ID.)*
+
 **A user creates it:** `/open/create`. Lands in the same queue. They may have
 3 pending at a time.
 

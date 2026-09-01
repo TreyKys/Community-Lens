@@ -218,6 +218,18 @@ function SubmissionCard({ sub, expanded, onToggle, headroom, onDone }: {
   const [scores, setScores] = useState<Record<string, number>>({});
   const [gate, setGate] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  // WHO is reviewing. Neither this screen nor the New Market screen ever
+  // sends the admin's Supabase session token — only the shared admin-secret
+  // cookie, which has no notion of an individual person — so the API's
+  // "real session, else this field, else the one ADMIN_REVIEWER_USER_ID env
+  // var" fallback chain landed on nobody, and every review silently needed
+  // that single env var just to not 400. Typed once and remembered in this
+  // browser (see the effect below) rather than re-pasted per submission —
+  // an admin reviews several of these in a row.
+  const [reviewerId, setReviewerId] = useState('');
+  useEffect(() => {
+    try { setReviewerId(localStorage.getItem('opinionsng_admin_reviewer_id') || ''); } catch {}
+  }, []);
   const [tier, setTier] = useState('starter');
   const [closesAt, setClosesAt] = useState(
     sub.tradingClosesAt ? sub.tradingClosesAt.slice(0, 16) : '');
@@ -241,6 +253,7 @@ function SubmissionCard({ sub, expanded, onToggle, headroom, onDone }: {
         credentials: 'include',
         body: JSON.stringify({
           marketId: sub.id, decision, scores, hardGate: gate, notes,
+          reviewerId: reviewerId.trim(),
           ...(decision === 'approve' ? {
             tier,
             tradingClosesAt: closesAt ? new Date(closesAt).toISOString() : null,
@@ -379,6 +392,22 @@ function SubmissionCard({ sub, expanded, onToggle, headroom, onDone }: {
                 value={notes} onChange={e => setNotes(e.target.value)} />
             </div>
 
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground">
+                Your user ID — this is what four-eyes checks against whoever submitted it
+              </p>
+              <Input
+                value={reviewerId}
+                onChange={e => {
+                  const v = e.target.value;
+                  setReviewerId(v);
+                  try { localStorage.setItem('opinionsng_admin_reviewer_id', v.trim()); } catch {}
+                }}
+                placeholder="uuid"
+                className="text-xs h-8 font-mono"
+              />
+            </div>
+
             {!gate && total >= 10 && (
               <div className="space-y-3 pt-2 border-t border-border">
                 <div className="space-y-1">
@@ -427,18 +456,18 @@ function SubmissionCard({ sub, expanded, onToggle, headroom, onDone }: {
             )}
 
             <div className="grid grid-cols-3 gap-2 pt-1">
-              <Button size="sm" variant="outline" disabled={!!busy}
+              <Button size="sm" variant="outline" disabled={!!busy || !reviewerId.trim()}
                       className="border-red-500/40 text-red-400 hover:bg-red-500/10"
                       onClick={() => submit('reject')}>
                 {busy === 'reject' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reject'}
               </Button>
-              <Button size="sm" variant="outline" disabled={!!busy || notes.trim().length < 10}
+              <Button size="sm" variant="outline" disabled={!!busy || !reviewerId.trim() || notes.trim().length < 10}
                       onClick={() => submit('revise')}>
                 {busy === 'revise' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Revise'}
               </Button>
               <Button size="sm"
                       className="bg-emerald-600 hover:bg-emerald-500"
-                      disabled={!!busy || !!gate || !allScored || total < 10 || overCap || !closesAt}
+                      disabled={!!busy || !reviewerId.trim() || !!gate || !allScored || total < 10 || overCap || !closesAt}
                       onClick={() => submit('approve')}>
                 {busy === 'approve' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Approve'}
               </Button>
