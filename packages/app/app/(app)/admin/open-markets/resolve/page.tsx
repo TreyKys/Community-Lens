@@ -169,6 +169,16 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
   const { toast } = useToast();
   const [mode, setMode] = useState<'settle' | 'void'>('settle');
   const [outcomeIdx, setOutcomeIdx] = useState<number | null>(null);
+  // The FIRST of the two required people — the one actually resolving here.
+  // This screen already asks for a confirmer's UUID by hand (below); it never
+  // asked for the resolver's own, silently depending on a session this admin
+  // panel never establishes, with a single shared env var as the only
+  // fallback. Same localStorage key as the submit/review screens, so typing
+  // it once anywhere on this admin panel covers all three.
+  const [resolvedBy, setResolvedBy] = useState('');
+  useEffect(() => {
+    try { setResolvedBy(localStorage.getItem('opinionsng_admin_reviewer_id') || ''); } catch {}
+  }, []);
   const [confirmedBy, setConfirmedBy] = useState('');
   const [evidenceUrl, setEvidenceUrl] = useState('');
   const [reason, setReason] = useState('');
@@ -194,15 +204,15 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
 
   const runPreview = async () => {
     const d = mode === 'settle'
-      ? await call({ action: 'settle', outcomeIdx, confirmedBy, evidenceUrl, dryRun: true }, 'preview')
-      : await call({ action: 'void', kind: voidKind, reason, confirmedBy, dryRun: true }, 'preview');
+      ? await call({ action: 'settle', outcomeIdx, resolvedBy, confirmedBy, evidenceUrl, dryRun: true }, 'preview')
+      : await call({ action: 'void', kind: voidKind, reason, resolvedBy, confirmedBy, dryRun: true }, 'preview');
     if (d) setPreview({ ...d, mode });
   };
 
   const apply = async () => {
     const d = mode === 'settle'
-      ? await call({ action: 'settle', outcomeIdx, confirmedBy, evidenceUrl, dryRun: false }, 'apply')
-      : await call({ action: 'void', kind: voidKind, reason, confirmedBy, dryRun: false }, 'apply');
+      ? await call({ action: 'settle', outcomeIdx, resolvedBy, confirmedBy, evidenceUrl, dryRun: false }, 'apply')
+      : await call({ action: 'void', kind: voidKind, reason, resolvedBy, confirmedBy, dryRun: false }, 'apply');
     if (d) {
       toast({
         title: mode === 'settle' ? 'Market resolved' : 'Market voided',
@@ -367,6 +377,19 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
                       value={reason} onChange={e => setReason(e.target.value)} />
                   </div>
                 )}
+
+                <div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Your user ID — the resolver
+                  </p>
+                  <Input value={resolvedBy}
+                         onChange={e => {
+                           const v = e.target.value;
+                           setResolvedBy(v); setPreview(null);
+                           try { localStorage.setItem('opinionsng_admin_reviewer_id', v.trim()); } catch {}
+                         }}
+                         placeholder="uuid" className="text-xs h-8 font-mono" />
+                </div>
 
                 <div>
                   <p className="text-[10px] text-muted-foreground">

@@ -68,10 +68,17 @@ export default function AdminNewOpenMarketPage() {
   const [eventTag, setEventTag] = useState<string | null>(null);
   const [createdBy, setCreatedBy] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // See the note above this field's input: the admin login here is one
+  // shared secret with no per-person identity, so nothing else on this page
+  // can tell the API who is submitting. Shares its localStorage key with the
+  // review queue's reviewer-ID field — the same person typically does both,
+  // and typing it once should cover both screens.
+  const [submittedBy, setSubmittedBy] = useState('');
 
   useEffect(() => {
     fetch('/api/admin/auth').then(r => { if (r.ok) setIsAdmin(true); })
       .finally(() => setChecking(false));
+    try { setSubmittedBy(localStorage.getItem('opinionsng_admin_reviewer_id') || ''); } catch {}
   }, []);
 
   const login = async () => {
@@ -109,7 +116,8 @@ export default function AdminNewOpenMarketPage() {
   }
 
   const ready = question.trim().length >= 15 && category && cleanOutcomes.length >= 2
-    && !duplicate && source.trim().length >= 3 && problems.length === 0;
+    && !duplicate && source.trim().length >= 3 && problems.length === 0
+    && submittedBy.trim().length > 0;
 
   const submit = async () => {
     setSubmitting(true);
@@ -129,6 +137,7 @@ export default function AdminNewOpenMarketPage() {
           horizonAt: horizonAt ? new Date(horizonAt).toISOString() : null,
           eventTag,
           createdBy: createdBy.trim() || null,
+          submittedBy: submittedBy.trim(),
         }),
       });
       const d = await r.json();
@@ -312,6 +321,26 @@ export default function AdminNewOpenMarketPage() {
           <textarea
             className="w-full text-xs bg-transparent border border-border rounded p-2 min-h-[52px]"
             value={description} onChange={e => setDescription(e.target.value)} />
+        </div>
+
+        <div className="space-y-1 pt-2 border-t border-border">
+          <p className="text-xs font-medium">Your user ID</p>
+          <Input
+            value={submittedBy}
+            onChange={e => {
+              const v = e.target.value;
+              setSubmittedBy(v);
+              try { localStorage.setItem('opinionsng_admin_reviewer_id', v.trim()); } catch {}
+            }}
+            placeholder="uuid"
+            className="text-xs h-8 font-mono"
+          />
+          <p className="text-[10px] text-muted-foreground">
+            This screen never sees who you are otherwise — the admin login is one shared
+            secret, not a personal account. Recorded as who submitted this, so four-eyes
+            can hold: you (or anyone typing the same ID) cannot then review, trade or
+            resolve it. Remembered in this browser, so it is only typed once.
+          </p>
         </div>
 
         <div className="space-y-1 pt-2 border-t border-border">
