@@ -37,7 +37,7 @@ export async function GET(request: Request) {
   const [expRes, cfgRes, reserveRes, healthRes, marketsRes] = await Promise.all([
     supabaseAdmin.from('open_markets_exposure').select('*').maybeSingle(),
     supabaseAdmin.from('open_markets_config')
-      .select('trading_enabled, disabled_reason, max_total_exposure_tngn, max_market_b_tngn, allowed_categories')
+      .select('trading_enabled, disabled_reason, max_total_exposure_tngn, max_market_b_tngn, allowed_categories, solo_operator_mode, solo_operator_set_at')
       .eq('id', 1).maybeSingle(),
     supabaseAdmin.from('reserve_health').select('*').maybeSingle(),
     supabaseAdmin.rpc('scan_open_markets_health'),
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
       .select('id, question, category, outcomes, b, q, status, horizon_at, ' +
               'trading_closes_at, threshold_tngn, fees_collected, fees_collected_real, ' +
               'fees_swept, creator_accrued, creator_paid, created_by, opened_at, ' +
-              'halted_reason, payout_phase, settlement_locked_until')
+              'halted_reason, payout_phase, settlement_locked_until, self_reviewed, self_resolved')
       .in('status', ['open', 'horizon_window', 'halted', 'closed', 'pending_payout'])
       .order('opened_at', { ascending: false, nullsFirst: false }),
   ]);
@@ -92,6 +92,8 @@ export async function GET(request: Request) {
       settlementLockedUntil: m.settlement_locked_until,
       haltedReason: m.halted_reason,
       isHouse: !m.created_by,
+      selfReviewed: !!m.self_reviewed,
+      selfResolved: !!m.self_resolved,
       openedAt: m.opened_at,
     };
   });
@@ -100,6 +102,8 @@ export async function GET(request: Request) {
     tradingEnabled: cfg.trading_enabled !== false,
     disabledReason: cfg.disabled_reason || null,
     allowedCategories: cfg.allowed_categories || [],
+    soloOperatorMode: !!cfg.solo_operator_mode,
+    soloOperatorSetAt: cfg.solo_operator_set_at || null,
     totals: {
       committedTngn: committed,
       capTngn: cap,
@@ -185,6 +189,23 @@ export async function POST(request: Request) {
         marketsSwept: Number(row?.markets_swept || 0),
         tngnSwept: Number(row?.tngn_swept || 0),
       });
+    }
+
+    // Solo operator mode. Routed through set_open_markets_solo_mode rather
+    // than a bare UPDATE (see that function) so switching this on is its own
+    // recorded event, not indistinguishable from every other config tweak.
+    case 'set_solo_mode': {
+      const adminId = String(body?.adminId || '').trim();
+      if (!adminId) {
+        return NextResponse.json({ error: 'Your user ID is required to change this' }, { status: 400 });
+      }
+      const enabled = !!body?.enabled;
+      const { error } = await supabaseAdmin.rpc('set_open_markets_solo_mode', {
+        p_admin_id: adminId,
+        p_enabled: enabled,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ soloOperatorMode: enabled });
     }
 
     case 'set_cap': {

@@ -30,6 +30,7 @@ type Market = {
   resolvedOutcome: number | null; tradingClosesAt: string | null;
   settlementLockedUntil: string | null; payoutPhase: string; pendingKind: string | null;
   haltedReason: string | null; isHouse: boolean; createdBy: string | null;
+  selfReviewed: boolean;
   openHolders: number; openShares: number; unreleasedRows: number;
   awaitingResolution: boolean; overdueClose: boolean; releaseUnlocked: boolean;
   horizonCount: number; disputeWindowHours: number;
@@ -238,7 +239,14 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
         <button className="w-full text-left space-y-2" onClick={onToggle}>
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm font-medium leading-snug">{m.question}</p>
-            <Badge variant="outline" className="text-[9px] uppercase shrink-0">{m.status}</Badge>
+            <div className="flex items-center gap-1 shrink-0">
+              {m.selfReviewed && (
+                <Badge variant="outline" className="text-[9px] uppercase text-amber-400 border-amber-500/40">
+                  self-reviewed
+                </Badge>
+              )}
+              <Badge variant="outline" className="text-[9px] uppercase">{m.status}</Badge>
+            </div>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span>{m.openHolders} holder{m.openHolders === 1 ? '' : 's'}</span>

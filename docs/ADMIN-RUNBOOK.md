@@ -524,6 +524,39 @@ either creation form actually does something.
 
 ---
 
+# 3e. Solo operator mode
+
+Four-eyes assumes a second admin exists to hand a submission to. If you are
+the only admin, that assumption is false, and the fix is not to quietly work
+around the check — it is an explicit, visible, opt-in mode.
+
+**Turn it on:** `/admin/open-markets/exposure` → **Solo operator mode**.
+Needs your user ID typed in first (same box, same shared memory, as
+submit/review/resolve).
+
+**What it actually allows**, once on: the same person may submit *and*
+approve, or resolve *and* confirm, a market — but **only a house market**
+(blank creator). The moment a creator is attributed to a market (someone
+earns 25% of its fees), solo mode changes nothing — that market still needs
+a genuinely different person at every step, exactly as before. That is the
+one guard this was never going to touch: self-approving something you also
+profit from is the insider-trading hole the whole submitted_by mechanism
+exists to close.
+
+**What it never touches, under any setting:** whoever created or submitted a
+market still cannot trade it. That protects other people's money from an
+informed insider — it has nothing to do with how many admins exist.
+
+**Every use is stamped, not hidden.** A market you submit-and-approve alone
+shows a **"self-reviewed"** badge on the resolve screen. Its `self_resolved`
+column is set the same way if you also resolve-and-confirm it alone. Neither
+looks like — or is stored as — genuine second-person oversight; a self-
+resolved market's `resolution_confirmed_by` is left NULL rather than
+duplicating your own id, so the database's own record says plainly that
+nobody else confirmed it.
+
+---
+
 # 4. Other tools
 
 | Screen | What it is for |
