@@ -384,7 +384,16 @@ $$;
 -- Carries the creator's track record inline: "has this person had a market
 -- resolve cleanly before" is the single most useful thing a reviewer can know,
 -- and looking it up per submission by hand means it never gets looked up.
-CREATE OR REPLACE VIEW public.open_markets_review_queue AS
+--
+-- DROP then CREATE, not CREATE OR REPLACE. A later migration
+-- (20260807030000) redefines this same view with an extra column inserted
+-- in the middle of the list — CREATE OR REPLACE VIEW can only ever APPEND
+-- columns at the end, so on a database where that later migration already
+-- ran, replaying this one as OR REPLACE fails with "cannot drop columns
+-- from view". Nothing depends on this view except the admin queue route, so
+-- dropping it first is safe regardless of which shape is currently live.
+DROP VIEW IF EXISTS public.open_markets_review_queue;
+CREATE VIEW public.open_markets_review_queue AS
 SELECT
   m.id, m.question, m.description, m.category, m.outcomes,
   m.resolution_source, m.resolution_detail, m.revision_policy,

@@ -175,7 +175,13 @@ $$;
 
 
 -- ── What a creator needs to see about their own markets ────────────────────
-CREATE OR REPLACE VIEW public.open_markets_creator_summary AS
+-- DROP then CREATE, not CREATE OR REPLACE — same reasoning as
+-- open_markets_review_queue below: nothing else currently redefines this
+-- view, but CREATE OR REPLACE VIEW is a trap the moment anything ever does,
+-- and DROP+CREATE costs nothing extra since only the creator summary route
+-- reads it.
+DROP VIEW IF EXISTS public.open_markets_creator_summary;
+CREATE VIEW public.open_markets_creator_summary AS
 SELECT
   m.id, m.question, m.category, m.outcomes, m.status, m.created_by,
   m.created_at, m.opened_at, m.resolved_at,
