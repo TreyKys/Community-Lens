@@ -338,45 +338,93 @@ notification. They can turn it off again on `/profile`.
 Run these in the Supabase dashboard → **SQL Editor**, one at a time, **top to
 bottom**. Order matters: each builds on the one above it.
 
+**This table was previously wrong** — it only listed five migrations
+(streaks onward) and silently dropped everything from the Open Markets review
+gate through the most recent fix, because nobody added new rows to it as
+those migrations were written. That gap is exactly what produced two live
+errors on `/admin/open-markets`: `submit_open_market(...)` "not found in the
+schema cache" on the submission form, and `record "v_mkt" has no field
+"submitted_by"` on approval — both come from `open_markets.submitted_by` and
+the function signatures built around it (`20260807040000` and later) never
+having been applied. The table below is the full, current list.
+
 | # | File | What it adds |
 |---|---|---|
-| 1 | `20260807050000_streaks.sql` | The six streaks and their claim ledger |
-| 2 | `20260807060000_rewards_phone_and_socials.sql` | Phone + social follow bonuses |
-| 3 | `20260807070000_notify_on_bet_settlement.sql` | "You won ₦X" when a locked-odds bet settles |
-| 4 | `20260807080000_push_subscriptions.sql` | Phone-notification plumbing |
-| 5 | `20260807090000_referral_streak.sql` | The referral streak (needs #1) |
+| 1 | `20260807000100_open_markets_review.sql` | The review queue itself: `submit_open_market`, `review_open_market`, the category allowlist and rubric gate |
+| 2 | `20260807010000_open_markets_invariant_fix.sql` | Fixes a false-CRITICAL health check on a fully-exited position |
+| 3 | `20260807020000_open_markets_creator_and_disputes.sql` | Creator earnings claims + user disputes |
+| 4 | `20260807030000_open_markets_event_tag.sql` | `event_tag` routing hook for themed hub pages (e.g. `/bbn`) |
+| 5 | `20260807040000_open_markets_submitter_accountability.sql` | `submitted_by` — closes the house-market self-approval hole (needs #1–#4) |
+| 6 | `20260807050000_streaks.sql` | The six streaks and their claim ledger |
+| 7 | `20260807060000_rewards_phone_and_socials.sql` | Phone + social follow bonuses |
+| 8 | `20260807070000_notify_on_bet_settlement.sql` | "You won ₦X" when a locked-odds bet settles |
+| 9 | `20260807080000_push_subscriptions.sql` | Phone-notification plumbing |
+| 10 | `20260807090000_referral_streak.sql` | The referral streak (needs #6) |
+| 11 | `20260807100000_phone_reward_off.sql` | Stops promising the ₦200 phone reward there is no SMS provider to pay out |
+| 12 | `20260807120000_social_media_preview.sql` | Preview stage for queued social posts, image selection |
+| 13 | `20260807130000_purge_unstaked_auto_fetched_markets.sql` | One-time + repeatable cleanup of untouched auto-fetched markets |
+| 14 | `20260807140000_open_markets_solo_operator_mode.sql` | Opt-in single-admin mode for four-eyes (needs #5) |
+| 15 | `20260905000000_fix_bonus_expiry_resurrection.sql` | Stops an expired bonus from reviving when a new bonus is credited |
 
 Open each file from `supabase/migrations/`, paste the whole thing in, run it.
 
-**Or run all five at once**, from the repo root, without opening anything:
+**Or run all fifteen at once**, from the repo root, without opening anything:
 
 ```bash
 psql "postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres" \
   -v ON_ERROR_STOP=1 --single-transaction \
+  -f supabase/migrations/20260807000100_open_markets_review.sql \
+  -f supabase/migrations/20260807010000_open_markets_invariant_fix.sql \
+  -f supabase/migrations/20260807020000_open_markets_creator_and_disputes.sql \
+  -f supabase/migrations/20260807030000_open_markets_event_tag.sql \
+  -f supabase/migrations/20260807040000_open_markets_submitter_accountability.sql \
   -f supabase/migrations/20260807050000_streaks.sql \
   -f supabase/migrations/20260807060000_rewards_phone_and_socials.sql \
   -f supabase/migrations/20260807070000_notify_on_bet_settlement.sql \
   -f supabase/migrations/20260807080000_push_subscriptions.sql \
-  -f supabase/migrations/20260807090000_referral_streak.sql
+  -f supabase/migrations/20260807090000_referral_streak.sql \
+  -f supabase/migrations/20260807100000_phone_reward_off.sql \
+  -f supabase/migrations/20260807120000_social_media_preview.sql \
+  -f supabase/migrations/20260807130000_purge_unstaked_auto_fetched_markets.sql \
+  -f supabase/migrations/20260807140000_open_markets_solo_operator_mode.sql \
+  -f supabase/migrations/20260905000000_fix_bonus_expiry_resurrection.sql
 ```
 
 The connection string is in Supabase → **Project Settings → Database →
 Connection string → URI**. Use the **direct connection on port 5432**, not the
-transaction pooler on 6543 — the pooler cannot hold one transaction across five
-files.
+transaction pooler on 6543 — the pooler cannot hold one transaction across
+fifteen files.
 
 The two flags are the whole safety story:
 
 - `ON_ERROR_STOP=1` — stop at the first error instead of ploughing on through
   the remaining files. Without it psql reports the error and keeps going.
-- `--single-transaction` — all five land, or none of them do. There is no
+- `--single-transaction` — all fifteen land, or none of them do. There is no
   half-applied state to unpick.
 
-Silence and an exit code of 0 means it worked.
+Silence and an exit code of 0 means it worked. After it returns, reload
+PostgREST's schema cache so the API layer picks up the new/changed function
+signatures immediately instead of waiting for its own cache to expire:
 
-**All five are safe to run twice.** Every table, index and policy in them is
-guarded, so if you are unsure whether one already went in, just run it — a
-second run changes nothing. This has been verified, not assumed.
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+(Each of these migrations already issues that `NOTIFY` itself at the end, so
+this is only needed if you ever apply one manually outside this batch, e.g.
+by pasting a single file into the SQL Editor.)
+
+**All fifteen are safe to run twice.** Every table, index, trigger and policy
+in them is guarded (`IF NOT EXISTS` / `CREATE OR REPLACE` / `DROP ... IF
+EXISTS`), so if you are unsure whether some of them already went in, just run
+the whole batch — the ones already applied are a clean no-op. This has been
+verified against every file in this list, not assumed.
+
+**After running this batch**, reload `/admin/open-markets/new` and the review
+queue and confirm both errors above are gone. If either persists, the next
+thing to check is whether `NOTIFY pgrst, 'reload schema'` actually reached
+PostgREST — Supabase's pooled connection can lag a few seconds before the API
+layer sees new function signatures.
 
 **#5 must come after #1** — it replaces a function that #1 creates. Running it
 first fails with "function does not exist", which is loud and harmless, but
