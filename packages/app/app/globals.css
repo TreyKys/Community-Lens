@@ -84,6 +84,53 @@
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
+
+  /* Open Markets: the tug-of-war meter reacting to a trade landing (its own
+     or another trader's). Short and specific rather than a generic pulse —
+     the point is "notice this changed", not decoration. */
+  .market-tick {
+    animation: market-tick-kf .5s cubic-bezier(.2,.8,.3,1);
+  }
+  @keyframes market-tick-kf {
+    0%   { transform: translateY(0); filter: blur(0); }
+    35%  { transform: translateY(-6px); filter: blur(2px); opacity: .55; }
+    36%  { transform: translateY(6px); }
+    100% { transform: translateY(0); filter: blur(0); opacity: 1; }
+  }
+  .market-bar-glow {
+    animation: market-bar-glow-kf .6s ease;
+  }
+  @keyframes market-bar-glow-kf {
+    0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.35); }
+    40%  { box-shadow: 0 0 0 6px rgba(16,185,129,0.35); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+  .market-row-in {
+    animation: market-row-in-kf .35s ease;
+  }
+  @keyframes market-row-in-kf {
+    from { opacity: 0; transform: translateY(-8px); background: rgba(16,185,129,0.08); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .market-live-dot {
+    animation: market-live-ping-kf 1.8s ease-out infinite;
+  }
+  @keyframes market-live-ping-kf {
+    0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.45); }
+    70%  { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+  /* Endpoint marker on the price-history chart — an SVG circle scaled via
+     transform (not `r`, which CSS cannot animate reliably across browsers).
+     transform-box: fill-box is set inline where this is used, so the scale
+     is centred on the dot itself rather than the SVG viewport's origin. */
+  .market-dot-ping {
+    animation: market-dot-ping-kf 1.8s ease-out infinite;
+  }
+  @keyframes market-dot-ping-kf {
+    0%   { transform: scale(1); opacity: 0.55; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
 }
 
 

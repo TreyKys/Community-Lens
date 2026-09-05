@@ -22,6 +22,15 @@ import { Loader2, ChevronLeft, TrendingUp, TrendingDown, Info, Share2, Flag } fr
 //  2. The cost of EXITING is shown before you enter. A ₦10,000 buy cannot be
 //     sold back for ₦10,000 — you pay the fee twice and walk the price back
 //     down. Hiding that until someone tries to sell is how you lose trust.
+//
+// A third thing this screen is careful about, added alongside the meter/
+// ticker/chart redesign below: the trade ticker shows SHARE counts, never
+// naira. open_trades is owner-only at the RLS layer specifically because a
+// public per-account wallet-size signal is a physical-safety problem on this
+// platform (see the comment on open_trades_public_read in
+// 20260806000000_open_markets_schema.sql) — delta_shares is the one size
+// signal that migration deliberately made public via open_trades_tape, and
+// that is the only thing this page shows per trade.
 
 type Mkt = {
   id: string; question: string; description?: string; outcomes: string[];
@@ -29,12 +38,23 @@ type Mkt = {
   horizonAt?: string; tradingClosesAt?: string; resolvedOutcome?: number | null;
   volumeTngn: number; isCreator: boolean; settlementLockedUntil?: string | null;
 };
-type Tick = { outcomeIdx: number; price: number; at: string };
+type Tick = { outcomeIdx: number; price: number; shares: number; at: string };
+type CtxItem = { title: string; body: string };
 type Pos = { positionId: string; outcomeIdx: number; outcomeLabel: string;
   shares: number; costBasisTngn: number; markValueTngn: number; unrealisedPnlTngn: number };
 
 const ngn = (n: number) => `₦${Math.round(n).toLocaleString()}`;
 const pct = (p: number) => `${(p * 100).toFixed(1)}%`;
+
+function relTime(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
 export default function OpenMarketPage({ params }: { params: { id: string } }) {
   const { toast } = useToast();
@@ -57,6 +77,18 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
   const [quoting, setQuoting] = useState(false);
   const [placing, setPlacing] = useState(false);
 
+  // "More about this market" — fetched separately from the main load so a
+  // slow or failed Gemini call never blocks or breaks the trading page.
+  const [context, setContext] = useState<CtxItem[] | null>(null);
+  const [contextLoading, setContextLoading] = useState(true);
+
+  // Fires a brief glow/tick the moment a trade lands — the current user's own,
+  // or anyone else's, picked up on the next poll. Compares against the
+  // PREVIOUS prices seen, not just "did load() run", so a poll that finds
+  // nothing new stays quiet.
+  const [pulse, setPulse] = useState(false);
+  const prevPricesRef = useRef<number[] | null>(null);
+
   // One id per intent-to-trade. Regenerated only after a fill, so a retry of
   // the SAME order replays rather than trading twice.
   const tradeIdRef = useRef<string>('');
@@ -73,15 +105,49 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Could not load this market');
+
+      const prev = prevPricesRef.current;
+      if (prev && d.market.prices.some((p: number, i: number) => Math.abs(p - (prev[i] ?? p)) > 0.0005)) {
+        setPulse(true);
+        setTimeout(() => setPulse(false), 650);
+      }
+      prevPricesRef.current = d.market.prices;
+
       setMkt(d.market);
       setPositions(d.position || []);
       setHistory(d.priceHistory || []);
     } catch (e: any) {
-      toast({ title: 'Could not load', description: e.message, variant: 'destructive' });
+      // Silent on a background poll — only the first, blocking load should
+      // interrupt the user with a toast.
+      if (loading) toast({ title: 'Could not load', description: e.message, variant: 'destructive' });
     } finally { setLoading(false); }
-  }, [params.id, toast]);
+  }, [params.id, toast, loading]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [params.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll for trades landing while nobody but this tab is watching — an
+  // "immersive" market is one that visibly moves without the viewer having to
+  // do anything. Paused when the tab isn't visible, and stops once the book
+  // is no longer open.
+  useEffect(() => {
+    if (!mkt || mkt.status !== 'open') return;
+    const id = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') load();
+    }, 15000);
+    return () => clearInterval(id);
+  }, [mkt?.status, load]);
+
+  // "More about this market" — one fetch per market, cached server-side.
+  useEffect(() => {
+    let cancelled = false;
+    setContextLoading(true);
+    fetch(`/api/open-markets/${params.id}/context`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setContext(Array.isArray(d.items) ? d.items : []); })
+      .catch(() => { if (!cancelled) setContext([]); })
+      .finally(() => { if (!cancelled) setContextLoading(false); });
+    return () => { cancelled = true; };
+  }, [params.id]);
 
   // Naira in -> share count out, computed locally from the book. Debounced
   // alongside the quote so a fast typist doesn't churn it.
@@ -237,29 +303,41 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
           </div>
           {mkt.description && <p className="text-sm text-muted-foreground">{mkt.description}</p>}
 
-          {/* Probability leads. It is the single number that says what this
-              market currently believes, and it is what makes browsing feel
-              like reading a feed rather than an order book. */}
-          <div className="space-y-2 pt-1">
-            {mkt.outcomes.map((o, i) => (
-              <button
-                key={i}
-                onClick={() => setOutcomeIdx(i)}
-                className={`w-full rounded-lg border p-3 text-left transition-colors duration-150 ${
-                  outcomeIdx === i ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-border hover:border-emerald-500/25'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{o}</span>
-                  <span className="text-xl font-semibold tabular">{pct(mkt.prices[i])}</span>
-                </div>
-                <div className="mt-2 h-1 w-full rounded-full bg-muted overflow-hidden">
-                  <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-500 ease-out"
-                       style={{ width: `${mkt.prices[i] * 100}%` }} />
-                </div>
-              </button>
-            ))}
-          </div>
+          {/* Probability leads. A binary market gets the unified meter: Yes
+              and No always sum to 100%, so two separate bars were the same
+              number said twice. A market with more than two outcomes keeps
+              the original per-outcome list — there is no single "favoured
+              side" line to draw through more than two options. */}
+          {mkt.outcomes.length === 2 ? (
+            <Meter outcomes={mkt.outcomes} prices={mkt.prices}
+                   selected={outcomeIdx} onSelect={setOutcomeIdx} pulse={pulse} />
+          ) : (
+            <div className="space-y-2 pt-1">
+              {mkt.outcomes.map((o, i) => (
+                <button
+                  key={i}
+                  onClick={() => setOutcomeIdx(i)}
+                  className={`w-full rounded-lg border p-3 text-left transition-colors duration-150 ${
+                    outcomeIdx === i ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-border hover:border-emerald-500/25'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{o}</span>
+                    <span className={`text-xl font-semibold tabular ${pulse ? 'market-tick' : ''}`}>{pct(mkt.prices[i])}</span>
+                  </div>
+                  <div className="mt-2 h-1 w-full rounded-full bg-muted overflow-hidden">
+                    <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-500 ease-out"
+                         style={{ width: `${mkt.prices[i] * 100}%` }} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Live trade feed. A quiet market otherwise reads as dead — this
+              is the same data open_trades_tape already makes public (share
+              count and direction, never naira or who), just surfaced. */}
+          <TradeTicker history={history} outcomes={mkt.outcomes} />
 
           {/* Every trade records the price it left behind, so the history is
               already in the trade log — no candle table. A sparse line on a
@@ -274,6 +352,11 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
           </p>
         </CardContent>
       </Card>
+
+      {/* "More about this market" — general background on the SUBJECT,
+          written once per market and cached. Never a prediction and never
+          this platform's view on the outcome; see lib/openMarketContext.ts. */}
+      <MarketContextPanel items={context} loading={contextLoading} />
 
       {positions.length > 0 && (
         <Card>
@@ -491,15 +574,143 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
   );
 }
 
+// The tug-of-war meter for a binary (exactly two outcome) market.
+//
+// Yes and No always sum to 100%, so two identical progress bars were the
+// same number said twice. This is one bar, split where the book actually
+// is, with one big reactive digit for whichever side is currently favoured.
+// Outcome order is always [0, 1] left-to-right and never swaps sides as the
+// price crosses 50% — only the FILL colour (emerald for whichever is
+// favoured, muted for the other) moves, so the layout never jumps.
+function Meter({ outcomes, prices, selected, onSelect, pulse }: {
+  outcomes: string[]; prices: number[]; selected: number; onSelect: (i: number) => void; pulse: boolean;
+}) {
+  const leadIdx = prices[0] >= prices[1] ? 0 : 1;
+
+  return (
+    <div className="pt-1">
+      <div className="text-center pb-2">
+        <p className="text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground/80">{outcomes[leadIdx]}</span> is currently favoured
+        </p>
+        <p className={`text-4xl font-bold tabular tracking-tight text-emerald-400 ${pulse ? 'market-tick' : ''}`}>
+          {pct(prices[leadIdx])}
+        </p>
+      </div>
+
+      <div className={`relative h-9 rounded-lg border border-border overflow-hidden flex bg-muted/50 ${pulse ? 'market-bar-glow' : ''}`}>
+        {[0, 1].map(i => (
+          <button
+            key={i}
+            onClick={() => onSelect(i)}
+            aria-label={`Trade ${outcomes[i]}, currently ${pct(prices[i])}`}
+            className={`h-full flex items-center text-[11px] font-semibold overflow-hidden transition-[width] duration-500 ease-out ${
+              i === 0 ? 'justify-end pr-2 border-r border-background/40' : 'justify-start pl-2'
+            } ${
+              i === leadIdx ? 'bg-emerald-500 text-emerald-950' : 'bg-muted text-muted-foreground'
+            } ${selected === i ? 'ring-2 ring-inset ring-emerald-400/70' : ''}`}
+            style={{ width: `${Math.max(prices[i] * 100, 2)}%` }}
+          >
+            {prices[i] > 0.13 && pct(prices[i])}
+          </button>
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground pt-1 tabular">
+        <span>{outcomes[0]} · {pct(prices[0])}</span>
+        <span>{outcomes[1]} · {pct(prices[1])}</span>
+      </div>
+    </div>
+  );
+}
+
+// Live trade feed. Same tape data open_trades_tape already exposes publicly
+// — direction and share size, never naira and never who — just surfaced
+// instead of sitting unused in the price-history array.
+function TradeTicker({ history, outcomes }: { history: Tick[]; outcomes: string[] }) {
+  if (history.length === 0) return null;
+  const rows = [...history]
+    .sort((a, b) => +new Date(b.at) - +new Date(a.at))
+    .slice(0, 6);
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 market-live-dot" />
+        Recent trades
+      </div>
+      <div>
+        {rows.map(t => (
+          <div key={`${t.at}_${t.outcomeIdx}_${t.shares}`}
+               className="market-row-in flex items-center justify-between px-3 py-1.5 text-xs border-b border-border/60 last:border-0">
+            <span className="text-muted-foreground">
+              {t.shares > 0 ? 'Bought' : 'Sold'} <span className="text-foreground/80">{outcomes[t.outcomeIdx]}</span>
+            </span>
+            <span className="flex items-center gap-2 tabular">
+              <span className="font-medium">{Math.round(Math.abs(t.shares)).toLocaleString()} shares</span>
+              <span className="text-muted-foreground">{relTime(t.at)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// "More about this market" — general background on the SUBJECT, never the
+// outcome. Reuses the same card language as everything else on this page;
+// the diamond marks are just a quiet visual rhythm down the list, not a
+// sequence (there is no order to these — any could stand alone).
+function MarketContextPanel({ items, loading }: { items: CtxItem[] | null; loading: boolean }) {
+  if (!loading && (!items || items.length === 0)) return null;
+  const marks = ['◐', '◑', '◒', '◓'];
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+          More about this market
+        </p>
+        {loading ? (
+          <div className="space-y-2 pt-3">
+            <div className="h-3 w-2/3 rounded shimmer" />
+            <div className="h-3 w-full rounded shimmer" />
+            <div className="h-3 w-5/6 rounded shimmer" />
+          </div>
+        ) : (
+          <>
+            <div className="pt-1">
+              {items!.map((it, i) => (
+                <div key={i} className={`grid grid-cols-[18px_1fr] gap-2.5 py-2.5 ${i > 0 ? 'border-t border-border/60' : ''}`}>
+                  <span className="text-emerald-500/70 text-sm leading-6" aria-hidden>{marks[i % marks.length]}</span>
+                  <div>
+                    <p className="text-sm font-medium">{it.title}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed mt-0.5">{it.body}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground pt-2 border-t border-border/60 mt-1">
+              General background, written by AI — not a prediction, and not this platform&rsquo;s view on how it resolves.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // Price history, drawn straight from the trade log.
 //
-// Deliberately a plain SVG polyline with no smoothing and no interpolation
-// between trades: this is a market that may have had four trades all week, and
-// a curve drawn through four points implies continuous movement that never
-// happened. Flat segments between real trades are the truth.
+// Deliberately no smoothing and no interpolation between trades: this is a
+// market that may have had four trades all week, and a curve drawn through
+// four points implies continuous movement that never happened. Flat segments
+// between real trades are the truth — the gradient fill and hover tooltip
+// added here change how much weight that honest line carries, not what it
+// claims.
 function PriceHistory({ history, outcomeIdx, label, current }: {
   history: Tick[]; outcomeIdx: number; label: string; current: number;
 }) {
+  const [tip, setTip] = useState<{ left: number; top: number; text: string } | null>(null);
   const points = history.filter(h => h.outcomeIdx === outcomeIdx);
 
   // One trade is a dot, not a line. Below that there is nothing to show, and
@@ -512,7 +723,7 @@ function PriceHistory({ history, outcomeIdx, label, current }: {
     );
   }
 
-  const W = 100, H = 28;
+  const W = 100, H = 32;
   const xs = points.map((_, i) => (i / (points.length - 1)) * W);
   const lo = Math.min(...points.map(p => p.price));
   const hi = Math.max(...points.map(p => p.price));
@@ -522,9 +733,26 @@ function PriceHistory({ history, outcomeIdx, label, current }: {
   const mid = (hi + lo) / 2;
   const y = (p: number) => H - ((p - (mid - span / 2)) / span) * H;
 
-  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xs[i].toFixed(2)},${y(p.price).toFixed(2)}`).join(' ');
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xs[i].toFixed(2)},${y(p.price).toFixed(2)}`).join(' ');
+  const area = `${line} L${xs[xs.length - 1].toFixed(2)},${H} L${xs[0].toFixed(2)},${H} Z`;
   const first = points[0].price;
   const up = current >= first;
+  const color = up ? '#10b981' : '#ef4444';
+  const gradId = `open-mkt-grad-${outcomeIdx}`;
+  const lastX = xs[xs.length - 1];
+  const lastY = y(points[points.length - 1].price);
+
+  const onMove = (e: any) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W;
+    let nearestI = 0, best = Infinity;
+    xs.forEach((x, i) => { const d = Math.abs(x - mx); if (d < best) { best = d; nearestI = i; } });
+    setTip({
+      left: (xs[nearestI] / W) * rect.width,
+      top: (y(points[nearestI].price) / H) * rect.height,
+      text: `${(points[nearestI].price * 100).toFixed(1)}%`,
+    });
+  };
 
   return (
     <div className="pt-1 space-y-1">
@@ -534,13 +762,32 @@ function PriceHistory({ history, outcomeIdx, label, current }: {
           {up ? '▲' : '▼'} {Math.abs((current - first) * 100).toFixed(1)} pts
         </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-           className="w-full h-10" role="img"
-           aria-label={`${label} moved from ${(first * 100).toFixed(0)}% to ${(current * 100).toFixed(0)}%`}>
-        <path d={d} fill="none" strokeWidth={1.5} vectorEffect="non-scaling-stroke"
-              className={up ? 'stroke-emerald-500' : 'stroke-red-500'}
-              strokeLinejoin="round" strokeLinecap="round" />
-      </svg>
+      <div className="relative">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+             className="w-full h-12" role="img"
+             onMouseMove={onMove} onMouseLeave={() => setTip(null)}
+             aria-label={`${label} moved from ${(first * 100).toFixed(0)}% to ${(current * 100).toFixed(0)}%`}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={area} fill={`url(#${gradId})`} stroke="none" />
+          <path d={line} fill="none" strokeWidth={1.5} vectorEffect="non-scaling-stroke"
+                className={up ? 'stroke-emerald-500' : 'stroke-red-500'}
+                strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={lastX} cy={lastY} r={4} fill={color} fillOpacity={0.4}
+                  className="market-dot-ping" style={{ transformBox: 'fill-box', transformOrigin: 'center' } as any} />
+          <circle cx={lastX} cy={lastY} r={1.8} fill={color} />
+        </svg>
+        {tip && (
+          <div className="absolute pointer-events-none text-[10px] font-medium bg-popover border border-border rounded px-1.5 py-0.5 shadow-sm tabular z-10"
+               style={{ left: tip.left, top: tip.top, transform: 'translate(-50%, -135%)' }}>
+            {tip.text}
+          </div>
+        )}
+      </div>
       <p className="text-[10px] text-muted-foreground">
         {points.length} trade{points.length === 1 ? '' : 's'} · flat stretches are real, not missing data
       </p>

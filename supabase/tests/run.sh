@@ -36,6 +36,7 @@ MIGRATIONS=(
   20260807100000_phone_reward_off
   20260807130000_purge_unstaked_auto_fetched_markets
   20260807140000_open_markets_solo_operator_mode
+  20260906000000_open_markets_ai_context
 )
 
 psql_as() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $DB $*"; }
