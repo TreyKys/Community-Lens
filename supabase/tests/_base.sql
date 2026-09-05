@@ -128,13 +128,20 @@ BEGIN
   RETURN jsonb_build_object('tngn_balance', v_tngn, 'bonus_balance', v_bonus);
 END$$;
 
--- Bonus expiry, mirrored from 20260630200000. Without it the stub cannot see
--- the interaction that produced the reported "₦5,000 on screen, insufficient
--- balance on every stake" — every credit path in these migrations relies on
--- this trigger to stamp an expiry, and none of them sets one itself.
+-- Bonus expiry, mirrored from 20260630200000 as fixed by 20260905000000.
+-- Without it the stub cannot see the interaction that produced the reported
+-- "₦5,000 on screen, insufficient balance on every stake" — every credit path
+-- in these migrations relies on this trigger to stamp an expiry, and none of
+-- them sets one itself. The stale-balance discard below mirrors the fix for
+-- "when I issue a new bonus the old one comes back": a credit path that just
+-- adds to bonus_balance (credit_user, referral bonuses, promos — anything
+-- that is not one of the staking RPCs) never itself checks whether what it
+-- is adding to had already expired, so without this the trigger happily
+-- extends the stale amount right along with the fresh credit.
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS bonus_expires_at timestamptz;
 CREATE OR REPLACE FUNCTION public.set_bonus_expires_at()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE v_increase numeric;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF COALESCE(NEW.bonus_balance, 0) > 0 THEN
@@ -142,6 +149,10 @@ BEGIN
     END IF;
   ELSIF TG_OP = 'UPDATE' THEN
     IF COALESCE(NEW.bonus_balance, 0) > COALESCE(OLD.bonus_balance, 0) THEN
+      v_increase := COALESCE(NEW.bonus_balance, 0) - COALESCE(OLD.bonus_balance, 0);
+      IF OLD.bonus_expires_at IS NOT NULL AND OLD.bonus_expires_at <= now() THEN
+        NEW.bonus_balance := v_increase;
+      END IF;
       NEW.bonus_expires_at := GREATEST(
         COALESCE(OLD.bonus_expires_at, now()), now() + INTERVAL '7 days');
     END IF;

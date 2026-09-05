@@ -54,7 +54,7 @@ done
 echo "migrations loaded: ${#MIGRATIONS[@]}"
 
 fail=0
-for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media purge_markets open_markets_solo_mode; do
+for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media purge_markets open_markets_solo_mode bonus_expiry; do
   echo
   echo "── $suite ──"
   # Each suite gets a fresh database: they both create users and markets, and
