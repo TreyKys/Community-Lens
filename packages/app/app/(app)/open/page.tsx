@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
 import { OpenMarketCard, type OpenMarketCardRow } from '@/components/OpenMarketCard';
+import { TradeHeroBackdrop } from '@/components/TradeHeroBackdrop';
 
 // Browse open markets. Card rendering lives in OpenMarketCard so this stays
 // in sync with any hub page (e.g. /bbn) that also lists trading-engine
@@ -23,12 +24,21 @@ export default function OpenMarketsPage() {
 
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Trading</h1>
-        <p className="text-xs text-muted-foreground mt-1">
-          Buy a share for what the crowd thinks it&rsquo;s worth. It pays ₦1 if it happens, ₦0 if it doesn&rsquo;t —
-          and unlike a bet, you can sell any time instead of waiting for the answer.
-        </p>
+      {/* The one hero on this page — "TRADE" is the whole pitch for this
+          engine over the rest of the site: everywhere else you place a bet
+          and wait, here you can change your mind and sell. Sized and
+          weighted to read as the headline, not a section label. */}
+      <div className="relative overflow-hidden rounded-xl border border-emerald-500/15 bg-emerald-500/[0.03] px-4 pt-5 pb-4">
+        <TradeHeroBackdrop />
+        <div className="relative">
+          <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+            TRADE<span className="text-emerald-400">.</span>
+          </h1>
+          <p className="text-xs text-muted-foreground mt-2 max-w-sm">
+            Buy a share for what the crowd thinks it&rsquo;s worth. It pays ₦1 if it happens, ₦0 if it doesn&rsquo;t —
+            and unlike a bet, you can sell any time instead of waiting for the answer.
+          </p>
+        </div>
       </div>
 
       {loading ? (

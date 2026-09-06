@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { DataTable, Column } from '@/components/admin/DataTable';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Shield, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus, Ban, Search, AlertTriangle, XCircle, Copy, CalendarClock } from 'lucide-react';
+import { Loader2, Shield, ShieldAlert, Lock, Unlock, CheckCircle2, Users, Coins, Activity, Sparkles, Upload, Trash2, Send, ExternalLink, Gift, Eye, Flame, Pencil, Plus, Ban, Search, AlertTriangle, XCircle, Copy, CalendarClock } from 'lucide-react';
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer';
 import { MarketDetailDrawer } from '@/components/admin/MarketDetailDrawer';
 import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
@@ -297,6 +297,21 @@ function TreasuryPanel() {
             <div>
               <p className="text-sm font-medium">Trading review</p>
               <p className="text-xs text-muted-foreground">Approve submissions · exposure dashboard</p>
+            </div>
+          </div>
+          <ExternalLink className="w-4 h-4 text-muted-foreground" />
+        </div>
+      </Link>
+
+      <Link href="/admin/open-markets/control">
+        <div className="flex items-center justify-between p-4 bg-card border border-emerald-500/20 rounded-xl hover:border-emerald-500/40 transition-colors cursor-pointer">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <ShieldAlert className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Trading — control panel</p>
+              <p className="text-xs text-muted-foreground">Every market, every state · pause, halt, reschedule, delete</p>
             </div>
           </div>
           <ExternalLink className="w-4 h-4 text-muted-foreground" />
