@@ -38,10 +38,14 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const prices = pricesFromQ(m.q, m.b);
 
-  // Public tape — no user_id, no naira amounts per trader.
+  // Public tape — no user_id, no naira amounts per trader. delta_shares is
+  // the one size signal open_trades_tape already exposes publicly (see
+  // 20260806000000_open_markets_schema.sql) — it powers the live trade
+  // ticker on the trading page without adding anything beyond what that
+  // view already made public.
   const { data: tape } = await supabaseAdmin
     .from('open_trades')
-    .select('outcome_idx, price_after, created_at')
+    .select('outcome_idx, delta_shares, price_after, created_at')
     .eq('market_id', params.id)
     .order('created_at', { ascending: true })
     .limit(200);
@@ -115,6 +119,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
     priceHistory: (tape || []).map(t => ({
       outcomeIdx: t.outcome_idx,
       price: Number(t.price_after),
+      // Signed: positive is a buy, negative a sell. The ticker shows the
+      // direction and the size; it never shows what it cost.
+      shares: Number(t.delta_shares),
       at: t.created_at,
     })),
     position,

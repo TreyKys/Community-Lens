@@ -29,6 +29,11 @@
 -- the real safety net; the NOT EXISTS checks below exist to make the common
 -- case fast and to report WHY a row was left alone, not to replace it.
 --
+-- merkle_commits is the one exception to "any row means activity" — see the
+-- comment directly on that check below. A row there gets written for every
+-- market that ever locks, bet or no bet, so existence alone is not evidence
+-- of a real stake.
+--
 -- Sub-markets (BTTS, Over/Under) go first, in their own pass, so a parent is
 -- only removed once every child under it is either already gone or was never
 -- eligible in the first place — never leaving a market with a phantom child
@@ -39,6 +44,16 @@
 -- database where the five tables it names do not all already exist — plpgsql
 -- defers that to first call, which is what every other function in this
 -- codebase relies on when it references tables created by a later migration.
+-- merkle_commits is checked with `AND bet_count > 0`, unlike the other four.
+-- /api/markets/lock writes a row here for EVERY market that reaches its
+-- close time, on the 15-minute lock cron, whether or not a single bet was
+-- ever placed on it — bet_count is 0 in that case, and the row exists purely
+-- as proof the market locked on schedule. Checking existence alone (as the
+-- other four tables correctly do — they are never written except in response
+-- to a real stake) meant a market that simply ran its course untouched was
+-- indistinguishable from one someone actually bet on, and the very first
+-- real run of this function protected 729 of 765 candidates — almost all of
+-- them on exactly this false signal, not genuine activity.
 CREATE OR REPLACE FUNCTION public._auto_fetched_market_has_activity(p_market_id bigint)
 RETURNS boolean
 LANGUAGE plpgsql STABLE
@@ -48,7 +63,8 @@ BEGIN
       OR EXISTS (SELECT 1 FROM public.multiplier_legs      WHERE market_id = p_market_id)
       OR EXISTS (SELECT 1 FROM public.vip_referral_earnings WHERE market_id = p_market_id)
       OR EXISTS (SELECT 1 FROM public.bet_insurance_events  WHERE market_id = p_market_id)
-      OR EXISTS (SELECT 1 FROM public.merkle_commits        WHERE market_id = p_market_id);
+      OR EXISTS (SELECT 1 FROM public.merkle_commits
+                  WHERE market_id = p_market_id AND bet_count > 0);
 END;
 $$;
 
@@ -84,6 +100,15 @@ BEGIN
       CONTINUE;
     END IF;
     BEGIN
+      -- A bet_count=0 merkle_commits row does not count as "activity" (see
+      -- _auto_fetched_market_has_activity above) but IS still a foreign key
+      -- reference — the FK does not know about bet_count, only about the
+      -- row's existence. Left in place, it would block every one of these
+      -- deletes with foreign_key_violation, silently reclassifying "no real
+      -- activity" as "blocked_by_fk" and defeating the fix above. Removing
+      -- it here is safe: a bet_count>0 row is never reached this far, because
+      -- a market with one fails the activity check and is never a candidate.
+      DELETE FROM public.merkle_commits WHERE market_id = v_id AND bet_count = 0;
       DELETE FROM public.markets WHERE id = v_id;
       v_deleted := v_deleted + 1;
     EXCEPTION WHEN foreign_key_violation THEN
@@ -121,6 +146,15 @@ BEGIN
       CONTINUE;
     END IF;
     BEGIN
+      -- A bet_count=0 merkle_commits row does not count as "activity" (see
+      -- _auto_fetched_market_has_activity above) but IS still a foreign key
+      -- reference — the FK does not know about bet_count, only about the
+      -- row's existence. Left in place, it would block every one of these
+      -- deletes with foreign_key_violation, silently reclassifying "no real
+      -- activity" as "blocked_by_fk" and defeating the fix above. Removing
+      -- it here is safe: a bet_count>0 row is never reached this far, because
+      -- a market with one fails the activity check and is never a candidate.
+      DELETE FROM public.merkle_commits WHERE market_id = v_id AND bet_count = 0;
       DELETE FROM public.markets WHERE id = v_id;
       v_deleted := v_deleted + 1;
     EXCEPTION WHEN foreign_key_violation THEN
