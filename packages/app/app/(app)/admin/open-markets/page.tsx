@@ -129,6 +129,10 @@ export default function OpenMarketsReviewPage() {
           <ChevronLeft className="w-4 h-4" /> Admin
         </Link>
         <div className="flex items-center gap-3">
+          <Link href="/admin/open-markets/control"
+                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400 hover:text-emerald-300">
+            <ShieldAlert className="w-3.5 h-3.5" /> Control panel
+          </Link>
           <Link href="/admin/open-markets/resolve"
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <Gavel className="w-3.5 h-3.5" /> Resolve

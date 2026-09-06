@@ -690,7 +690,7 @@ function MarketContextPanel({ items, loading }: { items: CtxItem[] | null; loadi
               ))}
             </div>
             <p className="text-[10px] text-muted-foreground pt-2 border-t border-border/60 mt-1">
-              General background, written by AI — not a prediction, and not this platform&rsquo;s view on how it resolves.
+              General background — not a prediction, and not this platform&rsquo;s view on how it resolves.
             </p>
           </>
         )}

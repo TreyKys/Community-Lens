@@ -103,8 +103,8 @@ export function Sidebar() {
           filter over the locked-odds markets, which is not what this is.
           Rendered on every breakpoint: nothing else in the app links to it. */}
       <div className="flex flex-col gap-1 mb-3 border-b pb-3">
-        <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-muted-foreground px-3 mb-1">
-          Trading
+        <p className="text-[10px] uppercase tracking-[0.14em] font-bold text-emerald-400/90 px-3 mb-1">
+          Trade
         </p>
         <Button
           variant={pathname?.startsWith('/open') && !pathname?.startsWith('/open/creator') ? 'secondary' : 'ghost'}
