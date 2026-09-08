@@ -1611,6 +1611,28 @@ function CreateMarketPanel() {
       return;
     }
 
+    // The submit button is disabled on the same check (see lockedOddsCheck
+    // below), so this only fires on a stale click — e.g. the reserve number
+    // arrived and flipped valid->invalid between render and click. Kept as
+    // a real guard rather than trusting the disabled prop alone: a rejected
+    // seed here used to be caught only by the server, one round trip later.
+    if (isLockedOdds) {
+      const check = validateLockedOddsSeed({
+        seedSize, seedProbability, seedProbsMulti, vigOverride, reserveDeployable,
+        numOutcomes: numOutcomesNow,
+      });
+      if (!check.ok) {
+        toast({
+          title: 'Locked-odds settings are not valid yet',
+          description: !check.seedFitsReserve
+            ? `Seed exceeds deployable reserve (₦${Math.max(0, reserveDeployable ?? 0).toLocaleString()} available).`
+            : 'Check the seed size, probabilities and vig override above.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       // For 3+ outcomes, convert per-outcome probabilities into an
@@ -1761,6 +1783,17 @@ function CreateMarketPanel() {
       setSavingTemplate(false);
     }
   };
+
+  // Gates the submit button. Locked-odds is on by default, so without this
+  // an admin could click "Create Locked-Odds Market" while the reserve
+  // warning was showing in red right above it — the click looked live
+  // because nothing on the button reflected the invalid state, and the
+  // request only failed after a round trip to the server.
+  const lockedOddsCheck = validateLockedOddsSeed({
+    seedSize, seedProbability, seedProbsMulti, vigOverride, reserveDeployable,
+    numOutcomes: numOutcomesNow,
+  });
+  const createDisabled = isSubmitting || (isLockedOdds && !lockedOddsCheck.ok);
 
   return (
     <Card>
@@ -2049,9 +2082,10 @@ function CreateMarketPanel() {
           category={category}
         />
 
-        <Button onClick={handleCreate} disabled={isSubmitting} className="w-full">
+        <Button onClick={handleCreate} disabled={createDisabled} className="w-full">
           {isSubmitting
             ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</>
+            : isLockedOdds && !lockedOddsCheck.ok ? 'Fix locked-odds settings above'
             : isLockedOdds ? 'Create Locked-Odds Market' : 'Create Market'}
         </Button>
       </CardContent>
@@ -2413,6 +2447,53 @@ function BulkImportPanel() {
   );
 }
 
+// Shared between LockedOddsConfigBlock (the inline red/green hints) and
+// CreateMarketPanel (the submit button's disabled state and a pre-flight
+// check in handleCreate). One function so the two can never drift apart —
+// they did, briefly: the button used to ignore all of this and let an
+// admin submit a doomed request, which the server then rejected after a
+// round trip. Isolating the CIWA5 check requires this be a plain function
+// of primitives, not a hook, so it runs identically in both places.
+function validateLockedOddsSeed(input: {
+  seedSize: string;
+  seedProbability: string;
+  seedProbsMulti: string[];
+  vigOverride: string;
+  reserveDeployable: number | null;
+  numOutcomes: number;
+}) {
+  const seedSizeNum = Number(input.seedSize);
+  const seedProbNum = Number(input.seedProbability);
+  const vigNum = input.vigOverride.trim() === '' ? undefined : Number(input.vigOverride);
+
+  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
+  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
+  const seedFitsReserve = input.reserveDeployable == null || seedSizeNum <= input.reserveDeployable;
+  // Below the ₦1,000 floor, "reduce the seed" is not an available remedy —
+  // there is no valid seed size left to try. Surfaced separately so the
+  // warning text can stop suggesting something that cannot work.
+  const reserveBelowMinimum = input.reserveDeployable != null && input.reserveDeployable < 1_000;
+
+  const multiProbs = input.seedProbsMulti.slice(0, input.numOutcomes).map(s => Number(s));
+  const multiProbSum = multiProbs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
+  const validMultiProbs =
+    input.numOutcomes < 3
+      ? true
+      : multiProbs.length === input.numOutcomes
+        && multiProbs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98)
+        && Math.abs(multiProbSum - 1) <= 0.005;
+  const validProb =
+    input.numOutcomes === 2
+      ? (Number.isFinite(seedProbNum) && seedProbNum >= 0.05 && seedProbNum <= 0.95)
+      : validMultiProbs;
+
+  return {
+    validSeed, validProb, validVig, validMultiProbs, seedFitsReserve, reserveBelowMinimum,
+    multiProbs, multiProbSum,
+    ok: validSeed && validProb && validVig && seedFitsReserve,
+  };
+}
+
 // ── Locked-odds config block ─────────────────────────────────────────────
 //
 // Used inside CreateMarketPanel. Collapsible; defaults preserve the
@@ -2445,25 +2526,12 @@ function LockedOddsConfigBlock(props: {
   const seedSizeNum = Number(seedSize);
   const seedProbNum = Number(seedProbability);
   const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
-  const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
-  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
-  const seedFitsReserve = reserveDeployable == null || seedSizeNum <= reserveDeployable;
-
-  // Probability validation differs between the binary and multi-outcome
-  // cases. Binary: single YES probability in [0.05, 0.95]. Multi: each
-  // outcome in [0.02, 0.98] and they must sum to ~1.
-  const multiProbs = seedProbsMulti.slice(0, numOutcomes).map(s => Number(s));
-  const multiProbSum = multiProbs.reduce((a, p) => a + (Number.isFinite(p) ? p : 0), 0);
-  const validMultiProbs =
-    numOutcomes < 3
-      ? true
-      : multiProbs.length === numOutcomes
-        && multiProbs.every(p => Number.isFinite(p) && p >= 0.02 && p <= 0.98)
-        && Math.abs(multiProbSum - 1) <= 0.005;
-  const validProb =
-    numOutcomes === 2
-      ? (Number.isFinite(seedProbNum) && seedProbNum >= 0.05 && seedProbNum <= 0.95)
-      : validMultiProbs;
+  const {
+    validSeed, validProb, validVig, validMultiProbs, seedFitsReserve, reserveBelowMinimum,
+    multiProbs, multiProbSum,
+  } = validateLockedOddsSeed({
+    seedSize, seedProbability, seedProbsMulti, vigOverride, reserveDeployable, numOutcomes,
+  });
 
   // Compose the opening seed pool — same logic as the API but client-side.
   // For 3+ outcomes we now use the admin's per-outcome probabilities
@@ -2645,7 +2713,13 @@ function LockedOddsConfigBlock(props: {
 
           {!seedFitsReserve && (
             <p className="text-[11px] text-red-400">
-              Seed exceeds deployable reserve. Reduce seed size or settle a market first.
+              {reserveBelowMinimum
+                // Below the ₦1,000 floor there is no seed size left to try —
+                // telling the admin to "reduce" it is advice that cannot be
+                // followed. Uncheck Locked-odds to fall back to a parimutuel
+                // market, which does not draw on the reserve at all.
+                ? `Reserve has ₦${Math.max(0, reserveDeployable ?? 0).toLocaleString()} deployable — below the ₦1,000 minimum seed. Settle a market to free up capital, or uncheck Locked-odds to create a parimutuel market instead.`
+                : 'Seed exceeds deployable reserve. Reduce seed size or settle a market first.'}
             </p>
           )}
         </div>
