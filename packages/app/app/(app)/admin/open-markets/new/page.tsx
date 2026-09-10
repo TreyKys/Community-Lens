@@ -47,6 +47,12 @@ const EVENT_HUBS: Record<string, Array<{ id: string; label: string }>> = {
   sport: SPORT_HUB_IDS.map(id => ({ id, label: SPORT_HUBS[id].label })),
 };
 
+// Mirrors submit_open_market's ceiling exactly (20260910000000) — a BBN
+// eviction or an NPFL title race can genuinely have this many live
+// candidates, where the old cap of 8 forced merging distinct people into
+// one bucket, which makes the resolved outcome ambiguous instead of clear.
+const MAX_OUTCOMES = 30;
+
 export default function AdminNewOpenMarketPage() {
   const { toast } = useToast();
   const router = useRouter();
@@ -68,6 +74,9 @@ export default function AdminNewOpenMarketPage() {
   const [eventTag, setEventTag] = useState<string | null>(null);
   const [createdBy, setCreatedBy] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Same paste-a-list convenience as /open/create — see the note there.
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkText, setBulkText] = useState('');
   // See the note above this field's input: the admin login here is one
   // shared secret with no per-person identity, so nothing else on this page
   // can tell the API who is submitting. Shares its localStorage key with the
@@ -96,6 +105,20 @@ export default function AdminNewOpenMarketPage() {
   const setKindAndOutcomes = (k: 'binary' | 'multi') => {
     setKind(k);
     setOutcomes(k === 'binary' ? ['Yes', 'No'] : ['', '', '']);
+    setBulkMode(false); setBulkText('');
+  };
+
+  const applyBulk = () => {
+    const lines = bulkText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return;
+    if (lines.length > MAX_OUTCOMES) {
+      toast({
+        title: `Only the first ${MAX_OUTCOMES} were kept`,
+        description: `That's the platform's max per market — you pasted ${lines.length}.`,
+      });
+    }
+    setOutcomes(lines.slice(0, MAX_OUTCOMES));
+    setBulkText(''); setBulkMode(false);
   };
 
   const cleanOutcomes = outcomes.map(o => o.trim()).filter(Boolean);
@@ -107,7 +130,7 @@ export default function AdminNewOpenMarketPage() {
   const problems: string[] = [];
   if (question.trim() && question.trim().length < 15) problems.push('Question is too short to be unambiguous.');
   if (cleanOutcomes.length < 2) problems.push('Needs at least two outcomes.');
-  if (cleanOutcomes.length > 8) problems.push('Maximum eight outcomes.');
+  if (cleanOutcomes.length > MAX_OUTCOMES) problems.push(`Maximum ${MAX_OUTCOMES} outcomes.`);
   if (duplicate) problems.push('Two outcomes are the same.');
   if (source.trim() && source.trim().length < 3) problems.push('Name the resolution source properly.');
   if (closesAt && new Date(closesAt).getTime() <= Date.now()) problems.push('Closing time is in the past.');
@@ -226,32 +249,69 @@ export default function AdminNewOpenMarketPage() {
         </div>
 
         <div className="space-y-1">
-          <p className="text-xs font-medium">Outcomes</p>
-          {outcomes.map((o, i) => (
-            <div key={i} className="flex gap-2">
-              <Input value={o} className="text-sm h-9"
-                     placeholder={`Option ${i + 1}`}
-                     disabled={kind === 'binary'}
-                     onChange={e => {
-                       const next = [...outcomes]; next[i] = e.target.value; setOutcomes(next);
-                     }} />
-              {kind === 'multi' && outcomes.length > 2 && (
-                <button className="text-muted-foreground hover:text-red-400 px-2"
-                        onClick={() => setOutcomes(outcomes.filter((_, x) => x !== i))}>
-                  <X className="w-4 h-4" />
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium">Outcomes</p>
+            {kind === 'multi' && (
+              <button type="button" className="text-[11px] text-emerald-400 hover:underline"
+                      onClick={() => { setBulkMode(v => !v); setBulkText(''); }}>
+                {bulkMode ? 'Type them one by one' : 'Paste a list instead'}
+              </button>
+            )}
+          </div>
+
+          {kind === 'multi' && bulkMode ? (
+            <div className="space-y-1.5">
+              <textarea
+                className="w-full text-sm bg-transparent border border-border rounded p-2 min-h-[160px] font-mono"
+                placeholder={'One outcome per line — e.g.\nKemi\nChidi\nTobi\nBoma\n…'}
+                value={bulkText}
+                onChange={e => setBulkText(e.target.value)}
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-muted-foreground">
+                  {bulkText.split('\n').map(l => l.trim()).filter(Boolean).length} line
+                  {bulkText.split('\n').map(l => l.trim()).filter(Boolean).length === 1 ? '' : 's'} · up to {MAX_OUTCOMES}
+                </p>
+                <Button type="button" size="sm" variant="outline" className="h-7 text-xs"
+                        disabled={bulkText.split('\n').map(l => l.trim()).filter(Boolean).length < 2}
+                        onClick={applyBulk}>
+                  Use these
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {outcomes.map((o, i) => (
+                <div key={i} className="flex gap-2">
+                  <Input value={o} className="text-sm h-9"
+                         placeholder={`Option ${i + 1}`}
+                         disabled={kind === 'binary'}
+                         onChange={e => {
+                           const next = [...outcomes]; next[i] = e.target.value; setOutcomes(next);
+                         }} />
+                  {kind === 'multi' && outcomes.length > 2 && (
+                    <button className="text-muted-foreground hover:text-red-400 px-2"
+                            onClick={() => setOutcomes(outcomes.filter((_, x) => x !== i))}>
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {kind === 'multi' && outcomes.length < MAX_OUTCOMES && (
+                <button className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:underline"
+                        onClick={() => setOutcomes([...outcomes, ''])}>
+                  <Plus className="w-3 h-3" /> Add another
                 </button>
               )}
-            </div>
-          ))}
-          {kind === 'multi' && outcomes.length < 8 && (
-            <button className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:underline"
-                    onClick={() => setOutcomes([...outcomes, ''])}>
-              <Plus className="w-3 h-3" /> Add another
-            </button>
+            </>
           )}
-          <p className="text-[10px] text-muted-foreground">
-            Exactly one must end up true — include &ldquo;none of these&rdquo; if that is possible.
-          </p>
+
+          {kind === 'multi' && (
+            <p className="text-[10px] text-muted-foreground">
+              {cleanOutcomes.length}/{MAX_OUTCOMES} outcomes · Exactly one must end up true — include
+              &ldquo;none of these&rdquo; if that is possible.
+            </p>
+          )}
         </div>
 
         <div className="space-y-1">

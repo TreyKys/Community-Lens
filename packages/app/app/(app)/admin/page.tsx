@@ -602,11 +602,18 @@ function LeaderboardPreviewPanel() {
 
 // ── Reserve health (locked-odds book monitoring) ────────────────────────
 //
-// Lights up only once there's at least one is_locked_odds market in
-// the system — admins not piloting locked-odds shouldn't see this at
-// all. Surfaces the dynamic-stake-cap regime so admins know what users
-// can currently stake.
+// The book-health stats grid lights up only once there's at least one
+// is_locked_odds market in the system — admins not piloting locked-odds
+// shouldn't see it. The top-up control below is NOT gated on that: capital
+// is exactly as needed when the reserve has been drained low enough that
+// every locked-odds market has already gone quiet, which is precisely the
+// state in which "there are zero open locked-odds markets" becomes true.
+// A control that hides itself the moment it's most needed is worse than no
+// control — this happened for real on 2026-09-08 (deployable had been at
+// ₦0 for 51 days) and the only fix available at the time was a hand-typed
+// SQL UPDATE.
 function ReserveHealthPanel() {
+  const { toast } = useToast();
   const [data, setData] = useState<{
     deployable: number;
     floor: number;
@@ -615,6 +622,18 @@ function ReserveHealthPanel() {
     openSlipLiability?: number;
     lockedOddsMarketCount: number;
   } | null>(null);
+  const [topupAmount, setTopupAmount] = useState('');
+  const [topupReason, setTopupReason] = useState('');
+  const [toppingUp, setToppingUp] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/reserve-health', { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      setData(d);
+    } catch { /* non-critical */ }
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -622,21 +641,47 @@ function ReserveHealthPanel() {
     // so we proxy through an admin-authenticated endpoint instead of
     // hitting the tables directly with the browser-side anon client.
     // Pattern matches /api/admin/owner-activity etc.
-    const load = async () => {
-      try {
-        const r = await fetch('/api/admin/reserve-health', { credentials: 'include' });
-        if (!r.ok) return;
-        const d = await r.json();
-        if (!alive) return;
-        setData(d);
-      } catch { /* non-critical */ }
-    };
-    const cleanup = pollWhileVisible(load, 60_000);
+    const wrapped = async () => { if (alive) await load(); };
+    const cleanup = pollWhileVisible(wrapped, 60_000);
     return () => { alive = false; cleanup(); };
-  }, []);
+  }, [load]);
 
-  // Hide entirely until there's a locked-odds market in play.
-  if (!data || data.lockedOddsMarketCount === 0) return null;
+  const submitTopup = async () => {
+    const amt = Number(topupAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      toast({ title: 'Enter a positive amount', variant: 'destructive' });
+      return;
+    }
+    if (topupReason.trim().length < 5) {
+      toast({ title: 'Say why this capital is being added', variant: 'destructive' });
+      return;
+    }
+    setToppingUp(true);
+    try {
+      const r = await fetch('/api/admin/reserve-health', {
+        method: 'POST',
+        headers: adminHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ action: 'topup', amountTngn: amt, reason: topupReason.trim() }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error || 'Top-up failed');
+      toast({
+        title: `Reserve topped up ₦${amt.toLocaleString()}`,
+        description: `Deployable is now ₦${Math.round(json.newDeployable).toLocaleString()}.`,
+      });
+      setTopupAmount(''); setTopupReason('');
+      load();
+    } catch (e: any) {
+      toast({ title: 'Top-up failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setToppingUp(false);
+    }
+  };
+
+  if (!data) return null;
+
+  const hasLockedOddsMarkets = data.lockedOddsMarketCount > 0;
 
   // Mirror the dynamic-cap schedule in lib/lockedOdds + the
   // place_bet_locked RPC. If these ever drift, update all three.
@@ -647,6 +692,59 @@ function ReserveHealthPanel() {
   const stressed = data.deployable < data.floor * 0.6;
 
   const f = (n: number) => `₦${Math.round(n).toLocaleString()}`;
+
+  const topupForm = (
+    <div className={cn('space-y-2', hasLockedOddsMarkets && 'pt-3 mt-3 border-t border-border/60')}>
+      <p className="text-[11px] font-medium flex items-center gap-1.5">
+        <Coins className="w-3.5 h-3.5 text-emerald-400" /> Top up reserve
+      </p>
+      <p className="text-[10px] text-muted-foreground">
+        Adds real capital to house_reserve.total_tngn — not a user credit, not a settlement.
+        Logged to treasury_log as reserve_topup with the reason below.
+      </p>
+      <div className="grid grid-cols-[1fr_2fr_auto] gap-2">
+        <Input
+          type="number" min={1} placeholder="Amount (₦)"
+          value={topupAmount} onChange={e => setTopupAmount(e.target.value)}
+          className="text-xs h-9"
+        />
+        <Input
+          placeholder="Reason (required)"
+          value={topupReason} onChange={e => setTopupReason(e.target.value)}
+          className="text-xs h-9"
+        />
+        <Button size="sm" disabled={toppingUp} onClick={submitTopup} className="bg-emerald-600 hover:bg-emerald-500">
+          {toppingUp ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Top up'}
+        </Button>
+      </div>
+    </div>
+  );
+
+  // No locked-odds markets currently open: skip the book-health stats grid
+  // (there is no book to report on) but still surface the raw reserve
+  // numbers and the top-up control — this is exactly the state a fully
+  // drained reserve can produce.
+  if (!hasLockedOddsMarkets) {
+    return (
+      <Card className={cn('border', data.deployable <= 0 ? 'border-red-500/40 bg-red-500/[0.04]' : 'border-border')}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-muted-foreground" />
+            House Reserve
+            <span className="text-[10px] font-normal text-muted-foreground ml-1">no locked-odds markets open right now</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-3 gap-3 mb-1">
+            <StatCard label="Deployable" value={f(data.deployable)} sub="Tier-2 spending capacity" icon={Coins} color={data.deployable <= 0 ? 'text-red-400' : 'text-emerald-400'} />
+            <StatCard label="Floor" value={f(data.floor)} sub="Untouchable buffer" icon={Shield} color="text-muted-foreground" />
+            <StatCard label="Total Reserve" value={f(data.total)} sub="Deployable + floor" icon={Coins} color="text-blue-400" />
+          </div>
+          {topupForm}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className={cn(
@@ -680,6 +778,7 @@ function ReserveHealthPanel() {
             Worst-case exposure exceeds deployable reserve. New Tier-2 stakes are tightening; settle a market to recover headroom.
           </p>
         )}
+        {topupForm}
       </CardContent>
     </Card>
   );
