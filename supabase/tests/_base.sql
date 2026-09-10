@@ -2,6 +2,33 @@
 -- engine touches. Deliberately mirrors the real column names and the real
 -- clamping behaviour of credit_user (GREATEST(0, ...)), because that clamp is
 -- what makes credit_user unsafe as a debit and the engine is built around it.
+
+-- Every migration in this repo GRANTs/REVOKEs against anon, authenticated
+-- and service_role — real Supabase projects provision these automatically,
+-- but a bare local Postgres cluster (this test harness's target) does not.
+-- Roles are cluster-level in Postgres, not per-database, so once a prior
+-- run on this same machine created them, dropdb/createdb between suites
+-- never touched them again — which is exactly why this was easy to miss:
+-- it only breaks the FIRST time run.sh executes against a genuinely fresh
+-- cluster (a new container, a wiped data directory), not on every run.
+-- Guarded so re-running this file on a cluster that already has them is a
+-- clean no-op rather than a duplicate_object error.
+DO $$
+BEGIN
+  CREATE ROLE anon NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+  CREATE ROLE authenticated NOLOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$
+BEGIN
+  CREATE ROLE service_role NOLOGIN BYPASSRLS;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 CREATE SCHEMA auth;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE auth.users(id uuid primary key);
