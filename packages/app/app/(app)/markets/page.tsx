@@ -3,6 +3,7 @@ import { MarketsBackdrop } from "@/components/MarketsBackdrop";
 import { MoversRail } from "@/components/MoversRail";
 import { PopularMarketsScroll } from "@/components/PopularMarketsScroll";
 import { CategoryTabs } from "@/components/CategoryTabs";
+import { CategoryTradingMarkets } from "@/components/CategoryTradingMarkets";
 import { MarketsToolbar } from "@/components/MarketsToolbar";
 import { Suspense } from "react";
 
@@ -23,6 +24,12 @@ export default function MarketsPage() {
           </Suspense>
           <Suspense fallback={null}>
             <CategoryTabs />
+          </Suspense>
+          {/* Trade markets for whichever category tab is selected — politics,
+              economy, etc. Renders nothing for tabs with no open_markets
+              equivalent (Trending, New, Crypto), so this is a no-op there. */}
+          <Suspense fallback={null}>
+            <CategoryTradingMarkets />
           </Suspense>
           <Suspense fallback={<div className="h-10 rounded-lg shimmer" />}>
             <MarketsToolbar />

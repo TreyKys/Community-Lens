@@ -127,5 +127,37 @@ BEGIN
     mkt_pending2, admin, now() + interval '10 days', NULL);
   PERFORM pg_temp.check('reschedule refused on a status other than open/horizon_window',
     NOT r.applied AND r.reason ILIKE '%pending_review%', r.reason);
+
+  ---------------------------------------------------------------- retag
+  -- Purely a display tag, so — unlike delete/reschedule — this must work
+  -- regardless of status: mkt_pending2 is still pending_review here.
+  SELECT * INTO r FROM public.admin_retag_open_market(mkt_pending2, NULL, 'bbn');
+  PERFORM pg_temp.check('retag refused with no admin id', NOT r.applied, r.reason);
+
+  SELECT * INTO r FROM public.admin_retag_open_market(gen_random_uuid(), admin, 'bbn');
+  PERFORM pg_temp.check('retag on a missing market reports not found', NOT r.applied AND r.reason = 'Market not found');
+
+  SELECT * INTO r FROM public.admin_retag_open_market(mkt_pending2, admin, 'BBN');
+  PERFORM pg_temp.check('retag works even on a pending_review market (no status restriction)',
+    r.applied AND r.event_tag = 'bbn', r.reason);
+  PERFORM pg_temp.check('the tag is lowercased and trimmed, matching submit_open_market',
+    (SELECT event_tag FROM public.open_markets WHERE id = mkt_pending2) = 'bbn');
+
+  SELECT metadata INTO logged FROM public.treasury_log
+   WHERE type = 'admin_alert' AND metadata->>'action' = 'open_market_retagged'
+     AND open_market_id = mkt_pending2;
+  PERFORM pg_temp.check('the retag left an audit row naming the admin and the old/new tag',
+    logged IS NOT NULL AND logged->>'admin_id' = admin::text
+      AND logged->>'previous_event_tag' IS NULL AND logged->>'new_event_tag' = 'bbn',
+    COALESCE(logged::text, 'none'));
+
+  SELECT * INTO r FROM public.admin_retag_open_market(mkt_pending2, admin, '  ');
+  PERFORM pg_temp.check('a blank tag clears it back to NULL', r.applied AND r.event_tag IS NULL, r.reason);
+  PERFORM pg_temp.check('event_tag is actually NULL, not an empty string',
+    (SELECT event_tag FROM public.open_markets WHERE id = mkt_pending2) IS NULL);
+
+  SELECT * INTO r FROM public.admin_retag_open_market(mkt_pending2, admin, NULL);
+  PERFORM pg_temp.check('retagging to the same value (still NULL) reports unchanged, not an error',
+    r.applied AND r.reason = 'unchanged');
 END
 $t$;

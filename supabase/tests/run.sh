@@ -40,6 +40,8 @@ MIGRATIONS=(
   20260907000000_open_markets_admin_controls
   20260909000000_admin_topup_house_reserve
   20260910000000_open_markets_raise_outcome_cap
+  20260911000000_open_markets_bonus_trading
+  20260912000000_open_markets_retag
 )
 
 psql_as() { su postgres -c "psql -v ON_ERROR_STOP=1 -q -d $DB $*"; }
@@ -58,7 +60,7 @@ done
 echo "migrations loaded: ${#MIGRATIONS[@]}"
 
 fail=0
-for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media purge_markets open_markets_solo_mode bonus_expiry open_markets_admin_controls house_reserve_topup open_markets_outcome_cap; do
+for suite in open_markets_e2e open_markets_cron open_markets_creator open_markets_event_tag open_markets_house_market streaks rewards push referral_streak social_media purge_markets open_markets_solo_mode bonus_expiry open_markets_admin_controls house_reserve_topup open_markets_outcome_cap open_markets_bonus_trading; do
   echo
   echo "── $suite ──"
   # Each suite gets a fresh database: they both create users and markets, and

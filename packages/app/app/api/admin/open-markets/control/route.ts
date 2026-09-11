@@ -195,6 +195,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ rescheduled: true });
     }
 
+    // event_tag only — purely display routing (which hub page shows this
+    // market), no trading or money implication, so unlike reschedule/delete
+    // it needs no status restriction. Send '' or omit to clear the tag.
+    case 'retag': {
+      const marketId = String(body?.marketId || '');
+      const eventTag = body?.eventTag != null ? String(body.eventTag) : null;
+      const { data, error } = await supabaseAdmin.rpc('admin_retag_open_market', {
+        p_market_id: marketId,
+        p_admin_id: adminId,
+        p_event_tag: eventTag,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.applied) return NextResponse.json({ error: row?.reason || 'Could not retag' }, { status: 400 });
+      return NextResponse.json({ retagged: true, eventTag: row.event_tag });
+    }
+
     // The category allowlist. Read everywhere submit_open_market and
     // review_open_market check it; written nowhere until now — every
     // category live today was added by hand in a migration.
