@@ -321,7 +321,17 @@ export default function AdminNewOpenMarketPage() {
               <button key={c.id}
                       className={`px-3 py-1.5 rounded-full border text-[11px] transition-colors duration-150 ${
                         category === c.id ? 'border-emerald-500 bg-emerald-500/10' : 'border-border'}`}
-                      onClick={() => { setCategory(c.id); setEventTag(null); }}>
+                      onClick={() => {
+                        setCategory(c.id);
+                        // Pre-select the hub when there's exactly one for this
+                        // category — a BBN market with no event_tag only ever
+                        // shows up at /open, never on /bbn, and that used to be
+                        // a silent, easy-to-miss extra click rather than the
+                        // default. Left null when a category has several hubs
+                        // (e.g. 'sport'), since guessing which one is wrong.
+                        const hubs = EVENT_HUBS[c.id];
+                        setEventTag(hubs?.length === 1 ? hubs[0].id : null);
+                      }}>
                 {c.label}
               </button>
             ))}
@@ -330,9 +340,7 @@ export default function AdminNewOpenMarketPage() {
 
         {category && EVENT_HUBS[category] && (
           <div className="space-y-1">
-            <p className="text-xs font-medium">
-              Also feature on a hub <span className="text-muted-foreground font-normal">(optional)</span>
-            </p>
+            <p className="text-xs font-medium">Also feature on a hub</p>
             <div className="flex flex-wrap gap-2">
               {EVENT_HUBS[category].map(h => (
                 <button key={h.id}
@@ -343,6 +351,11 @@ export default function AdminNewOpenMarketPage() {
                 </button>
               ))}
             </div>
+            <p className="text-[10px] text-muted-foreground">
+              {eventTag
+                ? 'On that hub page too, on top of the general trading list.'
+                : 'Off — this will only show at /open, not on that hub. Tap it to turn on.'}
+            </p>
           </div>
         )}
 

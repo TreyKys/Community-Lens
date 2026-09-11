@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import { useUser } from '@/components/UserContext';
 import { Loader2, ChevronLeft, TrendingUp, TrendingDown, Info, Share2, Flag } from 'lucide-react';
 
 // Open market page: live probability, buy/sell, and an honest order ticket.
@@ -41,7 +42,7 @@ type Mkt = {
 type Tick = { outcomeIdx: number; price: number; shares: number; at: string };
 type CtxItem = { title: string; body: string };
 type Pos = { positionId: string; outcomeIdx: number; outcomeLabel: string;
-  shares: number; costBasisTngn: number; markValueTngn: number; unrealisedPnlTngn: number };
+  shares: number; sharesSellable: number; costBasisTngn: number; markValueTngn: number; unrealisedPnlTngn: number };
 
 const ngn = (n: number) => `₦${Math.round(n).toLocaleString()}`;
 const pct = (p: number) => `${(p * 100).toFixed(1)}%`;
@@ -58,6 +59,7 @@ function relTime(iso: string): string {
 
 export default function OpenMarketPage({ params }: { params: { id: string } }) {
   const { toast } = useToast();
+  const { user, refreshUser } = useUser();
   const [mkt, setMkt] = useState<Mkt | null>(null);
   const [positions, setPositions] = useState<Pos[]>([]);
   const [history, setHistory] = useState<Tick[]>([]);
@@ -224,6 +226,7 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
       newTradeId();          // next order gets a fresh key
       setAmount(''); setBudget(''); setQuote(null);
       load();
+      refreshUser();          // balance just moved (cash, bonus, or both)
     } catch (e: any) {
       toast({ title: 'Trade failed', description: e.message, variant: 'destructive' });
     } finally { setPlacing(false); }
@@ -364,7 +367,14 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
             <p className="text-xs text-muted-foreground">Your position</p>
             {positions.map(p => (
               <div key={p.positionId} className="flex items-center justify-between text-sm">
-                <span>{Math.round(p.shares).toLocaleString()} × {p.outcomeLabel}</span>
+                <span>
+                  {Math.round(p.shares).toLocaleString()} × {p.outcomeLabel}
+                  {p.sharesSellable < p.shares && (
+                    <span className="ml-1.5 text-[9px] uppercase text-muted-foreground align-middle">
+                      {p.sharesSellable <= 0 ? 'bonus' : 'part bonus'}
+                    </span>
+                  )}
+                </span>
                 <span className={`tabular ${p.unrealisedPnlTngn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {p.unrealisedPnlTngn >= 0 ? '▲' : '▼'} {ngn(Math.abs(p.unrealisedPnlTngn))}
                 </span>
@@ -396,7 +406,7 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
                 <TrendingUp className="w-4 h-4 mr-1" /> Buy
               </Button>
               <Button variant={side === 'sell' ? 'default' : 'outline'} size="sm"
-                      onClick={() => setSide('sell')} disabled={!held}
+                      onClick={() => setSide('sell')} disabled={!held || held.sharesSellable <= 0}
                       className={side === 'sell' ? 'bg-red-600 hover:bg-red-500' : ''}>
                 <TrendingDown className="w-4 h-4 mr-1" /> Sell
               </Button>
@@ -416,9 +426,17 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
                 the proceeds depend on how far your own sale moves the price. */}
             {side === 'buy' ? (
               <div className="space-y-2">
-                <label className="text-[11px] text-muted-foreground">
-                  How much on <span className="text-foreground/80">{mkt.outcomes[outcomeIdx]}</span>?
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-muted-foreground">
+                    How much on <span className="text-foreground/80">{mkt.outcomes[outcomeIdx]}</span>?
+                  </label>
+                  {user && (
+                    <span className="text-[11px] text-muted-foreground tabular">
+                      {ngn(user.tngn_balance)}
+                      {user.bonus_balance > 0 && <> + {ngn(user.bonus_balance)} bonus</>} available
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₦</span>
                   <Input type="number" inputMode="numeric" placeholder="Amount (min ₦100)"
@@ -445,20 +463,35 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
                       : 'Too small to place — try at least ₦100.'}
                   </p>
                 )}
+                {(user?.bonus_balance ?? 0) > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Your cash covers this first; bonus tops up the rest. Shares bought with bonus can be
+                    won or lost like any other, but can&rsquo;t be sold back for cash — only cash-funded
+                    shares can.
+                  </p>
+                )}
               </div>
             ) : (
             <div className="space-y-2">
               <label className="text-[11px] text-muted-foreground">
                 Sell <span className="text-foreground/80">{mkt.outcomes[outcomeIdx]}</span>
-                {held && <> · you hold {Math.round(held.shares).toLocaleString()}</>}
+                {held && <> · you hold {Math.round(held.shares).toLocaleString()}
+                  {held.sharesSellable < held.shares && <> ({Math.round(held.sharesSellable).toLocaleString()} sellable)</>}</>}
               </label>
               <Input type="number" inputMode="numeric" placeholder="Shares to sell"
+                     max={held ? held.sharesSellable : undefined}
                      value={amount} onChange={e => setAmount(e.target.value)} />
+              {held && held.sharesSellable < held.shares && (
+                <p className="text-[10px] text-muted-foreground">
+                  {Math.round(held.shares - held.sharesSellable).toLocaleString()} of these shares were bought with
+                  bonus balance, so they can&rsquo;t be sold for cash — they&rsquo;ll settle when this market resolves.
+                </p>
+              )}
               <div className="flex flex-wrap gap-1.5">
                 {[25, 50, 100].map(p => (
                   <button key={p} type="button"
-                          disabled={!held}
-                          onClick={() => held && setAmount(String(Math.floor(held.shares * p / 100)))}
+                          disabled={!held || held.sharesSellable <= 0}
+                          onClick={() => held && setAmount(String(Math.floor(held.sharesSellable * p / 100)))}
                           className="px-2.5 py-1 rounded-full border border-border/60 text-[11px] text-muted-foreground hover:border-red-500/40 disabled:opacity-40">
                     {p === 100 ? 'All' : `${p}%`}
                   </button>

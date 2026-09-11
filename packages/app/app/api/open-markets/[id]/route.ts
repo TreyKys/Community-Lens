@@ -56,30 +56,39 @@ export async function GET(request: Request, { params }: { params: { id: string }
   if (user) {
     const { data: pos } = await supabaseAdmin
       .from('open_positions')
-      .select('id, outcome_idx, shares_cash, shares_bonus, cost_cash, status')
+      .select('id, outcome_idx, shares_cash, shares_bonus, cost_cash, cost_bonus, status')
       .eq('market_id', params.id)
       .eq('user_id', user.id)
-      .gt('shares_cash', 0)
       .returns<OpenPositionRow[]>();
 
-    position = (pos || []).map(p => {
-      const shares = Number(p.shares_cash) + Number(p.shares_bonus);
-      const basis = Number(p.cost_cash);
-      const markValue = shares * prices[p.outcome_idx];
-      return {
-        positionId: p.id,
-        outcomeIdx: p.outcome_idx,
-        outcomeLabel: m.outcomes[p.outcome_idx],
-        shares,
-        costBasisTngn: basis,
-        // Mark-to-market. Deliberately labelled as an estimate in the UI:
-        // actually exiting moves the price against you, and the quote endpoint
-        // is the only place that tells the truth about what a sale realises.
-        markValueTngn: markValue,
-        unrealisedPnlTngn: markValue - basis,
-        status: p.status,
-      };
-    });
+    position = (pos || [])
+      // A position can now hold bonus-only shares with shares_cash at 0, so
+      // the DB-level filter this used to be (.gt('shares_cash', 0)) would
+      // hide a bonus-only holding entirely. Filter on the combined total.
+      .filter(p => Number(p.shares_cash) + Number(p.shares_bonus) > 0)
+      .map(p => {
+        const sharesCash = Number(p.shares_cash);
+        const shares = sharesCash + Number(p.shares_bonus);
+        const basis = Number(p.cost_cash) + Number(p.cost_bonus);
+        const markValue = shares * prices[p.outcome_idx];
+        return {
+          positionId: p.id,
+          outcomeIdx: p.outcome_idx,
+          outcomeLabel: m.outcomes[p.outcome_idx],
+          shares,
+          // Bonus-funded shares are never sellable for cash (see the header
+          // comment on execute_open_trade) — the ticket needs this to cap a
+          // sell input and to explain why "sell all" can leave a residual.
+          sharesSellable: sharesCash,
+          costBasisTngn: basis,
+          // Mark-to-market. Deliberately labelled as an estimate in the UI:
+          // actually exiting moves the price against you, and the quote endpoint
+          // is the only place that tells the truth about what a sale realises.
+          markValueTngn: markValue,
+          unrealisedPnlTngn: markValue - basis,
+          status: p.status,
+        };
+      });
   }
 
   return NextResponse.json({

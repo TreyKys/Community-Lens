@@ -36,7 +36,13 @@ export async function GET(request: Request) {
 
   // Filter BEFORE .returns(): that call closes the builder, so any .eq() after
   // it no longer type-checks.
-  if (category) base = base.eq('category', category);
+  // A comma splits into a multi-category match — used by the /markets
+  // "Trade this category" rail, where one tab (e.g. "Everything Economy")
+  // covers more than one open_markets.category value.
+  if (category) {
+    const cats = category.split(',').map(c => c.trim()).filter(Boolean);
+    base = cats.length > 1 ? base.in('category', cats) : base.eq('category', cats[0] ?? category);
+  }
   // Hub pages (e.g. /bbn) pass this instead of/alongside category — it's the
   // engine-agnostic routing tag, independent of the locked-odds sport/
   // league_code mechanism this table doesn't have.

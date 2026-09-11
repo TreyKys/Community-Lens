@@ -63,6 +63,8 @@ export default function OpenMarketsControlPage() {
   const [rescheduleClose, setRescheduleClose] = useState('');
   const [rescheduleHorizon, setRescheduleHorizon] = useState('');
   const [deleteReason, setDeleteReason] = useState('');
+  const [retagOpenId, setRetagOpenId] = useState<string | null>(null);
+  const [retagValue, setRetagValue] = useState('');
 
   useEffect(() => {
     fetch('/api/admin/auth').then(r => { if (r.ok) setIsAdmin(true); }).finally(() => setChecking(false));
@@ -397,6 +399,17 @@ export default function OpenMarketsControlPage() {
                         Go to resolve →
                       </Link>
                     )}
+                    {/* Purely a display tag — no trading/money implication —
+                        so it's offered regardless of status, unlike
+                        reschedule/delete. */}
+                    <button className="text-muted-foreground hover:underline inline-flex items-center gap-1"
+                            onClick={() => {
+                              const next = retagOpenId === m.id ? null : m.id;
+                              setRetagOpenId(next);
+                              if (next) setRetagValue(m.eventTag || '');
+                            }}>
+                      🏷 {m.eventTag ? `Hub: ${m.eventTag}` : 'No hub'}
+                    </button>
                     {!m.hasActivity && ['pending_review', 'revise', 'rejected', 'open'].includes(m.status) && (
                       <button className="text-red-400 hover:underline inline-flex items-center gap-1 ml-auto"
                               onClick={() => { setExpanded(isOpen ? null : m.id); setDeleteReason(''); }}>
@@ -437,6 +450,25 @@ export default function OpenMarketsControlPage() {
                               className="border-red-500/40 text-red-400 hover:bg-red-500/10"
                               onClick={() => actControl({ action: 'delete', marketId: m.id, reason: deleteReason.trim() }, 'Deleted')}>
                         Permanently delete
+                      </Button>
+                    </div>
+                  )}
+
+                  {retagOpenId === m.id && (
+                    <div className="pt-2 border-t border-border/60 space-y-2">
+                      <p className="text-[10px] text-muted-foreground">
+                        Which hub page this market also shows on (e.g. <code>bbn</code>, <code>football</code>) — on
+                        top of the general <Link href="/open" className="underline">/open</Link> list, never instead
+                        of it. Blank clears it, so it shows on /open only.
+                      </p>
+                      <Input value={retagValue} onChange={e => setRetagValue(e.target.value)}
+                             placeholder="e.g. bbn — blank to clear" className="text-xs h-8" />
+                      <Button size="sm" disabled={!!busy || !adminId.trim()}
+                              onClick={async () => {
+                                const ok = await actControl({ action: 'retag', marketId: m.id, eventTag: retagValue.trim() }, 'Retagged');
+                                if (ok) setRetagOpenId(null);
+                              }}>
+                        Save hub tag
                       </Button>
                     </div>
                   )}
