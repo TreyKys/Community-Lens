@@ -642,7 +642,7 @@ function MultiplierQuickPick({ market }: { market: Market }) {
   const cleanQ = market.question.replace(/\[.*?\]\s*/g, '').trim();
 
   return (
-    <div className="mb-3 rounded-md border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-2 flex items-center gap-2 flex-wrap">
+    <div className="mb-2 rounded-md border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5 flex items-center gap-2 flex-wrap">
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-violet-300/90 font-semibold">
         <Layers className="w-3 h-3" /> Multiplier
       </div>
@@ -775,20 +775,42 @@ function MarketCard({
       {leadColor && <div className="absolute inset-x-0 top-0 h-[3px]" style={{ background: leadColor }} />}
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-      <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
-        {/* The league/category tag. This was already in the data and already
-            being thrown away: questions arrive as "[PL] Arsenal vs Chelsea"
-            and cleanQuestion strips the bracket so the title reads properly.
-            Stripping it was right; DELETING it was the waste — put back as a
-            tag it tells you which competition you're looking at without
-            lengthening the headline. Falls back to the category when a
-            market carries no bracket. */}
-        {tagLabel && (
-          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-            {tagLabel}
+      <CardHeader className="p-3.5 md:p-4 pb-2 md:pb-2 relative z-10">
+        {/* One meta line: the league/category tag, the clock, and the pool
+            once it's allowed to show. These were three separate blocks
+            stacked down the card — same information, a third of the height.
+            The tag itself was already in the data and being thrown away:
+            questions arrive as "[PL] Arsenal vs Chelsea" and cleanQuestion
+            strips the bracket so the title reads properly. Stripping it was
+            right; DELETING it was the waste. Category is the fallback. */}
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70 min-w-0">
+          {tagLabel && (
+            <span className="font-semibold uppercase tracking-[0.14em] truncate max-w-[50%]">
+              {tagLabel}
+            </span>
+          )}
+          {tagLabel && <span className="opacity-40 shrink-0">·</span>}
+          <span className="flex items-center gap-1 shrink-0">
+            <Clock className="w-3 h-3" />
+            {isResolved || isLocked
+              ? `Closed ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`
+              : `Closes ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+            }
           </span>
-        )}
-        <div className="flex justify-between items-start gap-3">
+          {/* Pool stays hidden until the market locks or resolves — a small
+              pool pre-lock looks weak and tips traders off. Unchanged rule,
+              it just lives on this line now. */}
+          {(isLocked || isResolved) && (
+            <>
+              <span className="opacity-40 shrink-0">·</span>
+              <span className="flex items-center gap-1 min-w-0">
+                <TrendingUp className="w-3 h-3 shrink-0" />
+                <span className="truncate">₦{getDisplayPool(market.total_pool).toLocaleString()}</span>
+              </span>
+            </>
+          )}
+        </div>
+        <div className="flex justify-between items-start gap-3 mt-1">
           <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug min-w-0">
             <span className="min-w-0 whitespace-pre-wrap break-words">{displayQuestion}</span>
           </CardTitle>
@@ -824,34 +846,17 @@ function MarketCard({
         )}
       </CardHeader>
 
-      <CardContent className="px-4 md:px-6 pb-4 md:pb-6 relative z-10">
+      <CardContent className="px-3.5 md:px-4 pb-3 md:pb-4 relative z-10">
         {/* Resolved outcome */}
         {isResolved && resolvedOption && (
-          <div className="flex items-center gap-2 mb-3 text-sm">
+          <div className="flex items-center gap-2 mb-2 text-sm">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="text-emerald-400 font-medium">Result: {resolvedOption}</span>
           </div>
         )}
 
-        {/* Pool + deadline — wraps on narrow phones so neither label gets cut off.
-            Pool tNGN is hidden until the market locks/resolves: showing a small
-            pool pre-lock looks weak and tips traders off. Once locked the
-            number is no longer actionable, so it's safe to reveal. */}
-        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground mt-1 mb-3">
-          {(isLocked || isResolved) && (
-            <span className="flex items-center gap-1 min-w-0">
-              <TrendingUp className="w-3 h-3 shrink-0" />
-              <span className="truncate">Pool: ₦{getDisplayPool(market.total_pool).toLocaleString()} tNGN</span>
-            </span>
-          )}
-          <span className="flex items-center gap-1 shrink-0">
-            <Clock className="w-3 h-3" />
-            {isResolved || isLocked
-              ? `Closed ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`
-              : `Closes ${closesAt.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-            }
-          </span>
-        </div>
+        {/* Pool + deadline used to sit here as their own row. Same data, now
+            on the header's meta line above — moved, not dropped. */}
 
         {/* "Where it's leaning" — always visible, even collapsed. This used
             to be the biggest gap between the two staking modes: an Open
@@ -870,7 +875,7 @@ function MarketCard({
             : market.options.map(() => 1 / market.options.length);
           const colors = outcomeColorsFor(market.options);
           return (
-            <div className="mb-3 space-y-2">
+            <div className="mb-2 space-y-2">
               <div className="flex h-2 w-full gap-0.5">
                 {shares.map((s, i) => (
                   <div key={i}
@@ -924,7 +929,7 @@ function MarketCard({
 
         {/* On-chain verification badge */}
         {market.merkle_root && (
-          <div className="flex items-center gap-1.5 text-xs text-emerald-400/70 mb-3">
+          <div className="flex items-center gap-1.5 text-xs text-emerald-400/70 mb-2">
             <Lock className="w-3 h-3" />
             <span>Prediction ledger sealed on Polygon</span>
           </div>
@@ -963,7 +968,7 @@ function MarketCard({
         )}
       </CardContent>
 
-      <CardFooter className="px-4 md:px-6 pb-4 md:pb-6 pt-0 flex gap-2 relative z-10">
+      <CardFooter className="px-3.5 md:px-4 pb-3 md:pb-4 pt-0 flex gap-2 relative z-10">
         {/* Desktop place bet */}
         <div className="hidden md:flex gap-2 w-full">
           {isOpen && !isExpanded && (
@@ -1520,6 +1525,12 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
 
   return (
     <div className="space-y-3">
+      {/* Two-up from tablet width. A market card is nowhere near wide enough
+          to justify a full desktop row on its own — one question per line
+          meant four markets filled a 1440px screen. Phones stay single
+          column: at 390px a second column would cut every question in half,
+          which costs more than the scrolling it saves. */}
+      <div className="grid gap-3 md:grid-cols-2">
       {markets.map((market) => {
         const isPickTarget = stakeIntent?.type === 'bet' && Number(stakeIntent.marketId) === Number(market.id);
         return (
@@ -1552,6 +1563,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           />
         );
       })}
+      </div>
 
       {/* Auto-share prompt after a bet places successfully. The user
           just made a pick — surface the OPx Picks share modal so they

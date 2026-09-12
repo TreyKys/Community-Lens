@@ -74,7 +74,10 @@ export function CategoryTradingMarkets() {
           {[0, 1].map(i => <div key={i} className="h-28 rounded-xl shimmer" />)}
         </div>
       ) : (
-        <div className="space-y-3">
+        // Two-up from tablet, matching the locked-odds list below it — the
+        // two feeds sit on the same page, so one of them running full-width
+        // rows while the other pairs up would read as a layout bug.
+        <div className="grid gap-3 md:grid-cols-2">
           {rows.map(m => <OpenMarketCard key={m.id} market={m} hideCategory />)}
         </div>
       )}
