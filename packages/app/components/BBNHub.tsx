@@ -20,7 +20,6 @@ const TAG_ICON: Record<string, typeof Trophy> = {
   twist: Zap,
 };
 
-const ngn = (n: number) => `₦${Math.round(n).toLocaleString()}`;
 
 // Big Brother Naija hub — deliberately NOT a reskin of /football.
 //
@@ -237,12 +236,6 @@ function BBNHero({ openCount, upcomingCount, poolTngn }: {
               <span className="font-semibold tabular">{upcomingCount}</span>
               <span className="text-white/60 ml-1.5">closing this week</span>
             </div>
-            {poolTngn > 0 && (
-              <div className="px-3 py-1.5 rounded-md bg-amber-500/10 backdrop-blur ring-1 ring-amber-500/20 text-amber-200">
-                <span className="font-semibold tabular">{ngn(poolTngn)}</span>
-                <span className="text-amber-200/60 ml-1.5">staked</span>
-              </div>
-            )}
           </div>
         </div>
       </div>

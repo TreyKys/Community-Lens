@@ -920,9 +920,6 @@ function MarketCard({
                   </span>
                 )}
               </div>
-              {totalStaked === 0 && (
-                <p className="text-[9px] text-muted-foreground/60">No predictions yet — be the first</p>
-              )}
             </div>
           );
         })()}
