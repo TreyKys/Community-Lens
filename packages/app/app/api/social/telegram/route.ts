@@ -5,14 +5,15 @@ import {
   answerCallback, markCardHandled, notify, sendReplyCard,
   sendDraftCard, markDraftHandled,
   sendPreviewCard, refreshPreviewCard, sendPhotoPreview,
+  sendReadyCard, markReadyHandled, swapReadyCardPhoto,
 } from '@/lib/social/telegram';
 import {
   setMedia, autoCardUrl, awaitMediaFor, clearAwaitingMedia, pendingMediaPost,
 } from '@/lib/social/media';
 import { handleCommand, isMultiMessageCommand, commandName } from '@/lib/social/commands';
 import { parseBrief, draftFromBrief } from '@/lib/social/brief';
+import { makeReadyPost } from '@/lib/social/ready';
 import { nextFreeSlot, formatSlot } from '@/lib/social/slots';
-import { randomThemeId } from '@/lib/social/cardText';
 import { ingestShared } from '@/lib/social/ingest';
 import { getSettings } from '@/lib/social/settings';
 import { draftReply } from '@/lib/social/reply';
@@ -183,44 +184,10 @@ async function handleDraft(raw: string): Promise<void> {
     ).catch(() => {});
   }
 
-  const supa = getSupabaseAdmin();
   let sent = 0;
-
   for (const body of result.drafts) {
-    const { data: row, error } = await supa
-      .from('social_posts')
-      .insert({
-        channel: 'x',
-        kind: 'briefed',
-        body,
-        brief: req.brief,
-        status: 'draft',      // outside the queue — cannot publish
-        scheduled_at: null,   // a slot is chosen when you tap Queue
-        priority: 50,         // ahead of evergreen filler once queued
-        // Fixed now, not at render time, so the card the operator
-        // approves in /preview is the one that publishes.
-        card_theme: randomThemeId(),
-      })
-      .select('id')
-      .single();
-
-    if (error || !row) continue;
-
-    const messageId = await sendDraftCard({
-      postId: row.id,
-      index: sent + 1,
-      total: result.drafts.length,
-      body,
-    });
-
-    // Reuse provider_post_id to remember which card to edit later. It
-    // is null until publish, and a draft has no provider id yet.
-    await supa
-      .from('social_posts')
-      .update({ provider_post_id: `tg:${messageId}` })
-      .eq('id', row.id);
-
-    sent++;
+    const id = await makeReadyPost({ body, kind: 'briefed', brief: req.brief });
+    if (id) sent++;
   }
 
   if (result.rejected.length) {
@@ -231,32 +198,32 @@ async function handleDraft(raw: string): Promise<void> {
   }
 }
 
-/** Re-send anything still sitting undecided. */
+/** Re-send anything still sitting undecided, as fresh ready cards. */
 async function handlePendingDrafts(): Promise<void> {
   const supa = getSupabaseAdmin();
   const { data } = await supa
     .from('social_posts')
-    .select('id, body, brief')
+    .select('id, body, media_url')
     .eq('status', 'draft')
     .order('created_at', { ascending: true })
-    .limit(10);
+    .limit(20);
 
   if (!data?.length) {
     await notify(`No drafts waiting. <code>/draft 4 BBN posts</code> to write some.`);
     return;
   }
 
-  for (let i = 0; i < data.length; i++) {
-    const messageId = await sendDraftCard({
-      postId: data[i].id,
-      index: i + 1,
-      total: data.length,
-      body: String(data[i].body),
-    });
-    await supa
-      .from('social_posts')
-      .update({ provider_post_id: `tg:${messageId}` })
-      .eq('id', data[i].id);
+  await notify(`<b>${data.length} still waiting on a decision.</b>`);
+
+  for (const row of data) {
+    const messageId = await sendReadyCard({
+      postId: row.id,
+      body: String(row.body),
+      mediaUrl: (row as any).media_url ?? undefined,
+    }).catch(() => 0);
+    if (messageId) {
+      await supa.from('social_posts').update({ provider_post_id: `tg:${messageId}` }).eq('id', row.id);
+    }
   }
 }
 
@@ -305,6 +272,58 @@ async function decideDraft(postId: number, queue: boolean): Promise<string> {
   const when = formatSlot(slot);
   if (messageId) await markDraftHandled(messageId, 'queued', when).catch(() => {});
   return `Queued ${when} — /preview to add an image`;
+}
+
+/**
+ * Posted / Own image / Discard on a ready card — the entire lifecycle
+ * of a manually-posted post. There is no schedule to assign; the only
+ * question is whether the operator has acted on it yet.
+ */
+async function decideReady(postId: number, action: string): Promise<string> {
+  const supa = getSupabaseAdmin();
+
+  const { data: post } = await supa
+    .from('social_posts')
+    .select('id, provider_post_id, status')
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (!post || post.status !== 'draft') return 'Already handled';
+  const messageId = Number(String(post.provider_post_id ?? '').replace(/^tg:/, '')) || 0;
+
+  if (action === 'rdisc') {
+    const { data: updated } = await supa
+      .from('social_posts')
+      .update({ status: 'cancelled' })
+      .eq('id', postId)
+      .eq('status', 'draft')
+      .select('id');
+    if (!updated?.length) return 'Already handled';
+    if (messageId) await markReadyHandled(messageId, 'discarded').catch(() => {});
+    return 'Discarded';
+  }
+
+  if (action === 'rpost') {
+    // 'manual' rather than a real X post id — there is no X call here.
+    // provider_post_id keeps meaning "how this actually went out" for
+    // both mechanisms, so a future report over this table does not
+    // need a second column to tell manual posts from API ones.
+    const { data: updated } = await supa
+      .from('social_posts')
+      .update({ status: 'published', published_at: new Date().toISOString(), provider_post_id: 'manual' })
+      .eq('id', postId)
+      .eq('status', 'draft')      // compare-and-set: a double tap is a no-op
+      .select('id');
+    if (!updated?.length) return 'Already handled';
+    if (messageId) await markReadyHandled(messageId, 'posted').catch(() => {});
+    return 'Marked posted ✅';
+  }
+
+  // rup — arm the upload window; the reply-to-message path also works
+  // without this, but not every phone keyboard makes "reply" easy to
+  // reach, so the button is the fallback that always works.
+  await awaitMediaFor(postId);
+  return 'Send the photo now (10 min window)';
 }
 
 const escapeHtml = (s: string) =>
@@ -465,15 +484,35 @@ async function handlePhoto(update: any): Promise<void> {
   if (!postId) {
     await notify(
       `Got the photo, but I don't know which post it's for.\n\n` +
-      `Tap <b>📤 Upload</b> on a post in /preview first, or reply to that post's card with the photo.`,
+      `Tap <b>📤 Own image</b> on a card first, or reply to that card with the photo.`,
     );
     return;
   }
 
+  const { data: post } = await supa
+    .from('social_posts')
+    .select('id, status, body, provider_post_id')
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (!post) return;
+
   await setMedia(postId, 'upload', { fileId });
   await clearAwaitingMedia();
-  await refreshOne(postId);
-  await notify(`Attached your image to <b>#${postId}</b>.`);
+
+  const messageId = Number(String((post as any).provider_post_id ?? '').replace(/^tg:/, '')) || 0;
+
+  // 'queued' rows are the OLD text-card /preview flow, edited with
+  // editMessageText. Every new draft is a photo message from the
+  // start, so it needs editMessageMedia instead — editMessageText
+  // rejects an attempt to edit a photo message's text outright.
+  if ((post as any).status === 'queued') {
+    await refreshOne(postId);
+  } else if (messageId) {
+    await swapReadyCardPhoto(messageId, postId, fileId, String((post as any).body ?? '')).catch(async (e: any) => {
+      await notify(`Image saved for #${postId}, but I couldn't update the card: ${String(e?.message).slice(0, 150)}`);
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -584,6 +623,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
     const outcome = await decideDraft(targetId, action === 'qpost');
+    await answerCallback(cb.id, outcome).catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
+  // Ready cards — Posted / Own image / Discard. This is the primary
+  // loop now: /draft and the digest cron both land here.
+  if (['rpost', 'rup', 'rdisc'].includes(action)) {
+    if (!Number.isFinite(targetId)) {
+      await answerCallback(cb.id, 'Nothing to do').catch(() => {});
+      return NextResponse.json({ ok: true });
+    }
+    const outcome = await decideReady(targetId, action);
     await answerCallback(cb.id, outcome).catch(() => {});
     return NextResponse.json({ ok: true });
   }

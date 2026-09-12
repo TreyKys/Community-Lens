@@ -1,0 +1,35 @@
+name: Cron — Social Digest
+
+# Four bursts a day — the same hours the old scheduled planner used to
+# publish at, now used as review times instead. Each run writes a batch
+# of posts (BBN, football, the site's own markets) and pushes every one
+# straight to Telegram as a ready-to-post card: image, caption, and
+# Posted / Own image / Discard buttons.
+#
+# Nothing here touches the X API. The operator posts each one
+# themselves from the X app, in their own voice, whenever they get to
+# their phone — which is also why this costs nothing to run: there is
+# no metered call anywhere in this path, so no budget, no spend cap, no
+# developer keys required for posting at all.
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-social-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write today's burst and notify
+        run: |
+          curl -sSf --max-time 290 -X POST "${{ secrets.API_BASE_URL }}/api/social/digest" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

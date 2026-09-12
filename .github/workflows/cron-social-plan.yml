@@ -1,14 +1,25 @@
 name: Cron — Social Plan
 
-# Builds the day's post queue from live markets. Runs at 05:00 UTC
-# (06:00 WAT) so the queue is ready before the first 07:00 UTC slot.
+# SCHEDULE DELIBERATELY DISABLED — manual trigger only.
 #
-# Costs nothing against the X budget — planning only touches Supabase
-# and Gemini. Publishing is a separate workflow on purpose.
+# This built the day's post queue and scheduled each one for the X API
+# to auto-publish at a fixed time. That whole model — scheduled,
+# unattended, posted via the metered API — is superseded by
+# cron-social-digest.yml: the operator now posts everything themselves,
+# which is also what makes the pipeline free (nothing here calls X's
+# metered API at all, so there is nothing to budget or get developer
+# keys for).
+#
+# This route is kept, not deleted, because it is a working
+# implementation and the trade flips back if X posting is ever worth
+# automating again — e.g. once there is real distribution and the
+# metered cost is worth paying for guaranteed timing. To bring it back:
+# restore the schedule below AND cron-social-publish.yml's.
+#
+#   schedule:
+#     - cron: '0 5 * * *'
 
 on:
-  schedule:
-    - cron: '0 5 * * *'
   workflow_dispatch:
 
 concurrency:

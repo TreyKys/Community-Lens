@@ -144,6 +144,35 @@ export async function marketContext(limit = 8): Promise<string> {
 
 
 /**
+ * Bodies already posted (or drafted) for this exact brief recently.
+ *
+ * The digest cron runs the SAME topic brief four times a day
+ * (topics.ts). Without this, the 12:00 run rediscovers whatever the
+ * 07:00 run already found — research over a rolling window returns
+ * mostly the same facts — and writes a near-duplicate post about it.
+ *
+ * Matched by exact brief string, so an ad hoc /draft typed slightly
+ * differently just does not collide with anything. That is fine: this
+ * is a targeted guard against the specific repeat that four-times-daily
+ * automation on a fixed brief causes, not a general dedupe system.
+ */
+async function recentBodiesForBrief(brief: string, sinceHours = 20): Promise<string[]> {
+  try {
+    const supa = getSupabaseAdmin();
+    const since = new Date(Date.now() - sinceHours * 3600 * 1000).toISOString();
+    const { data } = await supa
+      .from('social_posts')
+      .select('body')
+      .eq('brief', brief)
+      .gte('created_at', since)
+      .limit(20);
+    return (data ?? []).map((r: any) => String(r.body));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Split a numbered list into individual posts.
  *
  * The model is asked for "1. ... 2. ..." and mostly complies, but drops
@@ -210,6 +239,7 @@ export async function draftFromBrief(
   const research = opts.research === false ? null : await researchBrief(req.brief);
 
   const context = opts.includeMarkets === false ? '' : await marketContext();
+  const avoid = await recentBodiesForBrief(req.brief);
 
   const prompt = `${VOICE}
 
@@ -231,6 +261,10 @@ How to use it:
 - Do NOT invent anything absent from the research above. No scores, names, dates or percentages of your own.
 - If one finding is thin, use a different one rather than padding it into a whole post.
 - Do not write "reportedly" or "sources say". Either it is in the research or it does not go in the post.
+` : ''}
+${avoid.length ? `ALREADY POSTED about this brief in the last day — do not repeat these angles or reuse their wording:
+
+${avoid.map((a) => `- ${a}`).join('\n')}
 ` : ''}
 ${context ? `Currently live on the site — use ONLY if the brief genuinely relates to one of these. If the brief is about something else, ignore this list entirely and do not mention markets or odds:
 

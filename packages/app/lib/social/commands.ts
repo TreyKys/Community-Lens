@@ -14,29 +14,30 @@ const escapeHtml = (s: string) =>
 
 const HELP = `<b>Opinions.ng social bot</b>
 
-<b>Writing posts</b>
+<b>Posting — fully manual, you post everything yourself</b>
+Four times a day (~8am/1pm/6pm/9pm WAT) I write a burst of posts —
+BBN, football, and whatever's live on the site — and send each one as
+a card: image, caption, and <b>Posted / Own image / Discard</b> buttons.
+
+Tap <b>Posted</b> once you've shared it in the X app yourself. That's it —
+nothing here ever calls the X API, so nothing here costs anything.
+
+<b>Writing on demand</b>
 <code>/draft 4 BBN posts</code>
 <code>/draft 3 posts about the Super Eagles squad</code>
 <code>/draft something about the naira this week</code>
 
-You tell me the subject; I write the posts and send them one at a time
-with Queue / Discard buttons. Tap Queue and it takes the next free slot.
-Doesn't have to be about anything on the site.
+Same cards, same buttons, whenever you want more than the scheduled bursts.
 
 <b>Drafting a reply</b>
 Send an X post link — or paste a post's text — and I'll draft a reply, free.
 Link + the text pasted underneath works best: no lookup needed.
 
 <b>Control</b>
-/preview — every queued post, with its image, before it goes out
-/drafts — re-send any drafts still waiting on a decision
-/status — what's queued, what's paused, what it cost
-/queue — the next posts due
-/budget — spend this month
-/pause [reason] — stop publishing now
-/resume — start publishing again
-/cap N — max posts per day (0-20, /cap off to clear)
-/skip ID — cancel one queued post
+/drafts — re-send any cards still waiting on a decision
+/status — what's waiting, what's paused
+/pause [reason] — stop the bursts and /draft
+/resume — start again
 /paidlookup on|off — allow a $0.005 read when a share can't be read free
 /help — this`;
 
@@ -148,15 +149,19 @@ async function renderBudget(): Promise<string> {
 
 async function renderStatus(): Promise<string> {
   const supa = getSupabaseAdmin();
-  const [settings, budget, queued, today] = await Promise.all([
+  const [settings, awaiting, postedToday, legacyQueued] = await Promise.all([
     getSettings(),
-    budgetSummary().catch(() => null),
-    supa.from('social_posts').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
+    supa.from('social_posts').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
     supa
       .from('social_posts')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'published')
       .gte('published_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
+    // The scheduled auto-publish path is dormant (see cron-social-plan
+    // .yml), but leftover 'queued' rows from before this switch — or
+    // from ever flipping that path back on — are worth surfacing
+    // rather than silently ignoring.
+    supa.from('social_posts').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
   ]);
 
   const state = settings.publishingPaused
@@ -165,13 +170,10 @@ async function renderStatus(): Promise<string> {
 
   return (
     `${state}\n\n` +
-    `Queued: <b>${queued.count ?? 0}</b>\n` +
-    `Published (24h): <b>${today.count ?? 0}</b>\n` +
-    `Daily cap: <b>${settings.dailyPostCap ?? 'env default'}</b>\n` +
-    `Paid lookups: <b>${settings.allowPaidLookup ? 'on' : 'off'}</b>\n\n` +
-    (budget
-      ? `Spend: $${budget.spentUsd.toFixed(3)} / $${budget.capUsd.toFixed(2)} (${budget.pctUsed}%)`
-      : `Spend: unavailable`)
+    `Awaiting a decision: <b>${awaiting.count ?? 0}</b> — /drafts to see them\n` +
+    `Posted (24h): <b>${postedToday.count ?? 0}</b>\n` +
+    `Paid lookups: <b>${settings.allowPaidLookup ? 'on' : 'off'}</b>` +
+    (legacyQueued.count ? `\n\n<i>${legacyQueued.count} old queued row(s) from the disabled auto-publish path — /queue to see them, /skip to clear.</i>` : '')
   );
 }
 

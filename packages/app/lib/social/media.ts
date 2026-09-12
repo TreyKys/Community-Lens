@@ -60,7 +60,7 @@ export async function resolveMediaUrl(stored: string): Promise<string> {
 export async function setMedia(
   postId: number,
   kind: MediaKind,
-  opts: { fileId?: string; kicker?: string; theme?: string } = {},
+  opts: { fileId?: string; kicker?: string; theme?: string; url?: string } = {},
 ): Promise<void> {
   const supa = getSupabaseAdmin();
 
@@ -69,7 +69,12 @@ export async function setMedia(
   if (kind === 'none') {
     patch.media_url = null;
   } else if (kind === 'auto_card') {
-    patch.media_url = autoCardUrl(postId);
+    // `url` overrides the post-text card for anything that has a
+    // better auto image already — a market-linked post uses the LIVE
+    // odds card (/api/social/card/{marketId}) instead of one rendering
+    // its own words, so the split it shows can never go stale between
+    // drafting and viewing the way a fixed snapshot would.
+    patch.media_url = opts.url ?? autoCardUrl(postId);
     if (opts.kicker) patch.card_kicker = opts.kicker.slice(0, 24);
     if (opts.theme) patch.card_theme = opts.theme;
   } else {

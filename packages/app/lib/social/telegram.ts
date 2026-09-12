@@ -231,6 +231,95 @@ export async function sendPhotoPreview(source: string, caption: string): Promise
   });
 }
 
+export type ReadyCard = {
+  postId: number;
+  body: string;
+  mediaUrl?: string;
+};
+
+function readyButtons(postId: number) {
+  return [[
+    { text: '✅ Posted', callback_data: `rpost:${postId}` },
+    { text: '📤 Own image', callback_data: `rup:${postId}` },
+    { text: '🗑 Discard', callback_data: `rdisc:${postId}` },
+  ]];
+}
+
+/**
+ * A post ready for the operator to publish themselves.
+ *
+ * Sent as a photo with the post text as its CAPTION rather than as a
+ * separate message — Telegram makes a caption copyable the same way a
+ * <code> block is, so this collapses what used to be two messages (a
+ * text card, then a follow-up "here is the image" reply) into one. At
+ * the volume this pipeline runs at now, that difference is the whole
+ * length of a review session.
+ */
+export async function sendReadyCard(card: ReadyCard): Promise<number> {
+  const caption = escapeHtml(card.body).slice(0, 1000);
+
+  if (card.mediaUrl) {
+    // Stored uploads carry a 'tg:' prefix (see media.ts) so they are
+    // never confused with a fetchable URL; strip it here the same way
+    // sendPhotoPreview does, or a re-sent /drafts card would hand
+    // Telegram the literal string "tg:AgAC..." as a photo URL.
+    const photo = card.mediaUrl.startsWith('tg:') ? card.mediaUrl.slice(3) : card.mediaUrl;
+    const result = await tg('sendPhoto', {
+      chat_id: chatId(),
+      photo,
+      caption,
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: readyButtons(card.postId) },
+    });
+    return Number(result?.message_id ?? 0);
+  }
+
+  // No image at all — same buttons, plain text card.
+  const result = await tg('sendMessage', {
+    chat_id: chatId(),
+    text: caption,
+    parse_mode: 'HTML',
+    link_preview_options: { is_disabled: true },
+    reply_markup: { inline_keyboard: readyButtons(card.postId) },
+  });
+  return Number(result?.message_id ?? 0);
+}
+
+/** Replace a ready card's buttons once the operator has decided. */
+export async function markReadyHandled(messageId: number, outcome: 'posted' | 'discarded'): Promise<void> {
+  const label = outcome === 'posted' ? '✅ Posted' : '🗑 Discarded';
+  await tg('editMessageReplyMarkup', {
+    chat_id: chatId(),
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [[{ text: label, callback_data: 'noop' }]] },
+  });
+}
+
+/**
+ * Swap a ready card's photo in place after the operator uploads their
+ * own — editMessageMedia, not a new message, so the card keeps its
+ * position in the chat and the operator does not end up with two
+ * versions of the same post to choose between.
+ */
+export async function swapReadyCardPhoto(
+  messageId: number,
+  postId: number,
+  fileId: string,
+  caption: string,
+): Promise<void> {
+  await tg('editMessageMedia', {
+    chat_id: chatId(),
+    message_id: messageId,
+    media: {
+      type: 'photo',
+      media: fileId,
+      caption: escapeHtml(caption).slice(0, 1000),
+      parse_mode: 'HTML',
+    },
+    reply_markup: { inline_keyboard: readyButtons(postId) },
+  });
+}
+
 /** Replace a draft card's buttons with what was decided. */
 export async function markDraftHandled(
   messageId: number,
