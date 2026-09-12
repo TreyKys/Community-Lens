@@ -21,7 +21,7 @@ import { SharePickModal } from '@/components/SharePickModal';
 import { PickPreviewModal } from '@/components/PickPreviewModal';
 import { getDisplayPool } from '@/lib/displayPool';
 import { spendableBalance } from '@/lib/bonus';
-import { outcomeColor } from '@/lib/outcomeColors';
+import { outcomeColor, outcomeColorsFor } from '@/lib/outcomeColors';
 
 interface Market {
   id: number;
@@ -707,6 +707,10 @@ function MarketCard({
     if (autoOpen) setIsExpanded(true);
   }, [autoOpen]);
   const [showDescription, setShowDescription] = useState(false);
+  // Set when someone taps an option chip on the collapsed card, so the bet
+  // form opens already on that option. Falls back to the OPx Picks prefill
+  // prop, which is the other way an outcome arrives pre-chosen.
+  const [pickedOutcome, setPickedOutcome] = useState<number | null>(null);
 
   const closesAt = new Date(market.closes_at);
   const isOpen = market.status === 'open' && closesAt > new Date();
@@ -722,12 +726,15 @@ function MarketCard({
     ? (() => {
         const pools = market.options.map((_, i) => Number(market.pool_by_outcome?.[String(i)] ?? 0));
         const total = pools.reduce((s, v) => s + v, 0);
-        return outcomeColor(total > 0 ? pools.indexOf(Math.max(...pools)) : 0);
+        return outcomeColorsFor(market.options)[total > 0 ? pools.indexOf(Math.max(...pools)) : 0];
       })()
     : null;
 
   // Strip bracket tags from question (e.g. "[PL] Arsenal vs Chelsea" → "Arsenal vs Chelsea")
   const cleanQuestion = market.question.replace(/\[.*?\]\s*/g, '').trim();
+  // ...and keep what was stripped, to show as the card's tag instead of
+  // discarding it. Category is the fallback for markets with no bracket.
+  const tagLabel = ((market.question.match(/\[(.*?)\]/) || [])[1] || market.category || '').trim();
   // For child markets in the event view, strip the parent prefix
   const displayQuestion = market.parent_market_id
     ? (cleanQuestion.match(/\(([^)]+)\)$/) || [])[1] || cleanQuestion
@@ -769,6 +776,18 @@ function MarketCard({
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
       <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
+        {/* The league/category tag. This was already in the data and already
+            being thrown away: questions arrive as "[PL] Arsenal vs Chelsea"
+            and cleanQuestion strips the bracket so the title reads properly.
+            Stripping it was right; DELETING it was the waste — put back as a
+            tag it tells you which competition you're looking at without
+            lengthening the headline. Falls back to the category when a
+            market carries no bracket. */}
+        {tagLabel && (
+          <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+            {tagLabel}
+          </span>
+        )}
         <div className="flex justify-between items-start gap-3">
           <CardTitle className="text-base font-medium tracking-tight text-foreground leading-snug min-w-0">
             <span className="min-w-0 whitespace-pre-wrap break-words">{displayQuestion}</span>
@@ -849,25 +868,51 @@ function MarketCard({
           const shares = totalStaked > 0
             ? pools.map(v => v / totalStaked)
             : market.options.map(() => 1 / market.options.length);
+          const colors = outcomeColorsFor(market.options);
           return (
-            <div className="mb-3 space-y-1.5">
+            <div className="mb-3 space-y-2">
               <div className="flex h-2 w-full gap-0.5">
                 {shares.map((s, i) => (
                   <div key={i}
                        className="rounded-full min-w-[3px] transition-[width] duration-500 ease-out"
-                       style={{ width: `${s * 100}%`, background: outcomeColor(i) }} />
+                       style={{ width: `${s * 100}%`, background: colors[i] }} />
                 ))}
               </div>
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+              {/* Each option is a PICK, not a caption. The key under the bar
+                  told you where the money was and then made you hunt for the
+                  Predict button to act on it — these open the same bet form
+                  already sitting below/behind this card, with that option
+                  chosen. Nothing new to learn and nothing bypassed: it is
+                  the existing flow, entered one tap earlier. */}
+              <div className="flex flex-wrap gap-1.5">
                 {market.options.slice(0, 4).map((o, i) => (
-                  <div key={i} className="flex items-center gap-1.5 text-[10px] text-muted-foreground min-w-0">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: outcomeColor(i) }} />
-                    <span className="truncate max-w-[6rem]">{o}</span>
-                    {totalStaked > 0 && <span className="tabular text-foreground/70">{Math.round(shares[i] * 100)}%</span>}
-                  </div>
+                  <button
+                    key={i}
+                    type="button"
+                    disabled={!isOpen}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPickedOutcome(i);
+                      setIsExpanded(true);
+                    }}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] min-w-0 transition-colors',
+                      'border-border/60 bg-background/40 hover:bg-muted/40 disabled:opacity-60 disabled:hover:bg-background/40',
+                    )}
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i] }} />
+                    <span className="truncate max-w-[7rem] text-foreground/90">{o}</span>
+                    {totalStaked > 0 && (
+                      <span className="tabular font-semibold" style={{ color: colors[i] }}>
+                        {Math.round(shares[i] * 100)}%
+                      </span>
+                    )}
+                  </button>
                 ))}
                 {market.options.length > 4 && (
-                  <span className="text-[10px] text-muted-foreground/70">+{market.options.length - 4} more</span>
+                  <span className="self-center text-[10px] text-muted-foreground/70">
+                    +{market.options.length - 4} more
+                  </span>
                 )}
               </div>
               {totalStaked === 0 && (
@@ -899,6 +944,10 @@ function MarketCard({
         {isOpen && isExpanded && (
           <div className="hidden md:block border-t border-muted/50 mt-3 pt-3 animate-in fade-in slide-in-from-top-2">
             <BettingInterface
+              // Remount when a different chip is tapped: the form reads its
+              // prefill once, at mount, so without this a second pick on an
+              // already-open card would be silently ignored.
+              key={`bet-${pickedOutcome ?? 'none'}`}
               market={market}
               session={session}
               onSuccess={(betId) => {
@@ -906,7 +955,7 @@ function MarketCard({
                 onBetPlaced(market.id, betId);
               }}
               onCancel={() => setIsExpanded(false)}
-              prefillOutcomeIndex={prefillOutcomeIndex}
+              prefillOutcomeIndex={pickedOutcome ?? prefillOutcomeIndex}
               prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
               prefillFromShareId={prefillFromShareId}
             />
@@ -962,13 +1011,14 @@ function MarketCard({
                     className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 pb-0"
                   >
                     <BettingInterface
+                      key={`bet-${pickedOutcome ?? 'none'}`}
                       market={market}
                       session={session}
                       onSuccess={(betId) => {
                         setIsExpanded(false);
                         onBetPlaced(market.id, betId);
                       }}
-                      prefillOutcomeIndex={prefillOutcomeIndex}
+                      prefillOutcomeIndex={pickedOutcome ?? prefillOutcomeIndex}
                       prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
                       prefillFromShareId={prefillFromShareId}
                     />

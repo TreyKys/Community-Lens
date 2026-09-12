@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useUser } from '@/components/UserContext';
-import { outcomeColor } from '@/lib/outcomeColors';
+import { outcomeColor, outcomeColorsFor } from '@/lib/outcomeColors';
 import { Loader2, ChevronLeft, TrendingUp, TrendingDown, Info, Share2, Flag } from 'lucide-react';
 
 // Open market page: live probability, buy/sell, and an honest order ticket.
@@ -607,8 +607,10 @@ function Meter({ outcomes, prices, selected, onSelect, pulse }: {
   // green, loser grey" — Yes/No is just a 2-outcome market like any other,
   // and giving it a special color scheme is what made the jump to a 3rd
   // outcome look like a completely different, unfinished product.
-  const leadColor = outcomeColor(leadIdx);
-  const otherColor = outcomeColor(1 - leadIdx);
+  // A recognised Yes/No book comes back green/red here (see outcomeColorsFor);
+  // two named sides — a fixture, two candidates — keep the categorical pair.
+  const colors = outcomeColorsFor(outcomes);
+  const leadColor = colors[leadIdx];
 
   return (
     <div className="pt-1">
@@ -628,22 +630,31 @@ function Meter({ outcomes, prices, selected, onSelect, pulse }: {
             key={i}
             onClick={() => onSelect(i)}
             aria-label={`Trade ${outcomes[i]}, currently ${pct(prices[i])}`}
-            className={`h-full flex items-center text-[11px] font-semibold overflow-hidden transition-[width] duration-500 ease-out text-white ${
+            className={`h-full flex items-center gap-1.5 text-[11px] font-semibold overflow-hidden transition-[width] duration-500 ease-out text-white whitespace-nowrap ${
               i === 0 ? 'justify-end pr-2 rounded-l-md' : 'justify-start pl-2 rounded-r-md'
             } ${selected === i ? 'ring-2 ring-inset ring-white/60' : ''}`}
-            style={{ width: `${Math.max(prices[i] * 100, 2)}%`, background: i === leadIdx ? leadColor : otherColor }}
+            style={{ width: `${Math.max(prices[i] * 100, 2)}%`, background: colors[i] }}
           >
-            {prices[i] > 0.13 && pct(prices[i])}
+            {/* The side's NAME rides inside its own half of the bar once
+                there's room for it, so the bar says what it is without
+                anyone having to look down at the key underneath. Below
+                ~28% there isn't room, so the price goes in alone; below
+                13% not even that fits and the color carries it, with the
+                key below still naming both sides. */}
+            {prices[i] > 0.28 && (
+              <span className="uppercase tracking-wide opacity-90 truncate">{outcomes[i]}</span>
+            )}
+            {prices[i] > 0.13 && <span className="tabular">{pct(prices[i])}</span>}
           </button>
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground pt-1 tabular">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full" style={{ background: outcomeColor(0) }} />
+          <span className="w-2 h-2 rounded-full" style={{ background: colors[0] }} />
           {outcomes[0]} · {pct(prices[0])}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full" style={{ background: outcomeColor(1) }} />
+          <span className="w-2 h-2 rounded-full" style={{ background: colors[1] }} />
           {outcomes[1]} · {pct(prices[1])}
         </span>
       </div>
