@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { outcomeColor } from '@/lib/outcomeColors';
+import { outcomeColorsFor, binaryYesIndex } from '@/lib/outcomeColors';
 
 // The Open Markets browse card. Extracted from /open/page.tsx so every
 // surface that lists trading-engine markets — the general /open browse list,
@@ -39,8 +39,14 @@ export function OpenMarketCard({ market: m, hideCategory }: {
   hideCategory?: boolean;
 }) {
   const top = m.prices.indexOf(Math.max(...m.prices));
-  const topColor = outcomeColor(top);
+  const colors = outcomeColorsFor(m.outcomes);
+  const topColor = colors[top];
   const isBinary = m.outcomes.length === 2;
+  // A recognised Yes/No book gets the two-ended treatment below: each side's
+  // own price, printed at its own end of the bar, in its own color. Any other
+  // shape — a fixture, a three-way, a 20-name eviction — keeps the ranked
+  // legend it already had.
+  const yesIdx = binaryYesIndex(m.outcomes);
 
   // Rank once, reuse for both the bar order (kept at outcome index — color
   // must never shuffle with price) and the legend (which DOES read better
@@ -76,9 +82,25 @@ export function OpenMarketCard({ market: m, hideCategory }: {
             {m.prices.map((p, i) => (
               <div key={i}
                    className="rounded-full min-w-[3px] transition-[width] duration-500 ease-out"
-                   style={{ width: `${p * 100}%`, background: outcomeColor(i) }} />
+                   style={{ width: `${p * 100}%`, background: colors[i] }} />
             ))}
           </div>
+
+          {/* Yes/No books get both sides priced, one at each end of the bar
+              they belong to. The hero number above only ever names the
+              leader; this is the line that says what the OTHER side costs,
+              which is the number you need if you disagree with the crowd —
+              and disagreeing with the crowd is the entire product. */}
+          {yesIdx !== null && (
+            <div className="flex items-center justify-between -mt-1.5 text-[11px] font-semibold tabular">
+              <span style={{ color: colors[0] }}>
+                {m.outcomes[0].toUpperCase()} {pct(m.prices[0])}
+              </span>
+              <span style={{ color: colors[1] }}>
+                {pct(m.prices[1])} {m.outcomes[1].toUpperCase()}
+              </span>
+            </div>
+          )}
 
           {/* Legend — skipped for a binary market, where the bar + hero
               number already say everything ("Yes 63%" implies "No 37%").
@@ -88,7 +110,7 @@ export function OpenMarketCard({ market: m, hideCategory }: {
             <div className="flex flex-wrap gap-x-3 gap-y-1">
               {ranked.slice(0, MAX_LEGEND_ROWS).map(({ i, p }) => (
                 <div key={i} className="flex items-center gap-1.5 text-[10px] text-muted-foreground min-w-0">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: outcomeColor(i) }} />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i] }} />
                   <span className="truncate max-w-[6rem]">{m.outcomes[i]}</span>
                   <span className="tabular text-foreground/70">{pct(p)}</span>
                 </div>
