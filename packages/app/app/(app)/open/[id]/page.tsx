@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { useUser } from '@/components/UserContext';
+import { outcomeColor } from '@/lib/outcomeColors';
 import { Loader2, ChevronLeft, TrendingUp, TrendingDown, Info, Share2, Flag } from 'lucide-react';
 
 // Open market page: live probability, buy/sell, and an honest order ticket.
@@ -306,35 +307,18 @@ export default function OpenMarketPage({ params }: { params: { id: string } }) {
           </div>
           {mkt.description && <p className="text-sm text-muted-foreground">{mkt.description}</p>}
 
-          {/* Probability leads. A binary market gets the unified meter: Yes
-              and No always sum to 100%, so two separate bars were the same
-              number said twice. A market with more than two outcomes keeps
-              the original per-outcome list — there is no single "favoured
-              side" line to draw through more than two options. */}
+          {/* Probability leads. A binary market gets the head-to-head meter:
+              Yes and No always sum to 100%, so one bar with both sides said
+              it once instead of the same number twice. 3+ outcomes get the
+              ranked list below — see OutcomeList for why that, not a
+              proportional bar, is the right form once there are more than a
+              couple of segments to tell apart. */}
           {mkt.outcomes.length === 2 ? (
             <Meter outcomes={mkt.outcomes} prices={mkt.prices}
                    selected={outcomeIdx} onSelect={setOutcomeIdx} pulse={pulse} />
           ) : (
-            <div className="space-y-2 pt-1">
-              {mkt.outcomes.map((o, i) => (
-                <button
-                  key={i}
-                  onClick={() => setOutcomeIdx(i)}
-                  className={`w-full rounded-lg border p-3 text-left transition-colors duration-150 ${
-                    outcomeIdx === i ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-border hover:border-emerald-500/25'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{o}</span>
-                    <span className={`text-xl font-semibold tabular ${pulse ? 'market-tick' : ''}`}>{pct(mkt.prices[i])}</span>
-                  </div>
-                  <div className="mt-2 h-1 w-full rounded-full bg-muted overflow-hidden">
-                    <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-500 ease-out"
-                         style={{ width: `${mkt.prices[i] * 100}%` }} />
-                  </div>
-                </button>
-              ))}
-            </div>
+            <OutcomeList outcomes={mkt.outcomes} prices={mkt.prices}
+                         selected={outcomeIdx} onSelect={setOutcomeIdx} pulse={pulse} />
           )}
 
           {/* Live trade feed. A quiet market otherwise reads as dead — this
@@ -619,6 +603,12 @@ function Meter({ outcomes, prices, selected, onSelect, pulse }: {
   outcomes: string[]; prices: number[]; selected: number; onSelect: (i: number) => void; pulse: boolean;
 }) {
   const leadIdx = prices[0] >= prices[1] ? 0 : 1;
+  // Each side keeps its OWN color (lib/outcomeColors) rather than "leader
+  // green, loser grey" — Yes/No is just a 2-outcome market like any other,
+  // and giving it a special color scheme is what made the jump to a 3rd
+  // outcome look like a completely different, unfinished product.
+  const leadColor = outcomeColor(leadIdx);
+  const otherColor = outcomeColor(1 - leadIdx);
 
   return (
     <div className="pt-1">
@@ -626,31 +616,99 @@ function Meter({ outcomes, prices, selected, onSelect, pulse }: {
         <p className="text-[11px] text-muted-foreground">
           <span className="font-medium text-foreground/80">{outcomes[leadIdx]}</span> is currently favoured
         </p>
-        <p className={`text-4xl font-bold tabular tracking-tight text-emerald-400 ${pulse ? 'market-tick' : ''}`}>
+        <p className={`text-4xl font-bold tabular tracking-tight ${pulse ? 'market-tick' : ''}`}
+           style={{ color: leadColor }}>
           {pct(prices[leadIdx])}
         </p>
       </div>
 
-      <div className={`relative h-9 rounded-lg border border-border overflow-hidden flex bg-muted/50 ${pulse ? 'market-bar-glow' : ''}`}>
+      <div className={`relative h-9 rounded-lg border border-border overflow-hidden flex gap-0.5 bg-muted/50 ${pulse ? 'market-bar-glow' : ''}`}>
         {[0, 1].map(i => (
           <button
             key={i}
             onClick={() => onSelect(i)}
             aria-label={`Trade ${outcomes[i]}, currently ${pct(prices[i])}`}
-            className={`h-full flex items-center text-[11px] font-semibold overflow-hidden transition-[width] duration-500 ease-out ${
-              i === 0 ? 'justify-end pr-2 border-r border-background/40' : 'justify-start pl-2'
-            } ${
-              i === leadIdx ? 'bg-emerald-500 text-emerald-950' : 'bg-muted text-muted-foreground'
-            } ${selected === i ? 'ring-2 ring-inset ring-emerald-400/70' : ''}`}
-            style={{ width: `${Math.max(prices[i] * 100, 2)}%` }}
+            className={`h-full flex items-center text-[11px] font-semibold overflow-hidden transition-[width] duration-500 ease-out text-white ${
+              i === 0 ? 'justify-end pr-2 rounded-l-md' : 'justify-start pl-2 rounded-r-md'
+            } ${selected === i ? 'ring-2 ring-inset ring-white/60' : ''}`}
+            style={{ width: `${Math.max(prices[i] * 100, 2)}%`, background: i === leadIdx ? leadColor : otherColor }}
           >
             {prices[i] > 0.13 && pct(prices[i])}
           </button>
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground pt-1 tabular">
-        <span>{outcomes[0]} · {pct(prices[0])}</span>
-        <span>{outcomes[1]} · {pct(prices[1])}</span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full" style={{ background: outcomeColor(0) }} />
+          {outcomes[0]} · {pct(prices[0])}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full" style={{ background: outcomeColor(1) }} />
+          {outcomes[1]} · {pct(prices[1])}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// 3+ outcomes. A proportional bar with more than a handful of segments turns
+// into a wall of invisible slivers — the wrong chart form past a few
+// categories (see the dataviz skill's "pick the form" step) — so instead of
+// stretching Meter's 2-segment bar to N, this is a RANKED LIST: every
+// outcome gets its own row, its own color, and its own independently-scaled
+// mini-bar (0-100% of ITS price, not a shared proportional split). That is
+// what actually fixes "the new UI only ever applied to 2-option markets" —
+// a BBN eviction with 16 housemates gets the same colored, sortable,
+// individually legible treatment a Yes/No market always had, not the flat
+// unstyled fallback this replaces.
+//
+// Sorted by price, unlike the color (which stays pinned to outcome index) —
+// a leaderboard is supposed to reorder as prices move; a color identity is
+// not, or a housemate trading places with another would repaint both rows.
+function OutcomeList({ outcomes, prices, selected, onSelect, pulse }: {
+  outcomes: string[]; prices: number[]; selected: number; onSelect: (i: number) => void; pulse: boolean;
+}) {
+  const leadIdx = prices.indexOf(Math.max(...prices));
+  const ranked = prices.map((p, i) => ({ i, p })).sort((a, b) => b.p - a.p);
+  // A long cast (up to 30 outcomes) would otherwise stretch the page to
+  // several screens of buttons before you reach the price ticker below it.
+  const scrollable = outcomes.length > 6;
+
+  return (
+    <div className="pt-1 space-y-2">
+      <p className="text-[11px] text-muted-foreground text-center pb-1">
+        <span className="font-medium" style={{ color: outcomeColor(leadIdx) }}>{outcomes[leadIdx]}</span> leads at{' '}
+        <span className="font-semibold tabular">{pct(prices[leadIdx])}</span>
+      </p>
+      <div className={`space-y-2 ${scrollable ? 'max-h-[22rem] overflow-y-auto pr-1' : ''}`}>
+        {ranked.map(({ i, p }) => {
+          const color = outcomeColor(i);
+          const isSelected = selected === i;
+          return (
+            <button
+              key={i}
+              onClick={() => onSelect(i)}
+              className={`w-full rounded-lg border p-3 text-left transition-colors duration-150 ${
+                isSelected ? 'bg-muted/40' : 'border-border hover:bg-muted/20'
+              }`}
+              style={isSelected ? { borderColor: color } : undefined}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
+                  <span className="text-sm font-medium truncate">{outcomes[i]}</span>
+                </span>
+                <span className={`text-xl font-semibold tabular shrink-0 ${pulse && i === leadIdx ? 'market-tick' : ''}`}>
+                  {pct(p)}
+                </span>
+              </div>
+              <div className="mt-2 h-1 w-full rounded-full bg-muted overflow-hidden">
+                <div className="h-full rounded-full transition-[width] duration-500 ease-out"
+                     style={{ width: `${p * 100}%`, background: color }} />
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
