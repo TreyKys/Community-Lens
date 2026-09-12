@@ -21,6 +21,7 @@ import { SharePickModal } from '@/components/SharePickModal';
 import { PickPreviewModal } from '@/components/PickPreviewModal';
 import { getDisplayPool } from '@/lib/displayPool';
 import { spendableBalance } from '@/lib/bonus';
+import { outcomeColor } from '@/lib/outcomeColors';
 
 interface Market {
   id: number;
@@ -31,6 +32,12 @@ interface Market {
   status: 'open' | 'locked' | 'resolved' | 'voided';
   closes_at: string;
   total_pool: number;
+  // Keyed by outcome index (string, e.g. "0") -> naira staked on it. Powers
+  // the "where it's leaning" preview on the collapsed card — it's real
+  // parimutuel pool share, not the locked-odds price itself (that needs the
+  // seed pool + vig + reserve, only fetched once a card is expanded), but
+  // it's an honest "here's where the money already is" signal either way.
+  pool_by_outcome?: Record<string, number> | null;
   resolved_outcome: number | null;
   parent_market_id: number | null;
   on_chain_market_id: number | null;
@@ -707,6 +714,18 @@ function MarketCard({
   const isResolved = market.status === 'resolved';
   const isVoided = market.status === 'voided';
 
+  // Leading option's color, for the card's top-edge accent — same idea as
+  // OpenMarketCard's colored edge, so a scroll of cards reads as distinct
+  // questions before you've read a single word, on either staking mode.
+  const showLeaning = (isOpen || isLocked) && market.options.length >= 2;
+  const leadColor = showLeaning
+    ? (() => {
+        const pools = market.options.map((_, i) => Number(market.pool_by_outcome?.[String(i)] ?? 0));
+        const total = pools.reduce((s, v) => s + v, 0);
+        return outcomeColor(total > 0 ? pools.indexOf(Math.max(...pools)) : 0);
+      })()
+    : null;
+
   // Strip bracket tags from question (e.g. "[PL] Arsenal vs Chelsea" → "Arsenal vs Chelsea")
   const cleanQuestion = market.question.replace(/\[.*?\]\s*/g, '').trim();
   // For child markets in the event view, strip the parent prefix
@@ -746,6 +765,7 @@ function MarketCard({
       data-market-id={market.id}
       className="bg-card transition-colors duration-150 hover:border-emerald-500/30 active:border-emerald-500/50 relative overflow-hidden group border-muted"
     >
+      {leadColor && <div className="absolute inset-x-0 top-0 h-[3px]" style={{ background: leadColor }} />}
       <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-transparent to-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
       <CardHeader className="p-4 md:p-6 pb-2 md:pb-2 relative z-10">
@@ -813,6 +833,49 @@ function MarketCard({
             }
           </span>
         </div>
+
+        {/* "Where it's leaning" — always visible, even collapsed. This used
+            to be the biggest gap between the two staking modes: an Open
+            Markets card led with a live probability bar, this card showed
+            NOTHING about the options until you tapped to expand it. Same
+            categorical palette as Trade markets (lib/outcomeColors), so the
+            two feeds read as one visual language. Pool SHARE, not the
+            locked-odds price itself — that needs the seed pool + vig +
+            reserve, which only load once a card is expanded — but it's an
+            honest "here's where the money already is" either way. */}
+        {showLeaning && (() => {
+          const pools = market.options.map((_, i) => Number(market.pool_by_outcome?.[String(i)] ?? 0));
+          const totalStaked = pools.reduce((s, v) => s + v, 0);
+          const shares = totalStaked > 0
+            ? pools.map(v => v / totalStaked)
+            : market.options.map(() => 1 / market.options.length);
+          return (
+            <div className="mb-3 space-y-1.5">
+              <div className="flex h-2 w-full gap-0.5">
+                {shares.map((s, i) => (
+                  <div key={i}
+                       className="rounded-full min-w-[3px] transition-[width] duration-500 ease-out"
+                       style={{ width: `${s * 100}%`, background: outcomeColor(i) }} />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                {market.options.slice(0, 4).map((o, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-[10px] text-muted-foreground min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: outcomeColor(i) }} />
+                    <span className="truncate max-w-[6rem]">{o}</span>
+                    {totalStaked > 0 && <span className="tabular text-foreground/70">{Math.round(shares[i] * 100)}%</span>}
+                  </div>
+                ))}
+                {market.options.length > 4 && (
+                  <span className="text-[10px] text-muted-foreground/70">+{market.options.length - 4} more</span>
+                )}
+              </div>
+              {totalStaked === 0 && (
+                <p className="text-[9px] text-muted-foreground/60">No predictions yet — be the first</p>
+              )}
+            </div>
+          );
+        })()}
 
         {/* On-chain verification badge */}
         {market.merkle_root && (
@@ -1208,7 +1271,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
       const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from('markets')
-        .select('id, title, question, category, options, status, closes_at, total_pool, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, trending_rank, is_locked_odds, published_at')
+        .select('id, title, question, category, options, status, closes_at, total_pool, pool_by_outcome, resolved_outcome, parent_market_id, on_chain_market_id, merkle_root, description, resolved_at, is_trending, trending_rank, is_locked_odds, published_at')
         .not('status', 'eq', 'voided')
         // Scheduled markets haven't opened yet, and pending_void markets
         // are mid-investigation — neither is meant to be public, in any
