@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Plus, Trash2, AlertTriangle, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@supabase/supabase-js';
+import { MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -299,8 +300,8 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
       let convVigNum: number | null = null;
       if (convVigOverride.trim() !== '') {
         const v = Number(convVigOverride);
-        if (!Number.isFinite(v) || v < 0.04 || v > 0.15) {
-          toast({ title: 'Vig must be between 0.04 and 0.15', variant: 'destructive' });
+        if (!Number.isFinite(v) || v < MIN_VIG || v > MAX_VIG) {
+          toast({ title: `Vig must be between ${MIN_VIG} and ${MAX_VIG}`, variant: 'destructive' });
           return;
         }
         convVigNum = v;
@@ -565,7 +566,7 @@ function ConvertToLockedOddsSection(props: {
   const seedProbNum = Number(seedProbability);
   const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
   const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
-  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
+  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= MIN_VIG && vigNum <= MAX_VIG);
   const seedFitsReserve = reserveDeployable == null || seedSizeNum <= reserveDeployable;
 
   const multiProbs = seedProbsMulti.slice(0, numOutcomes).map(s => Number(s));
@@ -717,11 +718,11 @@ function ConvertToLockedOddsSection(props: {
           )}
 
           <div className="space-y-1">
-            <Label className="text-xs">Vig override (0.04–0.15, blank = category default)</Label>
+            <Label className="text-xs">Vig override ({MIN_VIG}–{MAX_VIG}, blank = category default)</Label>
             <Input
               type="number"
-              min={0.04}
-              max={0.15}
+              min={MIN_VIG}
+              max={MAX_VIG}
               step={0.01}
               value={vigOverride}
               onChange={e => setVigOverride(e.target.value)}

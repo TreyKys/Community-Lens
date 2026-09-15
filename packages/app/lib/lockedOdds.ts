@@ -72,8 +72,17 @@ export const MAX_ODDS = 25;
 /** Floor on the dynamic vig. Below this, single bets stop being profitable. */
 export const MIN_VIG = 0.04;
 
-/** Ceiling on the dynamic vig. Above this, odds become embarrassing/uncompetitive. */
-export const MAX_VIG = 0.15;
+// Ceiling on the dynamic vig. Was 0.15 from launch through 2026-09;
+// raised to 0.55 on 2026-09-16 at the operator's explicit request, after
+// a market configured for 1.67/1.10 (a ~51% margin pair) came out at
+// ~2.10/1.33 instead — 0.15 is mathematically incompatible with that
+// pair (sum of 1/odds = 1.508 needs vig >= ~0.508 to be honoured; see
+// supabase/migrations/20260916000000_raise_max_vig_ceiling.sql for the
+// full reasoning). Raising this number makes the house's edge bigger and
+// payouts smaller for every market that uses a vig anywhere near it —
+// it is a product decision, not a technical constant, and changing it
+// again should get the same deliberate treatment this change did.
+export const MAX_VIG = 0.55;
 
 /**
  * Maximum multiplier between the floor payout and the upper end of the

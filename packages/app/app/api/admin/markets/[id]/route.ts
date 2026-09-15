@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import { MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -218,12 +219,13 @@ const ALLOWED_TEXT_FIELDS = ['title', 'question', 'description', 'category'] as 
 
 // Bounds for locked-odds conversion. Mirror the values used at
 // market-creation time (packages/app/app/api/admin/market/route.ts).
+// MIN_VIG/MAX_VIG are imported from lib/lockedOdds rather than
+// duplicated here — a third hand-copied 0.04/0.15 pair is exactly the
+// kind of drift that let the ceiling silently disagree with itself.
 const MIN_SEED_TNGN = 1_000;
 const MAX_SEED_TNGN = 14_000;
 const MIN_SEED_PROB = 0.05;
 const MAX_SEED_PROB = 0.95;
-const MIN_VIG = 0.04;
-const MAX_VIG = 0.15;
 
 function buildSeedPoolJsonb(
   totalSeedTngn: number,
@@ -476,7 +478,7 @@ export async function PATCH(
       const v = Number(cfg.vigPct);
       if (!Number.isFinite(v) || v < MIN_VIG || v > MAX_VIG) {
         return NextResponse.json(
-          { error: 'Vig must be between 0.04 (4%) and 0.15 (15%)' },
+          { error: `Vig must be between ${MIN_VIG} (${MIN_VIG * 100}%) and ${MAX_VIG} (${MAX_VIG * 100}%)` },
           { status: 400 },
         );
       }

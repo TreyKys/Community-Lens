@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import { MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,8 +10,12 @@ const supabaseAdmin = createClient(
 
 // Bounds for locked-odds seeding. Hardcoded conservative limits at
 // launch — these line up with the Phase 0 spec's "max ₦14k seed per
-// market" rule. Admin can override vig per market within the ALL-vig
-// CHECK bounds (4%–15%) defined in the markets table.
+// market" rule. Vig bounds are NOT hardcoded here on purpose: this file
+// used to carry its own literal 0.04/0.15, a second copy of the same
+// bound as the markets table CHECK and calculate_locked_odds_sql's
+// c_min_vig/c_max_vig — three unsynchronised copies is exactly what let
+// the ceiling silently disagree with itself. Import from lib/lockedOdds,
+// the one place these numbers are meant to live, instead.
 const MIN_SEED_TNGN = 1_000;
 const MAX_SEED_TNGN = 14_000;
 const MIN_SEED_PROB = 0.05;
@@ -144,9 +149,9 @@ export async function POST(request: Request) {
       let resolvedVig = 0.08;
       if (vigPct !== undefined && vigPct !== null && vigPct !== '') {
         const v = Number(vigPct);
-        if (!Number.isFinite(v) || v < 0.04 || v > 0.15) {
+        if (!Number.isFinite(v) || v < MIN_VIG || v > MAX_VIG) {
           return NextResponse.json(
-            { error: 'Vig must be between 0.04 (4%) and 0.15 (15%)' },
+            { error: `Vig must be between ${MIN_VIG} (${MIN_VIG * 100}%) and ${MAX_VIG} (${MAX_VIG * 100}%)` },
             { status: 400 },
           );
         }
