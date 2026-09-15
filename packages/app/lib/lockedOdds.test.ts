@@ -328,13 +328,14 @@ describe('dynamic vig', () => {
 
   it('clamps the final vig to MAX_VIG even when surcharges stack', () => {
     // Stack thin (+2%) + large stake (+1%) + reserve stress (+2%) on a
-    // 10% category → would be 0.15 before clamp. Add culture's 10% base
-    // and we're at 0.15 (the ceiling). Bumping further must clamp.
+    // 0.52 override → 0.57 before clamp, above MAX_VIG (0.55). Bumping
+    // further must clamp. (Was a 0.13 override against the old 0.15
+    // ceiling; re-based to MAX_VIG's 2026-09-16 value — see lockedOdds.ts.)
     const m: MarketSnapshot = {
-      category: 'culture',           // 0.10 base
+      category: 'culture',           // base ignored: override is set
       seedPool: [6_000, 6_000],
       realPool: [0, 0],              // thin → +0.02
-      vigPctOverride: 0.13,          // override → 0.13 base
+      vigPctOverride: 0.52,          // override → 0.52 base
     };
     const r = calculateLockedOdds(m, 5_000, 0, NEW_USER, STRESSED); // large-stake + stress
     expect(r.diagnostics.surcharges.finalVig).toBeLessThanOrEqual(MAX_VIG + 1e-9);

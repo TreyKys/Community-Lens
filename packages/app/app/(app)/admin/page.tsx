@@ -20,7 +20,7 @@ import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import { pollWhileVisible } from '@/lib/pollWhileVisible';
-import { calculateLockedOdds } from '@/lib/lockedOdds';
+import { calculateLockedOdds, MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
 import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
 import { groupedLockedOddsHubOptions, getLockedOddsHubOption } from '@/lib/lockedOddsHubOptions';
 import Link from 'next/link';
@@ -1095,9 +1095,15 @@ function OddsCalculatorPanel() {
   // ─── REVERSE math ─────────────────────────────────────────────────
   // Given target displayed odds, derive the seed probability split
   // implied by them. The implied vig is the sum-of-reciprocals minus 1;
-  // if it's outside our [4%, 15%] bounds we flag it. Seed probabilities
-  // are the normalised reciprocals so they sum to exactly 1 — these are
-  // the chosen/total ratios the algorithm uses to open the line.
+  // if it's outside [MIN_VIG, MAX_VIG] we flag it — this is the ONE
+  // place on this page that lets you type the odds themselves rather
+  // than reverse-engineering them from a probability + a vig slider, so
+  // it's the tool to reach for when you have a specific target pair in
+  // mind (see the Locked-odds Pro tier block below, which takes
+  // probability + vig directly and only shows you the resulting odds
+  // afterward). Seed probabilities are the normalised reciprocals so
+  // they sum to exactly 1 — these are the chosen/total ratios the
+  // algorithm uses to open the line.
   const reverseTargets = targetOdds.map(s => Number(s));
   const reverseValid = reverseTargets.every(o => Number.isFinite(o) && o >= 1.05 && o <= 50);
   const reverseImpliedSum = reverseValid ? reverseTargets.reduce((a, o) => a + 1 / o, 0) : 0;
@@ -1107,8 +1113,8 @@ function OddsCalculatorPanel() {
     : [];
   // Warn if the implied vig is outside the engine's clamped band.
   const reverseVigWarning =
-    reverseValid && (reverseImpliedVig < 0.04 || reverseImpliedVig > 0.15)
-      ? `Implied vig is ${(reverseImpliedVig * 100).toFixed(1)}% — outside the engine band (4–15%). Adjust your odds so the implied vig sits inside that range.`
+    reverseValid && (reverseImpliedVig < MIN_VIG || reverseImpliedVig > MAX_VIG)
+      ? `Implied vig is ${(reverseImpliedVig * 100).toFixed(1)}% — outside the engine band (${(MIN_VIG * 100).toFixed(0)}–${(MAX_VIG * 100).toFixed(0)}%). Adjust your odds so the implied vig sits inside that range.`
       : null;
 
   // ─── FORWARD probability validation ─────────────────────────────
@@ -2566,7 +2572,7 @@ function validateLockedOddsSeed(input: {
   const vigNum = input.vigOverride.trim() === '' ? undefined : Number(input.vigOverride);
 
   const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
-  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= 0.04 && vigNum <= 0.15);
+  const validVig = vigNum === undefined || (Number.isFinite(vigNum) && vigNum >= MIN_VIG && vigNum <= MAX_VIG);
   const seedFitsReserve = input.reserveDeployable == null || seedSizeNum <= input.reserveDeployable;
   // Below the ₦1,000 floor, "reduce the seed" is not an available remedy —
   // there is no valid seed size left to try. Surfaced separately so the
@@ -2776,11 +2782,11 @@ function LockedOddsConfigBlock(props: {
           )}
 
           <div className="space-y-1">
-            <Label className="text-xs">Vig override (0.04–0.15, blank = category default)</Label>
+            <Label className="text-xs">Vig override ({MIN_VIG}–{MAX_VIG}, blank = category default)</Label>
             <Input
               type="number"
-              min={0.04}
-              max={0.15}
+              min={MIN_VIG}
+              max={MAX_VIG}
               step={0.01}
               value={vigOverride}
               onChange={e => setVigOverride(e.target.value)}
