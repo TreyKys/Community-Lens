@@ -270,6 +270,30 @@ async function resolveLockedOddsMarket(args: {
         winnersCount: 0, losersCount: 0, unsettledMultiplierLegs: activeLegCount,
       }, { status: 207 });
     }
+
+    // Second half of the same root cause, still live: activeLegCount is
+    // *always* 0 at this point by construction — we only reach here
+    // after the block above confirms nothing is still 'active'. That
+    // makes it useless for telling "never had a leg" apart from "had
+    // legs, and they were just settled a few lines up in the POST
+    // handler." A market with real Multiplier exposure that settled
+    // cleanly was hitting the exact same queueVoidForApproval call below
+    // as a market nobody ever staked on. Check for ANY leg regardless of
+    // status — that's the true "was this market ever touched" signal.
+    const { count: everLegCount } = await supabaseAdmin
+      .from('multiplier_legs')
+      .select('id', { count: 'exact', head: true })
+      .eq('market_id', marketId);
+    if ((everLegCount ?? 0) > 0) {
+      await supabaseAdmin.from('markets').update({
+        status: 'resolved',
+        resolved_outcome: winningOutcomeIndex,
+        resolved_outcomes: winningOutcomeIndices,
+        resolved_at: new Date().toISOString(),
+      }).eq('id', marketId);
+      await supabaseAdmin.rpc('clear_market_liability', { p_market_id: marketId });
+      return NextResponse.json({ status: 'resolved', reason: 'No single bets, but Multiplier leg exposure existed and was already settled above — resolved, not voided.', winnersCount: 0, losersCount: 0 });
+    }
     await queueVoidForApproval(marketId, 'no_bets_placed_locked_odds');
     return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
   }
@@ -871,6 +895,26 @@ export async function POST(request: Request) {
           reason: `No single bets on this market, and ${activeLegCount} multiplier leg(s) failed to settle. Market kept claimed+locked for a retry — re-submit the same resolve request.`,
           winnersCount: 0, losersCount: 0, unsettledMultiplierLegs: activeLegCount,
         }, { status: 207 });
+      }
+
+      // Same second-half fix as the locked-odds branch above:
+      // activeLegCount is always 0 here by construction (only reached
+      // once the block above confirms nothing is still active), so it
+      // can't distinguish "never had a leg" from "had legs that just
+      // settled." Check for any leg at all before deciding this market
+      // was genuinely untouched.
+      const { count: everLegCount } = await supabaseAdmin
+        .from('multiplier_legs')
+        .select('id', { count: 'exact', head: true })
+        .eq('market_id', marketId);
+      if ((everLegCount ?? 0) > 0) {
+        await supabaseAdmin.from('markets').update({
+          status: 'resolved',
+          resolved_outcome: winningOutcomeIndex,
+          resolved_outcomes: winningOutcomeIndices,
+          resolved_at: new Date().toISOString(),
+        }).eq('id', marketId);
+        return NextResponse.json({ status: 'resolved', reason: 'No single bets, but Multiplier leg exposure existed and was already settled above — resolved, not voided.', winnersCount: 0, losersCount: 0 });
       }
       await queueVoidForApproval(marketId, 'no_bets_placed_parimutuel');
       return NextResponse.json({ status: 'pending_void', reason: 'No bets found — queued for admin approval before voiding', winnersCount: 0, losersCount: 0 });
