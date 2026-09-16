@@ -14,7 +14,9 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Plus, Trash2, AlertTriangle, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@supabase/supabase-js';
-import { MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
+import { MIN_VIG, MAX_VIG, resolveCategoryVig } from '@/lib/lockedOdds';
+import { buildLockedOddsSeedPool, buildOddsPreviewTable } from '@/lib/lockedOddsAdminPreview';
+import { LockedOddsConfirmDialog } from '@/components/admin/LockedOddsConfirmDialog';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -111,6 +113,9 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
   const [convSeedProbsMulti, setConvSeedProbsMulti] = useState<string[]>([]);
   const [convVigOverride, setConvVigOverride] = useState('');
   const [reserveDeployable, setReserveDeployable] = useState<number | null>(null);
+  // Gates handleSave when convertToLocked is on — see LockedOddsConfirmDialog
+  // for why a passive preview alone wasn't enough.
+  const [confirmOddsOpen, setConfirmOddsOpen] = useState(false);
 
   // Load market detail when the dialog opens. We use the existing
   // /api/admin/markets/[id] GET which returns the full forensic dossier;
@@ -338,7 +343,10 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
     }
   };
 
+  const cleanedOptionsForConfirm = options.map(o => o.trim()).filter(Boolean);
+
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => { if (!o && !isSaving) onClose(); }}>
       <DialogContent className="sm:max-w-[560px] max-h-[92vh] overflow-y-auto">
         <DialogHeader>
@@ -519,12 +527,42 @@ export function MarketEditDialog({ marketId, onClose, onSaved }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={isLoading || isSaving || !market}>
-            {isSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Saving…</> : 'Save changes'}
+          <Button
+            onClick={() => convertToLocked ? setConfirmOddsOpen(true) : handleSave()}
+            disabled={isLoading || isSaving || !market}
+          >
+            {isSaving ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Saving…</>
+              : convertToLocked ? 'Review odds & save' : 'Save changes'}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {convertToLocked && (
+      <LockedOddsConfirmDialog
+        open={confirmOddsOpen}
+        onOpenChange={setConfirmOddsOpen}
+        question={question}
+        options={cleanedOptionsForConfirm}
+        preview={buildOddsPreviewTable({
+          seedPool: buildLockedOddsSeedPool({
+            seedSize: convSeedSize,
+            seedProbability: convSeedProbability,
+            seedProbsMulti: convSeedProbsMulti,
+            numOutcomes: cleanedOptionsForConfirm.length,
+          }),
+          category, vigOverride: convVigOverride, reserveDeployable,
+        })}
+        effectiveVigPct={convVigOverride.trim() === '' ? resolveCategoryVig(category) : Number(convVigOverride)}
+        categoryVigPct={resolveCategoryVig(category)}
+        confirming={isSaving}
+        onConfirm={async () => {
+          await handleSave();
+          setConfirmOddsOpen(false);
+        }}
+      />
+    )}
+    </>
   );
 }
 

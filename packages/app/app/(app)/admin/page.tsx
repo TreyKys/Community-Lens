@@ -20,7 +20,9 @@ import { MarketEditDialog } from '@/components/admin/MarketEditDialog';
 import { cn } from '@/lib/utils';
 import { findBankByCode } from '@/lib/banks';
 import { pollWhileVisible } from '@/lib/pollWhileVisible';
-import { calculateLockedOdds, MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
+import { calculateLockedOdds, resolveCategoryVig, MIN_VIG, MAX_VIG } from '@/lib/lockedOdds';
+import { buildLockedOddsSeedPool, buildOddsPreviewTable } from '@/lib/lockedOddsAdminPreview';
+import { LockedOddsConfirmDialog } from '@/components/admin/LockedOddsConfirmDialog';
 import { spendableBonus, bonusExpiryNote } from '@/lib/bonus';
 import { groupedLockedOddsHubOptions, getLockedOddsHubOption } from '@/lib/lockedOddsHubOptions';
 import Link from 'next/link';
@@ -1084,12 +1086,10 @@ function OddsCalculatorPanel() {
   const validSeed = Number.isFinite(seedSizeNum) && seedSizeNum >= 1_000 && seedSizeNum <= 14_000;
   const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
 
-  // Category default vig — mirrors VIG_DEFAULTS in lib/lockedOdds.
-  const CATEGORY_VIGS: Record<string, number> = {
-    sports: 0.07, sports_top: 0.06, sports_props: 0.07, combat: 0.08,
-    economy: 0.09, crypto: 0.08, entertainment: 0.09, politics: 0.10, culture: 0.10,
-  };
-  const categoryVig = CATEGORY_VIGS[category] ?? 0.08;
+  // Was a hand-copied CATEGORY_VIGS map that could (and did) drift from the
+  // real table — now reads VIG_DEFAULTS itself via the same resolver the
+  // pricing engine uses.
+  const categoryVig = resolveCategoryVig(category);
   const effectiveVig = Number.isFinite(vigNum as number) ? (vigNum as number) : categoryVig;
 
   // ─── REVERSE math ─────────────────────────────────────────────────
@@ -1500,6 +1500,9 @@ function CreateMarketPanel() {
   const [parentMarketId, setParentMarketId] = useState<string>('');
   const [parentOptions, setParentOptions] = useState<Array<{ id: number; question: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Gates handleCreate for a locked-odds market — see the comment on
+  // LockedOddsConfirmDialog for why a passive preview wasn't enough.
+  const [confirmOddsOpen, setConfirmOddsOpen] = useState(false);
   // ─── Locked-odds config ────────────────────────────────────────────
   // On by default — every market created going forward is expected to
   // carry locked odds; parimutuel (unchecking this) is still fully
@@ -1582,7 +1585,8 @@ function CreateMarketPanel() {
     }
     setOptions(prev => [...prev, '']);
   };
-  const numOutcomesNow = options.map(o => o.trim()).filter(Boolean).length;
+  const cleanedOptionsNow = options.map(o => o.trim()).filter(Boolean);
+  const numOutcomesNow = cleanedOptionsNow.length;
 
   // Shared prefill core for both "Clone & Edit" (from a past market row)
   // and "quick-create from template" (from a saved market_templates
@@ -2185,14 +2189,41 @@ function CreateMarketPanel() {
           reserveDeployable={reserveDeployable}
           numOutcomes={numOutcomesNow}
           category={category}
+          options={cleanedOptionsNow}
         />
 
-        <Button onClick={handleCreate} disabled={createDisabled} className="w-full">
+        <Button
+          onClick={() => isLockedOdds ? setConfirmOddsOpen(true) : handleCreate()}
+          disabled={createDisabled}
+          className="w-full"
+        >
           {isSubmitting
             ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating...</>
             : isLockedOdds && !lockedOddsCheck.ok ? 'Fix locked-odds settings above'
-            : isLockedOdds ? 'Create Locked-Odds Market' : 'Create Market'}
+            : isLockedOdds ? 'Review odds & create' : 'Create Market'}
         </Button>
+
+        {isLockedOdds && (
+          <LockedOddsConfirmDialog
+            open={confirmOddsOpen}
+            onOpenChange={setConfirmOddsOpen}
+            question={question}
+            options={cleanedOptionsNow}
+            preview={buildOddsPreviewTable({
+              seedPool: buildLockedOddsSeedPool({
+                seedSize, seedProbability, seedProbsMulti, numOutcomes: numOutcomesNow,
+              }),
+              category, vigOverride, reserveDeployable,
+            })}
+            effectiveVigPct={vigOverride.trim() === '' ? resolveCategoryVig(category) : Number(vigOverride)}
+            categoryVigPct={resolveCategoryVig(category)}
+            confirming={isSubmitting}
+            onConfirm={async () => {
+              await handleCreate();
+              setConfirmOddsOpen(false);
+            }}
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -2599,6 +2630,7 @@ function validateLockedOddsSeed(input: {
   };
 }
 
+
 // ── Locked-odds config block ─────────────────────────────────────────────
 //
 // Used inside CreateMarketPanel. Collapsible; defaults preserve the
@@ -2618,6 +2650,7 @@ function LockedOddsConfigBlock(props: {
   reserveDeployable: number | null;
   numOutcomes: number;
   category: string;
+  options?: string[];
 }) {
   const {
     isLockedOdds, setIsLockedOdds,
@@ -2626,58 +2659,26 @@ function LockedOddsConfigBlock(props: {
     seedProbsMulti, setSeedProbsMulti,
     vigOverride, setVigOverride,
     reserveDeployable, numOutcomes, category,
+    options,
   } = props;
 
-  const seedSizeNum = Number(seedSize);
-  const seedProbNum = Number(seedProbability);
-  const vigNum = vigOverride.trim() === '' ? undefined : Number(vigOverride);
   const {
     validSeed, validProb, validVig, validMultiProbs, seedFitsReserve, reserveBelowMinimum,
-    multiProbs, multiProbSum,
+    multiProbSum,
   } = validateLockedOddsSeed({
     seedSize, seedProbability, seedProbsMulti, vigOverride, reserveDeployable, numOutcomes,
   });
 
-  // Compose the opening seed pool — same logic as the API but client-side.
-  // For 3+ outcomes we now use the admin's per-outcome probabilities
-  // instead of a blind uniform split.
-  const seedPool: number[] = (() => {
-    if (!validSeed || numOutcomes < 2) return [];
-    if (numOutcomes === 2) {
-      if (!validProb) return [];
-      const yes = Math.round(seedSizeNum * seedProbNum);
-      return [yes, seedSizeNum - yes];
-    }
-    if (validMultiProbs) {
-      const raw = multiProbs.map(p => Math.round(seedSizeNum * p));
-      const drift = seedSizeNum - raw.reduce((a, v) => a + v, 0);
-      raw[0] += drift;
-      return raw;
-    }
-    // Fallback while the admin is mid-edit (e.g. inputs don't sum to 1):
-    // render a uniform-split preview so the panel stays informative.
-    const share = Math.round(seedSizeNum / numOutcomes);
-    const out = Array.from({ length: numOutcomes }, () => share);
-    out[0] = seedSizeNum - share * (numOutcomes - 1);
-    return out;
-  })();
+  // Same helper the confirmation dialog uses — see its definition for why
+  // that matters (one seed-pool builder, not two that could quietly drift).
+  const seedPool: number[] = buildLockedOddsSeedPool({
+    seedSize, seedProbability, seedProbsMulti, numOutcomes,
+  });
 
-  // Hypothetical ₦500 opening stake on each outcome — gives the admin a
-  // concrete "this is what a Day-1 user will see" number.
-  const preview = isLockedOdds && seedPool.length >= 2 && validSeed && validProb
-    ? seedPool.map((_, i) => {
-        try {
-          return calculateLockedOdds(
-            { category, seedPool, realPool: Array(seedPool.length).fill(0), vigPctOverride: vigNum },
-            500,
-            i,
-            {},
-            { deployableTngn: reserveDeployable ?? 120_000, floorTngn: 30_000 },
-          );
-        } catch {
-          return null;
-        }
-      })
+  // Multi-stake preview — same helper + same three stakes the confirmation
+  // dialog shows, so the inline panel and the final gate never disagree.
+  const preview = isLockedOdds
+    ? buildOddsPreviewTable({ seedPool, category, vigOverride, reserveDeployable })
     : null;
 
   return (
@@ -2795,24 +2796,41 @@ function LockedOddsConfigBlock(props: {
             />
           </div>
 
-          {/* Live opening odds preview */}
+          {/* Live opening odds preview — three stakes, not one. ₦500 alone
+              never covers what a Multiplier leg actually shows (fixed
+              ₦100 reference stake, regardless of the real slip size) —
+              see the comment on ODDS_PREVIEW_STAKES for the full reasoning.
+              Same table shape the pre-create confirmation dialog shows. */}
           {preview && (
-            <div className="rounded-md bg-background/40 border border-border/40 p-2.5 space-y-1">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Opening odds — ₦500 sample</p>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {preview.map((r, i) => r && (
-                  <div key={i} className="bg-card/40 rounded px-2 py-1.5">
-                    <div className="text-[10px] text-muted-foreground">Outcome {i}</div>
-                    <div className="font-bold tabular-nums">{r.lockedOdds.toFixed(2)}×</div>
-                    <div className="text-[10px] text-muted-foreground">
-                      ₦{r.floorPayout.toLocaleString()} – ₦{r.upperPayout.toLocaleString()}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground">
-                      vig {(r.vigApplied * 100).toFixed(1)}%
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="rounded-md bg-background/40 border border-border/40 p-2.5 space-y-1.5 overflow-x-auto">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Opening odds preview</p>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className="text-left font-medium text-muted-foreground pr-2 pb-1">Stake</th>
+                    {Array.from({ length: numOutcomes }).map((_, i) => (
+                      <th key={i} className="text-right font-medium text-muted-foreground px-1.5 pb-1">
+                        {options?.[i] || `#${i}`}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map(row => (
+                    <tr key={row.stake}>
+                      <td className="pr-2 py-0.5 whitespace-nowrap">
+                        ₦{row.stake.toLocaleString()}
+                        <span className="text-muted-foreground"> · {row.label}</span>
+                      </td>
+                      {row.perOutcome.map((r, i) => (
+                        <td key={i} className="text-right px-1.5 py-0.5 tabular-nums font-bold">
+                          {r ? `${r.lockedOdds.toFixed(2)}×` : '—'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 

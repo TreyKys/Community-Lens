@@ -457,7 +457,7 @@ function computeVigSurcharges(
  * throwing so a new category that hasn't been added to VIG_DEFAULTS yet
  * still produces a quotable price.
  */
-function resolveCategoryVig(category: string): number {
+export function resolveCategoryVig(category: string): number {
   const key = category as keyof typeof VIG_DEFAULTS;
   if (Object.prototype.hasOwnProperty.call(VIG_DEFAULTS, key)) {
     return VIG_DEFAULTS[key];

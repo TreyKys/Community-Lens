@@ -818,9 +818,14 @@ function PriceHistory({ history, outcomeIdx, label, current }: {
   // One trade is a dot, not a line. Below that there is nothing to show, and
   // an empty chart frame reads as a loading failure.
   if (points.length < 2) {
+    // Deliberately doesn't interpolate the outcome label into a sentence —
+    // an outcome's text is free-form (a prop question's own outcome can be
+    // a full phrase like "Yes, it's unavoidable"), and stitching that into
+    // "...how {label} has moved" reads as broken grammar the moment the
+    // label isn't a single word.
     return (
       <p className="text-[10px] text-muted-foreground pt-1">
-        Not enough trading yet to show how {label} has moved.
+        Not enough trading yet to chart a price history.
       </p>
     );
   }
@@ -858,9 +863,9 @@ function PriceHistory({ history, outcomeIdx, label, current }: {
 
   return (
     <div className="pt-1 space-y-1">
-      <div className="flex items-center justify-between text-[10px]">
-        <span className="text-muted-foreground">{label} over time</span>
-        <span className={`tabular ${up ? 'text-emerald-400' : 'text-red-400'}`}>
+      <div className="flex items-center justify-between gap-2 text-[10px]">
+        <span className="text-muted-foreground truncate min-w-0">&ldquo;{label}&rdquo; over time</span>
+        <span className={`tabular shrink-0 ${up ? 'text-emerald-400' : 'text-red-400'}`}>
           {up ? '▲' : '▼'} {Math.abs((current - first) * 100).toFixed(1)} pts
         </span>
       </div>
