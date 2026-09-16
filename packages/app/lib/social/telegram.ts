@@ -16,10 +16,48 @@
 //
 // API sending exists behind SOCIAL_REPLY_MODE=api for when the budget
 // justifies it, but manual is the default and the recommended mode.
+//
+// ── who can command it vs. where it posts ───────────────────────────
+//
+// TELEGRAM_CHAT_ID is the DESTINATION — where cards and notifications
+// get sent. TELEGRAM_ALLOWED_USER_IDS is WHO may command the bot —
+// checked against the sender of an incoming message or button tap.
+//
+// These used to be the same value, because in a private 1:1 chat with
+// the bot they ARE the same value (a private chat's id equals the
+// user's own id). That stopped being safe to assume the moment the bot
+// can be added to a GROUP: a group's chat id is a large negative
+// number, not anyone's user id, so comparing a sender's id against it
+// would reject every command from everyone. TELEGRAM_ALLOWED_USER_IDS
+// falls back to TELEGRAM_CHAT_ID when unset, so nothing changes for an
+// existing private-chat setup — it only matters once TELEGRAM_CHAT_ID
+// is switched to point at a group.
+//
+// ── retrying a send ──────────────────────────────────────────────────
+//
+// Every Telegram call in this file goes through tg() below, so this is
+// the one place a retry-with-backoff fixes every call site at once.
+// Two failure modes are worth retrying automatically rather than
+// surfacing immediately:
+//
+//   429 — Telegram's own per-chat rate limit. A burst of a dozen
+//   sendPhoto calls in one digest run can trip this; Telegram's
+//   response names the exact wait in `retry_after`, which is honoured
+//   rather than guessed, because guessing shorter just earns a second
+//   429.
+//
+//   5xx / a network error — Telegram's side, or the connection, having
+//   a moment. A short fixed backoff and a couple of retries covers the
+//   realistic transient case without ever bothering the operator.
+//
+// A genuine 4xx (bad chat id, wrong token, malformed payload) is NOT
+// retried — the request will fail identically every time, so retrying
+// only adds delay before the caller finds out.
 
 import { fetchWithTimeout } from './selfCall';
 
 const TG = 'https://api.telegram.org';
+const MAX_ATTEMPTS = 3;
 
 function botToken(): string {
   const t = process.env.TELEGRAM_BOT_TOKEN;
@@ -33,17 +71,61 @@ function chatId(): string {
   return c;
 }
 
+/** Telegram user ids allowed to command the bot. See the note above. */
+export function allowedUserIds(): string[] {
+  const raw = process.env.TELEGRAM_ALLOWED_USER_IDS || process.env.TELEGRAM_CHAT_ID || '';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export function isAllowedUser(userId: string | number | null | undefined): boolean {
+  const id = String(userId ?? '').trim();
+  return id.length > 0 && allowedUserIds().includes(id);
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 async function tg(method: string, payload: Record<string, unknown>): Promise<any> {
-  const r = await fetchWithTimeout(`${TG}/bot${botToken()}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const json = await r.json().catch(() => ({}));
-  if (!r.ok || json?.ok === false) {
-    throw new Error(`telegram ${method} failed: ${JSON.stringify(json).slice(0, 300)}`);
+  let lastErr: Error = new Error(`telegram ${method}: no attempt made`);
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let r: Response;
+    try {
+      r = await fetchWithTimeout(`${TG}/bot${botToken()}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e: any) {
+      // The request never reached Telegram — a connection-level
+      // failure. Worth a short retry; not worth burning every attempt
+      // on, since a dead connection rarely heals in milliseconds.
+      lastErr = new Error(`telegram ${method} network error: ${e?.message ?? e}`);
+      if (attempt < MAX_ATTEMPTS) { await sleep(attempt * 1000); continue; }
+      break;
+    }
+
+    const json = await r.json().catch(() => ({}));
+    if (r.ok && json?.ok !== false) return json.result;
+
+    lastErr = new Error(`telegram ${method} failed ${r.status}: ${JSON.stringify(json).slice(0, 300)}`);
+
+    if (r.status === 429 && attempt < MAX_ATTEMPTS) {
+      const retryAfter = Number(json?.parameters?.retry_after ?? 1);
+      await sleep((retryAfter + 0.5) * 1000);
+      continue;
+    }
+
+    if (r.status >= 500 && attempt < MAX_ATTEMPTS) {
+      await sleep(attempt * 1000);
+      continue;
+    }
+
+    // A genuine bad request (400/401/403/...) will fail the same way
+    // every time — stop rather than spend the remaining attempts on it.
+    break;
   }
-  return json.result;
+
+  throw lastErr;
 }
 
 const escapeHtml = (s: string) =>
@@ -359,4 +441,33 @@ export async function notify(text: string): Promise<void> {
     parse_mode: 'HTML',
     link_preview_options: { is_disabled: true },
   });
+}
+
+/**
+ * For a message important enough that missing it silently would be
+ * worse than the operator getting told twice.
+ *
+ * notify() already retries transient failures inside tg() — this is
+ * for what happens once those retries are exhausted, which means
+ * Telegram itself is not taking messages right now, not just one call
+ * hitting a rate limit. Telling the operator "Telegram is down" BY
+ * SENDING THEM A TELEGRAM MESSAGE obviously will not work, so this
+ * falls back to email — the one channel that does not share Telegram's
+ * failure mode. Silently gives up only if email is not configured
+ * either (RESEND_API_KEY unset), matching sendOpsEmail's own no-op.
+ */
+export async function notifyOrEscalate(text: string, emailSubject: string): Promise<void> {
+  try {
+    await notify(text);
+  } catch (e: any) {
+    const { sendOpsEmail } = await import('@/lib/ops-email');
+    const plain = text.replace(/<[^>]+>/g, '');
+    await sendOpsEmail({
+      subject: emailSubject,
+      html:
+        `<p>Telegram would not take this after retrying:</p>` +
+        `<p><code>${String(e?.message ?? e).replace(/</g, '&lt;').slice(0, 300)}</code></p>` +
+        `<pre>${plain.replace(/</g, '&lt;')}</pre>`,
+    }).catch(() => {});
+  }
 }

@@ -13,7 +13,7 @@
 
 import { getSupabaseAdmin, getBaseUrl } from '@/lib/oracle';
 import { randomThemeId } from './cardText';
-import { setMedia, autoCardUrl } from './media';
+import { setMedia, autoCardUrl, resolveMediaUrl } from './media';
 import { sendReadyCard } from './telegram';
 
 export type ReadyPostInput = {
@@ -26,15 +26,25 @@ export type ReadyPostInput = {
   sourceMarketId?: number | null;
 };
 
+export type ReadyPostResult = {
+  postId: number;
+  /** False when sendReadyCard exhausted its own retries — the row was
+   * still written, so redeliverPendingCards() will pick it up later. */
+  delivered: boolean;
+};
+
 /**
  * Insert one post as a draft, attach its card, and push it to Telegram
  * as a ready-to-post card.
  *
- * Returns the post id, or null if the insert was rejected — in
- * practice almost always the market+kind dedupe index doing its job
- * when two runs overlap.
+ * Returns the post id and whether the card actually reached Telegram,
+ * or null if the insert was rejected — in practice almost always the
+ * market+kind dedupe index doing its job when two runs overlap. A
+ * delivery failure is NOT swallowed here: the row is left with
+ * provider_post_id null so redeliverPendingCards() can find it, and
+ * the caller decides how to tell the operator.
  */
-export async function makeReadyPost(input: ReadyPostInput): Promise<number | null> {
+export async function makeReadyPost(input: ReadyPostInput): Promise<ReadyPostResult | null> {
   const supa = getSupabaseAdmin();
 
   const { data: row, error } = await supa
@@ -72,5 +82,56 @@ export async function makeReadyPost(input: ReadyPostInput): Promise<number | nul
     await supa.from('social_posts').update({ provider_post_id: `tg:${messageId}` }).eq('id', postId);
   }
 
-  return postId;
+  return { postId, delivered: messageId > 0 };
+}
+
+/** A draft is left for redelivery once it's sat this long without a card. */
+const REDELIVER_MIN_AGE_MS = 5 * 60 * 1000;
+
+export type RedeliverResult = {
+  attempted: number;
+  delivered: number;
+  stillFailing: number[];
+};
+
+/**
+ * Retry cards that were written but never reached Telegram —
+ * sendReadyCard() inside makeReadyPost() already retries three times
+ * with backoff (see telegram.ts's tg()), so a row still missing its
+ * provider_post_id after several minutes means Telegram itself was
+ * unreachable for the whole run, not a one-off blip. Meant to run on a
+ * short cron (see cron-social-redeliver.yml), independent of whatever
+ * triggered the original send.
+ */
+export async function redeliverPendingCards(): Promise<RedeliverResult> {
+  const supa = getSupabaseAdmin();
+  const cutoff = new Date(Date.now() - REDELIVER_MIN_AGE_MS).toISOString();
+
+  const { data: rows } = await supa
+    .from('social_posts')
+    .select('id, body, media_url')
+    .eq('status', 'draft')
+    .is('provider_post_id', null)
+    .lt('created_at', cutoff);
+
+  const result: RedeliverResult = { attempted: 0, delivered: 0, stillFailing: [] };
+  if (!rows?.length) return result;
+
+  for (const row of rows as Array<{ id: number; body: string; media_url: string | null }>) {
+    result.attempted++;
+    try {
+      const mediaUrl = row.media_url ? await resolveMediaUrl(row.media_url) : undefined;
+      const messageId = await sendReadyCard({ postId: row.id, body: row.body, mediaUrl });
+      if (messageId) {
+        await supa.from('social_posts').update({ provider_post_id: `tg:${messageId}` }).eq('id', row.id);
+        result.delivered++;
+      } else {
+        result.stillFailing.push(row.id);
+      }
+    } catch {
+      result.stillFailing.push(row.id);
+    }
+  }
+
+  return result;
 }

@@ -149,7 +149,16 @@ export function sanitisePost(raw: string): string {
   return t;
 }
 
-/** Phrases that must never leave the account. Checked after generation. */
+/**
+ * Phrases that must never leave the account. Checked after generation.
+ *
+ * The hedge-language group below (reportedly, sources say, etc.) backs
+ * up an instruction already in the drafting prompt itself — this is
+ * defense-in-depth for when the model ignores it, not the primary
+ * control. It exists because a hedge word is exactly what slips out
+ * when a model states something it isn't fully sure of instead of
+ * dropping the line, and a hedged claim reads as news either way.
+ */
 const BANNED = [
   /guarantee/i,
   /\bsure bet\b/i,
@@ -157,6 +166,12 @@ const BANNED = [
   /free money/i,
   /risk[- ]free/i,
   /\beasy money\b/i,
+  /reportedly/i,
+  /sources say/i,
+  /allegedly/i,
+  /unconfirmed/i,
+  /rumo[u]?r has it/i,
+  /according to sources/i,
 ];
 
 export function violatesCompliance(text: string): string | null {

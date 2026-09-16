@@ -249,10 +249,46 @@ lost; `/resume` picks up where it stopped.
 reads as paused. An unattended job that spends money should not decide
 on its own that everything is probably fine when it cannot check.
 
-Commands are accepted only from `TELEGRAM_CHAT_ID`. Telegram delivers
-every message the bot can see and bot usernames are guessable — without
-that check, a stranger who found it could pause your publishing or burn
-budget on paid lookups.
+Commands are accepted only from an allowed user id — `TELEGRAM_ALLOWED_USER_IDS`
+if set, else `TELEGRAM_CHAT_ID` (see "Running the bot in a group" below).
+Telegram delivers every message the bot can see and bot usernames are
+guessable — without that check, a stranger who found it could pause your
+publishing or burn budget on paid lookups.
+
+### Running the bot in a group
+
+`TELEGRAM_CHAT_ID` is *where cards get sent*; it can be a group id
+(negative, e.g. `-1001234567890`) just as well as your own. But a
+group's chat id is nobody's user id, so the moment you point it at a
+group, the old shortcut of comparing a sender's id to `TELEGRAM_CHAT_ID`
+would reject every command from everyone.
+
+`TELEGRAM_ALLOWED_USER_IDS` is the fix — a separate, comma-separated
+list of the numeric user ids allowed to drive the bot (tap buttons,
+run `/draft`, upload photos), independent of where the cards themselves
+land. Leave it unset for a private 1:1 chat (it falls back to
+`TELEGRAM_CHAT_ID`, which is correct there); set it explicitly the
+moment `TELEGRAM_CHAT_ID` becomes a group.
+
+One more thing to know: Telegram bots default to **privacy mode** in
+groups, seeing only messages that are commands, mention the bot, or
+reply to one of its own messages — a bare photo upload with no reply
+would go unseen. `@BotFather` → `/setprivacy` → your bot → *Disable* if
+you want the "just send a photo" flow to work the same in a group as it
+does 1:1. Tapping a card's inline buttons always works regardless —
+those are callbacks, not ordinary messages.
+
+### If a card fails to reach Telegram
+
+`sendReadyCard` (and every other Telegram call) already retries up to
+three times with backoff — honouring Telegram's own `retry_after` on a
+429, and backing off on a 5xx or network error — before giving up. If
+it's still down after that, the post row is left as a draft with no
+`provider_post_id`, the operator is told in-chat that a card didn't go
+out, and `cron-social-redeliver.yml` (every 20 minutes) retries any such
+row automatically. If Telegram itself stays unreachable through that
+too, the alert escalates to email via `sendOpsEmail` instead — the one
+channel that doesn't depend on Telegram being up.
 
 ---
 
@@ -333,6 +369,10 @@ Blocked in **all** posts and replies:
 - Any link (also a cost control)
 - `guarantee`, `sure bet`, `can't lose`, `free money`, `risk-free`,
   `easy money`
+- Hedge language — `reportedly`, `sources say`, `allegedly`,
+  `unconfirmed`, `rumour has it`, `according to sources`. The drafting
+  prompt already tells the model not to hedge; this is the backstop for
+  when it does anyway. A hedged claim still reads as news.
 
 Blocked in **replies** specifically:
 
@@ -349,6 +389,31 @@ a quiet scan is a working scan.
 
 Anything failing a guard is **dropped, not published**. A skipped slot is
 always cheaper than a bad post from a financial product.
+
+### Guarding against the research step inventing things
+
+`researchBrief()` (`lib/social/research.ts`) is Gemini with live Google
+Search grounding — it is what lets `/draft` and the digest talk about
+what actually happened this week instead of generic filler. Three
+layers keep it honest:
+
+1. **The prompt requires a citation.** Every line in the "what
+   happened" section must end with `[Source Name]`, naming a page the
+   model actually searched.
+2. **The citation is checked against the real grounding metadata, not
+   trusted.** `filterUncitedFindings()` drops any line whose bracketed
+   source doesn't match one of the pages Gemini's own grounding chunks
+   say it consulted — catching an invented or misremembered source
+   before it reaches anyone, model self-report or not.
+3. **The operator sees the findings and sources before the posts.**
+   `/draft` always showed this; the digest cron now does too, per
+   topic, before that burst's cards land. Whether a "fact" a search
+   turned up is actually true is a human judgement — this makes sure
+   the human gets to make it while the posts are still drafts.
+
+None of this is a guarantee — a sufficiently confident, wrong grounding
+result would still pass. It meaningfully reduces the odds a fabricated
+"fact" reaches a card, and keeps a human in the loop as the last check.
 
 ---
 

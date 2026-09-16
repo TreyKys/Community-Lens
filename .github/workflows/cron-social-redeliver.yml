@@ -1,0 +1,27 @@
+name: Cron — Social Redeliver
+
+# Safety net for cron-social-digest.yml and /draft: a card that never
+# reached Telegram (sendReadyCard already retried three times with
+# backoff inside that run) sits as a draft row with no provider_post_id
+# until this picks it up and tries again. Frequent because the whole
+# point is "let me know and retry after some time" — the operator
+# shouldn't have to notice a gap and re-run something manually.
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-social-redeliver
+  cancel-in-progress: false
+
+jobs:
+  redeliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retry any cards that failed to reach Telegram
+        run: |
+          curl -sSf --max-time 110 -X POST "${{ secrets.API_BASE_URL }}/api/social/redeliver" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

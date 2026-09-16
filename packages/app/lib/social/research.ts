@@ -35,6 +35,58 @@ export type Research = {
   sources: string[];
 };
 
+const CITATION_RE = /\[([^[\]]{2,80})]\s*$/;
+
+/** True if a bracketed citation plausibly names one of the real sources. */
+function citationMatches(citation: string, sources: string[]): boolean {
+  const c = citation.trim().toLowerCase();
+  if (!c) return false;
+  return sources.some((s) => {
+    const norm = s.trim().toLowerCase();
+    return norm.length > 0 && (norm.includes(c) || c.includes(norm));
+  });
+}
+
+/**
+ * Drop any "what happened" line whose bracketed citation doesn't
+ * actually match a page from the grounding metadata — the pages
+ * Gemini's search really consulted, not just what it claims to have
+ * searched. The prompt requires an exact source name in brackets on
+ * every line in that section; this is what catches the model citing
+ * something that was never in the grounding chunks, whether invented
+ * outright or training-data recall dressed up as a live result.
+ *
+ * Only "=== WHAT HAPPENED ===" is checked. "=== WHAT PEOPLE ARE
+ * ARGUING ABOUT ===" is framing a live disagreement rather than
+ * asserting a discrete fact, so it is left as written — a citation
+ * requirement there would mostly just strip the section to nothing.
+ *
+ * A pure string transform, independent of the network call, so it can
+ * be unit-tested without a fake API response.
+ */
+export function filterUncitedFindings(findings: string, sources: string[]): string {
+  const HEADER = '=== WHAT HAPPENED ===';
+  const start = findings.indexOf(HEADER);
+  if (start === -1) return findings;
+
+  const bodyStart = start + HEADER.length;
+  const nextHeader = findings.indexOf('===', bodyStart);
+  const bodyEnd = nextHeader === -1 ? findings.length : nextHeader;
+
+  const before = findings.slice(0, bodyStart);
+  const body = findings.slice(bodyStart, bodyEnd);
+  const after = findings.slice(bodyEnd);
+
+  const kept = body.split('\n').filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return true; // preserve blank-line spacing
+    const m = trimmed.match(CITATION_RE);
+    return !!m && citationMatches(m[1], sources);
+  });
+
+  return before + kept.join('\n') + after;
+}
+
 /**
  * Ask Gemini, with live Google Search, what is currently happening
  * around the brief.
@@ -58,10 +110,13 @@ Return TWO sections.
 === WHAT HAPPENED ===
 Specific events from the last 7 days. Every line must contain at least one PROPER NOUN (a person, a team, a place) or a NUMBER. A line with neither is useless — drop it.
 
-Good:  "Sun 3 Aug — Kola was evicted with 12% of the vote, the narrowest margin this season"
-Good:  "Tue — Ada and Chidi's argument over the food budget ran 40 minutes on the live feed"
+Every line MUST end with the source it came from, in square brackets, exactly matching the title of a page you actually searched. No bracket, no line.
+
+Good:  "Sun 3 Aug — Kola was evicted with 12% of the vote, the narrowest margin this season [Punch]"
+Good:  "Tue — Ada and Chidi's argument over the food budget ran 40 minutes on the live feed [BBNaija Updates]"
 Bad:   "there was drama in the house this week"
 Bad:   "housemates continue to form alliances"
+Bad:   "Kola was evicted with 12% of the vote" (no bracketed source — this line gets thrown away before a human ever sees it)
 
 === WHAT PEOPLE ARE ARGUING ABOUT ===
 The live disagreements. For each: the claim, and what the other side says.
@@ -127,7 +182,8 @@ If searching turns up nothing from the last 7 days, reply with exactly: NOTHING 
       if (title && !sources.includes(title)) sources.push(String(title));
     }
 
-    return { findings: text, sources: sources.slice(0, 6) };
+    const cappedSources = sources.slice(0, 6);
+    return { findings: filterUncitedFindings(text, cappedSources), sources: cappedSources };
   } catch {
     return null;
   }

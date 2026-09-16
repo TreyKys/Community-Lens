@@ -6,6 +6,7 @@ import {
   sendDraftCard, markDraftHandled,
   sendPreviewCard, refreshPreviewCard, sendPhotoPreview,
   sendReadyCard, markReadyHandled, swapReadyCardPhoto,
+  isAllowedUser,
 } from '@/lib/social/telegram';
 import {
   setMedia, autoCardUrl, awaitMediaFor, clearAwaitingMedia, pendingMediaPost,
@@ -185,9 +186,22 @@ async function handleDraft(raw: string): Promise<void> {
   }
 
   let sent = 0;
+  let undelivered = 0;
   for (const body of result.drafts) {
-    const id = await makeReadyPost({ body, kind: 'briefed', brief: req.brief });
-    if (id) sent++;
+    const made = await makeReadyPost({ body, kind: 'briefed', brief: req.brief });
+    if (made) {
+      sent++;
+      if (!made.delivered) undelivered++;
+    }
+  }
+
+  if (undelivered) {
+    // The row is still written — cron-social-redeliver.yml will retry
+    // it shortly — but the operator should know why a card they were
+    // expecting hasn't shown up yet.
+    await notify(
+      `<i>${undelivered} card${undelivered === 1 ? '' : 's'} could not reach Telegram just now — will retry automatically in a few minutes.</i>`,
+    ).catch(() => {});
   }
 
   if (result.rejected.length) {
@@ -536,7 +550,7 @@ export async function POST(request: Request) {
     // check below drops it.
     if (update?.message?.photo) {
       const photoFrom = String(update?.message?.from?.id ?? '');
-      if (photoFrom === String(process.env.TELEGRAM_CHAT_ID ?? '')) {
+      if (isAllowedUser(photoFrom)) {
         try {
           await handlePhoto(update);
         } catch (e: any) {
@@ -550,12 +564,15 @@ export async function POST(request: Request) {
     const raw = String(update?.message?.text ?? '').trim();
     if (!raw) return NextResponse.json({ ok: true });
 
-    // Only the configured operator may drive this. Telegram delivers
-    // every message the bot can see, and the bot's username is
-    // guessable — without this, a stranger who finds it could pause
-    // publishing or burn budget on paid lookups.
+    // Only an allowed operator may drive this. Telegram delivers every
+    // message the bot can see — including everything in a group it's
+    // added to — and the bot's username is guessable, so without this a
+    // stranger (or another member of the group) could pause publishing
+    // or burn budget on paid lookups. TELEGRAM_ALLOWED_USER_IDS is the
+    // allow-list; it's distinct from TELEGRAM_CHAT_ID because in a group
+    // the chat id is the group's, not any operator's.
     const fromId = String(update?.message?.from?.id ?? '');
-    if (fromId !== String(process.env.TELEGRAM_CHAT_ID ?? '')) {
+    if (!isAllowedUser(fromId)) {
       return NextResponse.json({ ok: true });
     }
 
@@ -583,7 +600,7 @@ export async function POST(request: Request) {
   // Telegram reports the tapper, and it need not be the same person the
   // card was sent to.
   const cbFrom = String(cb.from?.id ?? '');
-  if (cbFrom !== String(process.env.TELEGRAM_CHAT_ID ?? '')) {
+  if (!isAllowedUser(cbFrom)) {
     await answerCallback(cb.id, 'Not authorised').catch(() => {});
     return NextResponse.json({ ok: true });
   }

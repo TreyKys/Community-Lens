@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from '@/lib/oracle';
 import { composeMarketPost, openMarkets, type PostKind } from '@/lib/social/compose';
 import { draftFromBrief } from '@/lib/social/brief';
 import { makeReadyPost } from '@/lib/social/ready';
-import { notify } from '@/lib/social/telegram';
+import { notify, notifyOrEscalate } from '@/lib/social/telegram';
 import { getSettings } from '@/lib/social/settings';
 import { DIGEST_TOPICS, MARKET_POSTS_PER_RUN } from '@/lib/social/topics';
 
@@ -80,6 +80,7 @@ export async function POST(request: Request) {
 
   const counts: Counts = {};
   const errors: string[] = [];
+  const undelivered: number[] = [];
   let total = 0;
 
   // ── the fixed topics ────────────────────────────────────────────
@@ -88,16 +89,32 @@ export async function POST(request: Request) {
     try {
       const result = await draftFromBrief({ brief: topic.brief, count: topic.countPerRun });
 
+      // The operator is the only one who can tell whether a "fact" a
+      // search turned up is actually true, and they need that chance
+      // before the cards below land, not after. /draft already showed
+      // this; the digest cron ran the same research and stayed quiet
+      // about it, which was the gap.
+      if (result.research) {
+        const src = result.research.sources.length
+          ? `\n<i>Sources: ${escapeHtml(result.research.sources.join(', '))}</i>`
+          : `\n<i>No sources returned with this — treat it with extra caution.</i>`;
+        await notify(
+          `<b>${escapeHtml(topic.label)} — what I found</b>\n\n` +
+          `${escapeHtml(result.research.findings.slice(0, 1500))}${src}`,
+        ).catch(() => {});
+      }
+
       for (const body of result.drafts) {
-        const id = await makeReadyPost({
+        const made = await makeReadyPost({
           body,
           kind: 'briefed',
           brief: topic.brief,
           kicker: topic.label,
         });
-        if (id) {
+        if (made) {
           counts[topic.label]++;
           total++;
+          if (!made.delivered) undelivered.push(made.postId);
         }
       }
 
@@ -134,25 +151,36 @@ export async function POST(request: Request) {
       const body = await composeMarketPost(m, kind);
       if (!body) continue;
 
-      const id = await makeReadyPost({ body, kind, sourceMarketId: m.id });
-      if (id) {
+      const made = await makeReadyPost({ body, kind, sourceMarketId: m.id });
+      if (made) {
         counts['Markets']++;
         total++;
+        if (!made.delivered) undelivered.push(made.postId);
       }
     }
   } catch (e: any) {
     errors.push(`Markets: ${String(e?.message ?? e).slice(0, 150)}`);
   }
 
+  // A card that never reached Telegram is still a written draft row —
+  // cron-social-redeliver.yml will retry it — but the operator should
+  // know a burst came up short of what "generated" claims, and this is
+  // important enough to reach them by email if Telegram itself is the
+  // thing that's down.
+  if (undelivered.length) {
+    errors.push(`${undelivered.length} card${undelivered.length === 1 ? '' : 's'} failed to reach Telegram — will retry automatically`);
+  }
+
   // The whole point is the notification — unlike the old planner this
   // fires every run, success or not, because a burst with nothing to
   // show is itself worth knowing about.
-  await notify(
+  await notifyOrEscalate(
     summarise(counts, total) +
     (errors.length ? `\n\n<i>${errors.map((e) => escapeHtml(e)).join(' · ')}</i>` : ''),
-  ).catch(() => {});
+    'Opinions.ng social digest — Telegram unreachable',
+  );
 
-  return NextResponse.json({ generated: total, counts, errors });
+  return NextResponse.json({ generated: total, counts, errors, undelivered: undelivered.length });
 }
 
 const escapeHtml = (s: string) =>

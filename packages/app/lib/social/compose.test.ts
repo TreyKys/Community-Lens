@@ -58,6 +58,16 @@ describe('violatesCompliance', () => {
     expect(violatesCompliance('Full split on opinionsng.com')).toBeTruthy();
   });
 
+  it('rejects hedge language, a backstop for unverifiable "news"', () => {
+    // The drafting prompt already tells the model not to hedge — this
+    // is what catches it if it does anyway.
+    expect(violatesCompliance('Kola reportedly left the house last night')).toBeTruthy();
+    expect(violatesCompliance('Sources say the vote was rigged')).toBeTruthy();
+    expect(violatesCompliance('Ada allegedly walked out of the interview')).toBeTruthy();
+    expect(violatesCompliance('An unconfirmed report claims a twist is coming')).toBeTruthy();
+    expect(violatesCompliance('Rumour has it the finale is moving up')).toBeTruthy();
+  });
+
   it('passes ordinary market commentary', () => {
     expect(violatesCompliance('Arsenal at 47%. Draw at 28%. The crowd is split.')).toBeNull();
   });
