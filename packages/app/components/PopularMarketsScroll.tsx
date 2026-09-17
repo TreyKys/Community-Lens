@@ -40,12 +40,22 @@ export function PopularMarketsScroll() {
     let cancelled = false;
     (async () => {
       // Top open markets ordered by stake volume — true "popular" signal.
-      const cutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
+      //
+      // Two staleness gates, not one: a RESOLVED market only counts as
+      // "popular now" if it resolved recently (resolvedCutoff). An
+      // OPEN/LOCKED market only counts if it hasn't sat closed-but-
+      // unresolved for ages (staleCutoff). That second gate matters
+      // because it's also the only thing keeping out `pending_void` —
+      // a market auto-queued for void (e.g. the "no bets placed"
+      // false-positive bug) never resolves and never goes voided
+      // either, so without a closes_at floor it would rank forever on
+      // an old, empty total_pool right alongside genuinely live markets.
+      const resolvedCutoff = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
+      const staleCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from('markets')
         .select('id, question, category, total_pool, closes_at, options, status')
-        .not('status', 'eq', 'voided')
-        .or(`status.neq.resolved,resolved_at.gte.${cutoff}`)
+        .or(`and(status.in.(open,locked),closes_at.gte.${staleCutoff}),and(status.eq.resolved,resolved_at.gte.${resolvedCutoff})`)
         .is('parent_market_id', null)
         .order('total_pool', { ascending: false })
         .limit(12);
