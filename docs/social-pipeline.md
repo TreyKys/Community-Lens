@@ -394,26 +394,38 @@ always cheaper than a bad post from a financial product.
 
 `researchBrief()` (`lib/social/research.ts`) is Gemini with live Google
 Search grounding — it is what lets `/draft` and the digest talk about
-what actually happened this week instead of generic filler. Three
-layers keep it honest:
+what actually happened this week instead of generic filler. Four
+layers keep it honest, in order:
 
-1. **The prompt requires a citation.** Every line in the "what
+1. **The topic briefs name the current window explicitly.** "This week
+   in the current ongoing season" beats "the latest" — the model reads
+   an unanchored brief as "whatever you know about this subject" and
+   writes from training data, which for a card sent today means facts
+   from years ago (`Ten Hag under pressure`, `Poch's head`). The briefs
+   in `topics.ts` name the competitions, the season, the 7-day window,
+   and what NOT to include, so the search has something concrete to
+   look for.
+2. **The prompt requires a citation.** Every line in the "what
    happened" section must end with `[Source Name]`, naming a page the
    model actually searched.
-2. **The citation is checked against the real grounding metadata, not
+3. **The citation is checked against the real grounding metadata, not
    trusted.** `filterUncitedFindings()` drops any line whose bracketed
    source doesn't match one of the pages Gemini's own grounding chunks
    say it consulted — catching an invented or misremembered source
    before it reaches anyone, model self-report or not.
-3. **The operator sees the findings and sources before the posts.**
-   `/draft` always showed this; the digest cron now does too, per
-   topic, before that burst's cards land. Whether a "fact" a search
-   turned up is actually true is a human judgement — this makes sure
-   the human gets to make it while the posts are still drafts.
+4. **No research → no post, in the digest.** If the search returns
+   nothing, or every "what happened" line fails the citation check
+   (`hasCitedFindings` returns false), `researchBrief()` returns null
+   and the digest skips that topic for the round with a "no verified
+   current news — skipped" line in the summary. Falling back to
+   general knowledge is exactly what put stale takes on cards in the
+   first place. `/draft` still runs in that case because a human is
+   watching in real time and gets a **loud warning** before the drafts
+   — the digest has no such moment, so it doesn't get the option.
 
 None of this is a guarantee — a sufficiently confident, wrong grounding
-result would still pass. It meaningfully reduces the odds a fabricated
-"fact" reaches a card, and keeps a human in the loop as the last check.
+result would still pass — but stale training-data takes are now blocked
+by construction, not by hoping the model behaves.
 
 ---
 

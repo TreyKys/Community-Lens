@@ -180,8 +180,10 @@ async function handleDraft(raw: string): Promise<void> {
     ).catch(() => {});
   } else {
     await notify(
-      `<i>No recent news found for that brief — the posts below are written from general knowledge, ` +
-      `so they may read generic. A more specific brief usually helps.</i>`,
+      `<b>⚠ NO VERIFIED CURRENT NEWS FOUND for that brief.</b>\n\n` +
+      `The posts below are written from the model's training data, not from live search. ` +
+      `They will likely name people or events that are out of date — check every specific ` +
+      `before tapping Posted, or Discard the lot and try a more specific brief.`,
     ).catch(() => {});
   }
 

@@ -64,6 +64,23 @@ function citationMatches(citation: string, sources: string[]): boolean {
  * A pure string transform, independent of the network call, so it can
  * be unit-tested without a fake API response.
  */
+/**
+ * True when the WHAT HAPPENED section contains at least one real
+ * (non-blank) line. Empty means the citation filter dropped
+ * everything, which the digest reads as "no verified news to write
+ * from" and skips.
+ */
+export function hasCitedFindings(findings: string): boolean {
+  const HEADER = '=== WHAT HAPPENED ===';
+  const start = findings.indexOf(HEADER);
+  if (start === -1) return false;
+  const bodyStart = start + HEADER.length;
+  const nextHeader = findings.indexOf('===', bodyStart);
+  const bodyEnd = nextHeader === -1 ? findings.length : nextHeader;
+  const body = findings.slice(bodyStart, bodyEnd);
+  return body.split('\n').some((line) => line.trim().length > 0);
+}
+
 export function filterUncitedFindings(findings: string, sources: string[]): string {
   const HEADER = '=== WHAT HAPPENED ===';
   const start = findings.indexOf(HEADER);
@@ -183,7 +200,18 @@ If searching turns up nothing from the last 7 days, reply with exactly: NOTHING 
     }
 
     const cappedSources = sources.slice(0, 6);
-    return { findings: filterUncitedFindings(text, cappedSources), sources: cappedSources };
+    const filtered = filterUncitedFindings(text, cappedSources);
+
+    // If nothing survived the citation check under WHAT HAPPENED, the
+    // whole research call is a null — the drafter's "build every post
+    // on this" rail depends on there being facts under that header. If
+    // it's empty, the model has nothing to build on, and past
+    // experience is it silently reverts to training-data memories
+    // ("Ten Hag under pressure" in 2026). Better to return nothing and
+    // let the digest skip the topic than to smuggle stale takes in.
+    if (!hasCitedFindings(filtered)) return null;
+
+    return { findings: filtered, sources: cappedSources };
   } catch {
     return null;
   }

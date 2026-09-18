@@ -231,12 +231,21 @@ export type DraftResult = {
  */
 export async function draftFromBrief(
   req: BriefRequest,
-  opts: { includeMarkets?: boolean; research?: boolean } = {},
+  opts: { includeMarkets?: boolean; research?: boolean; injectedResearch?: Research | null } = {},
 ): Promise<DraftResult> {
   // Research first. A post about what happened last night beats a post
   // about the general nature of the thing, every time — and only one of
   // those can start a conversation on X.
-  const research = opts.research === false ? null : await researchBrief(req.brief);
+  //
+  // The digest calls researchBrief itself so it can bail out early
+  // when there is no verified current news, then passes what it found
+  // in here — no need to run the same grounded search twice.
+  const research =
+    opts.injectedResearch !== undefined
+      ? opts.injectedResearch
+      : opts.research === false
+        ? null
+        : await researchBrief(req.brief);
 
   const context = opts.includeMarkets === false ? '' : await marketContext();
   const avoid = await recentBodiesForBrief(req.brief);

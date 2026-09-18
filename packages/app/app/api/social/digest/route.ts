@@ -3,6 +3,7 @@ import { safeSecretMatch } from '@/lib/safeCompare';
 import { getSupabaseAdmin } from '@/lib/oracle';
 import { composeMarketPost, openMarkets, type PostKind } from '@/lib/social/compose';
 import { draftFromBrief } from '@/lib/social/brief';
+import { researchBrief } from '@/lib/social/research';
 import { makeReadyPost } from '@/lib/social/ready';
 import { notify, notifyOrEscalate } from '@/lib/social/telegram';
 import { getSettings } from '@/lib/social/settings';
@@ -87,22 +88,34 @@ export async function POST(request: Request) {
   for (const topic of DIGEST_TOPICS) {
     counts[topic.label] = 0;
     try {
-      const result = await draftFromBrief({ brief: topic.brief, count: topic.countPerRun });
-
-      // The operator is the only one who can tell whether a "fact" a
-      // search turned up is actually true, and they need that chance
-      // before the cards below land, not after. /draft already showed
-      // this; the digest cron ran the same research and stayed quiet
-      // about it, which was the gap.
-      if (result.research) {
-        const src = result.research.sources.length
-          ? `\n<i>Sources: ${escapeHtml(result.research.sources.join(', '))}</i>`
-          : `\n<i>No sources returned with this — treat it with extra caution.</i>`;
-        await notify(
-          `<b>${escapeHtml(topic.label)} — what I found</b>\n\n` +
-          `${escapeHtml(result.research.findings.slice(0, 1500))}${src}`,
-        ).catch(() => {});
+      // Research first, on its own. If it returns null the digest does
+      // NOT fall back to writing from general knowledge — that is
+      // exactly the failure mode that put "Ten Hag under pressure" and
+      // "Poch's head" on cards in 2026, years after either was true.
+      // The pipeline's only promise is real current info; better to
+      // send zero cards for a topic this round than a stale one.
+      const preflight = await researchBrief(topic.brief);
+      if (!preflight) {
+        errors.push(`${topic.label}: no verified current news — skipped this round`);
+        continue;
       }
+
+      const src = preflight.sources.length
+        ? `\n<i>Sources: ${escapeHtml(preflight.sources.join(', '))}</i>`
+        : '';
+      await notify(
+        `<b>${escapeHtml(topic.label)} — what I found</b>\n\n` +
+        `${escapeHtml(preflight.findings.slice(0, 1500))}${src}`,
+      ).catch(() => {});
+
+      // Drafting only proceeds now that research is guaranteed
+      // present. draftFromBrief re-runs research internally today; the
+      // opts flag below skips the second call and passes what we
+      // already have in via the same code path.
+      const result = await draftFromBrief(
+        { brief: topic.brief, count: topic.countPerRun },
+        { research: false, injectedResearch: preflight },
+      );
 
       for (const body of result.drafts) {
         const made = await makeReadyPost({

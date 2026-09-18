@@ -21,19 +21,29 @@ export type DigestTopic = {
   countPerRun: number;
 };
 
+// The briefs deliberately name the current calendar window and the
+// exact competitions/season we care about. Without an explicit anchor
+// the model happily writes from training-data memories — that is how
+// "Ten Hag under pressure" and "Poch's head" cards end up on a card in
+// 2026, years after either was true. Research is what enforces this at
+// runtime; the brief is what tells the search what to look for.
 export const DIGEST_TOPICS: DigestTopic[] = [
   {
     label: 'BBN',
     brief:
-      'Big Brother Naija — the current season: housemates, evictions, ' +
-      'arguments, alliances, twists',
+      'Big Brother Naija (BBNaija) — this week in the CURRENT ongoing season only. ' +
+      'Housemates, evictions, arguments, alliances, tasks, twists that happened in the last few days. ' +
+      'Nothing from prior seasons. If nothing has happened in the current season this week, return NOTHING RECENT.',
     countPerRun: 4,
   },
   {
     label: 'Football',
     brief:
-      'Premier League, Champions League, the Super Eagles and NPFL — ' +
-      'the latest fixtures, results and transfer talk',
+      'This week in football: the current Premier League season, the current UEFA Champions League ' +
+      'and Europa League matchweek, La Liga, and live transfer news. Also the Super Eagles when they ' +
+      "have a fixture or a squad-list story in the last 7 days. Do NOT include NPFL. Do NOT include " +
+      'anything older than 7 days. Managers, results and fixtures must be current — if a manager left ' +
+      'a club last season, do not write about them at that club.',
     countPerRun: 4,
   },
 ];

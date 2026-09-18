@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterUncitedFindings } from './research';
+import { filterUncitedFindings, hasCitedFindings } from './research';
 
 const SOURCES = ['Punch', 'BBNaija Updates', 'Vanguard Nigeria'];
 
@@ -75,6 +75,32 @@ describe('filterUncitedFindings', () => {
   it('keeps text unchanged when there is no "WHAT HAPPENED" header to filter', () => {
     const findings = 'NOTHING RECENT';
     expect(filterUncitedFindings(findings, SOURCES)).toBe(findings);
+  });
+
+  it('together with hasCitedFindings — an empty result after filtering reads as "no findings"', () => {
+    const findings =
+      '=== WHAT HAPPENED ===\n' +
+      'Kola was evicted [Made Up Blog]\n\n' +
+      '=== WHAT PEOPLE ARE ARGUING ABOUT ===\n' +
+      'People argue about things.';
+
+    const out = filterUncitedFindings(findings, SOURCES);
+    // The section header stays, but there is nothing under it — the
+    // caller must be able to detect that, or a "successful" research
+    // return with an empty facts section will smuggle general-knowledge
+    // drafts through the anti-hallucination rail. That was the Ten Hag
+    // bug of 2026-09.
+    expect(hasCitedFindings(out)).toBe(false);
+  });
+
+  it('hasCitedFindings — true when at least one line survives', () => {
+    const findings =
+      '=== WHAT HAPPENED ===\n' +
+      'Kola was evicted [Punch]\n\n' +
+      '=== WHAT PEOPLE ARE ARGUING ABOUT ===\n' +
+      'Argument.';
+    const out = filterUncitedFindings(findings, SOURCES);
+    expect(hasCitedFindings(out)).toBe(true);
   });
 
   it('preserves blank-line spacing between kept and dropped lines', () => {
