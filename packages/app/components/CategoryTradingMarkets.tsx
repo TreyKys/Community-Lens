@@ -9,8 +9,7 @@ import { OpenMarketCard, type OpenMarketCardRow } from '@/components/OpenMarketC
 // Which /markets category tabs have a matching open_markets.category, and
 // what it is. Only tabs that route through /markets' own filter belong here
 // — Sports and BBN have dedicated hub pages (/football, /bbn, ...) that
-// already show their trading markets via event_tag, and Trending/New are
-// cross-cutting feeds with no single category to match. Crypto has no entry
+// already show their trading markets via event_tag. Crypto has no entry
 // because open_markets has no 'crypto' category to match it to (see
 // allowed_categories in 20260807000100_open_markets_review.sql) — showing
 // nothing here is honest; guessing a category would not be.
@@ -20,9 +19,25 @@ import { OpenMarketCard, type OpenMarketCardRow } from '@/components/OpenMarketC
 // content on the locked-odds side (see the comment on CATEGORIES in
 // Sidebar.tsx) — mirrored here so a market tagged category='technology'
 // isn't invisible everywhere except /open.
+//
+// Trending and New are handled separately below (CROSS_CUTTING_TABS), not
+// here — they cut across every category rather than matching one, so they
+// fetch with no category filter instead of a CATEGORY_MAP entry.
 const CATEGORY_MAP: Record<string, string[]> = {
   politics: ['politics'],
   economy: ['economy', 'technology'],
+};
+
+// Trending and New used to render nothing for trade markets at all — the
+// only two tabs that mattered were the ones with no CATEGORY_MAP entry,
+// which is backwards: Trending is the page most people land on first, and a
+// trading market that's only ever discoverable via /open effectively didn't
+// exist for anyone who hadn't found that hub yet. 'volume' mirrors the sort
+// PopularMarketsScroll uses for locked-odds "popular now"; 'new' is the
+// API's own default (opened_at desc).
+const CROSS_CUTTING_TABS: Record<string, { sort?: 'volume'; heading: string }> = {
+  trending: { sort: 'volume', heading: 'Trending on Trade' },
+  new: { heading: 'New on Trade' },
 };
 
 // Trade markets were built as their own clearly-labelled section ON hub
@@ -38,15 +53,20 @@ export function CategoryTradingMarkets() {
   const searchParams = useSearchParams();
   const category = searchParams.get('category') || 'trending';
   const cats = CATEGORY_MAP[category];
+  const crossCutting = CROSS_CUTTING_TABS[category];
+  const active = !!cats || !!crossCutting;
 
   const [rows, setRows] = useState<OpenMarketCardRow[]>([]);
-  const [loading, setLoading] = useState(!!cats);
+  const [loading, setLoading] = useState(active);
 
   useEffect(() => {
-    if (!cats) { setRows([]); return; }
+    if (!cats && !crossCutting) { setRows([]); return; }
     let live = true;
     setLoading(true);
-    fetch(`/api/open-markets?category=${encodeURIComponent(cats.join(','))}&limit=8`)
+    const qs = new URLSearchParams({ limit: '8' });
+    if (cats) qs.set('category', cats.join(','));
+    if (crossCutting?.sort) qs.set('sort', crossCutting.sort);
+    fetch(`/api/open-markets?${qs.toString()}`)
       .then(r => r.json())
       .then(d => { if (live) setRows(d.markets || []); })
       .catch(() => { if (live) setRows([]); })
@@ -55,7 +75,7 @@ export function CategoryTradingMarkets() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
 
-  if (!cats) return null;
+  if (!active) return null;
   if (!loading && rows.length === 0) return null;
 
   return (
@@ -63,7 +83,7 @@ export function CategoryTradingMarkets() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <TrendingUp className="w-4 h-4 text-emerald-400" />
-          <h2 className="text-sm font-semibold">Trade this category</h2>
+          <h2 className="text-sm font-semibold">{crossCutting?.heading ?? 'Trade this category'}</h2>
         </div>
         <Link href="/open" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
           All trading markets <ArrowRight className="w-3 h-3" />
@@ -78,7 +98,10 @@ export function CategoryTradingMarkets() {
         // two feeds sit on the same page, so one of them running full-width
         // rows while the other pairs up would read as a layout bug.
         <div className="grid gap-3 md:grid-cols-2">
-          {rows.map(m => <OpenMarketCard key={m.id} market={m} hideCategory />)}
+          {/* Category badge stays visible on Trending/New — those rows span
+              every category, unlike a single-category tab where repeating
+              it on every card would be noise. */}
+          {rows.map(m => <OpenMarketCard key={m.id} market={m} hideCategory={!crossCutting} />)}
         </div>
       )}
     </section>

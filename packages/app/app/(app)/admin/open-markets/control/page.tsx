@@ -219,8 +219,8 @@ export default function OpenMarketsControlPage() {
       </div>
 
       <div>
-        <p className="text-[10px] text-muted-foreground mb-1">Your admin user ID — needed for solo mode, reschedule and delete</p>
-        <Input value={adminId} onChange={e => persistAdminId(e.target.value)} placeholder="your user uuid" className="text-xs h-8" />
+        <p className="text-[10px] text-muted-foreground mb-1">Your identity — needed for solo mode, reschedule and delete</p>
+        <Input value={adminId} onChange={e => persistAdminId(e.target.value)} placeholder="email or uuid" className="text-xs h-8" />
       </div>
 
       {cfg && (

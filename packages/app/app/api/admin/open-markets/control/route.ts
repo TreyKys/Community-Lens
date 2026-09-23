@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
 import { getAuthUser } from '@/lib/getAuthUser';
+import { resolveAdminUserId } from '@/lib/resolveAdminUserId';
 import { pricesFromQ, volumeFromFees } from '@/lib/openMarketTypes';
 
 export const maxDuration = 60;
@@ -154,7 +155,7 @@ export async function POST(request: Request) {
 
   const sessionUser = await getAuthUser(supabaseAdmin, request);
   const adminId = sessionUser?.id
-    || String(body?.adminId || '').trim()
+    || (await resolveAdminUserId(supabaseAdmin, body?.adminId))
     || process.env.ADMIN_REVIEWER_USER_ID
     || null;
 

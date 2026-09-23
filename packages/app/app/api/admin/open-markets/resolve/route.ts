@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
 import { getAuthUser } from '@/lib/getAuthUser';
+import { resolveAdminUserId } from '@/lib/resolveAdminUserId';
 import { pricesFromQ } from '@/lib/openMarketTypes';
 
 export const maxDuration = 300;
@@ -133,7 +134,7 @@ export async function POST(request: Request) {
 
   const sessionUser = await getAuthUser(supabaseAdmin, request);
   const resolvedBy = sessionUser?.id
-    || String(body?.resolvedBy || '')
+    || (await resolveAdminUserId(supabaseAdmin, body?.resolvedBy))
     || process.env.ADMIN_REVIEWER_USER_ID
     || '';
 
@@ -156,10 +157,12 @@ export async function POST(request: Request) {
       if (!Number.isInteger(outcomeIdx) || outcomeIdx < 0) {
         return NextResponse.json({ error: 'Choose the winning outcome' }, { status: 400 });
       }
-      const confirmedBy = String(body?.confirmedBy || '').trim();
+      const confirmedBy = await resolveAdminUserId(supabaseAdmin, body?.confirmedBy);
       if (!resolvedBy || !confirmedBy) {
         return NextResponse.json({
-          error: 'Resolution needs two people: a resolver and a confirmer.',
+          error: body?.confirmedBy && !confirmedBy
+            ? 'Could not find that confirmer — check the email or UUID.'
+            : 'Resolution needs two people: a resolver and a confirmer.',
         }, { status: 400 });
       }
       const evidence = String(body?.evidenceUrl || '').trim();
@@ -197,10 +200,12 @@ export async function POST(request: Request) {
     // Void returns money instead of picking a winner. Used when the question
     // became unanswerable, or when the house got something wrong.
     case 'void': {
-      const confirmedBy = String(body?.confirmedBy || '').trim();
+      const confirmedBy = await resolveAdminUserId(supabaseAdmin, body?.confirmedBy);
       if (!resolvedBy || !confirmedBy) {
         return NextResponse.json({
-          error: 'Voiding needs two people: a requester and an approver.',
+          error: body?.confirmedBy && !confirmedBy
+            ? 'Could not find that approver — check the email or UUID.'
+            : 'Voiding needs two people: a requester and an approver.',
         }, { status: 400 });
       }
       const kind = String(body?.kind || 'operational');
