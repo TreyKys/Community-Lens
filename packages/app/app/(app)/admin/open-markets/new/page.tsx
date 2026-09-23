@@ -405,13 +405,13 @@ export default function AdminNewOpenMarketPage() {
               setSubmittedBy(v);
               try { localStorage.setItem('opinionsng_admin_reviewer_id', v.trim()); } catch {}
             }}
-            placeholder="uuid"
+            placeholder="email or uuid"
             className="text-xs h-8 font-mono"
           />
           <p className="text-[10px] text-muted-foreground">
             This screen never sees who you are otherwise — the admin login is one shared
             secret, not a personal account. Recorded as who submitted this, so four-eyes
-            can hold: you (or anyone typing the same ID) cannot then review, trade or
+            can hold: you (or anyone typing the same identity) cannot then review, trade or
             resolve it. Remembered in this browser, so it is only typed once.
           </p>
         </div>
@@ -421,7 +421,7 @@ export default function AdminNewOpenMarketPage() {
             Attribute to a creator <span className="text-muted-foreground font-normal">(optional)</span>
           </p>
           <Input value={createdBy} onChange={e => setCreatedBy(e.target.value)}
-                 className="text-xs h-8 font-mono" placeholder="user uuid — leave blank for a house market" />
+                 className="text-xs h-8 font-mono" placeholder="user email or uuid — leave blank for a house market" />
           <p className="text-[10px] text-muted-foreground">
             Blank means a HOUSE market: no creator, so no fee share accrues and anyone can
             trade it. Naming someone gives them the 25% creator share — and then neither they

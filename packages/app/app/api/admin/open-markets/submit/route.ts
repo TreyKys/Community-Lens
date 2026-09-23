@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
 import { getAuthUser } from '@/lib/getAuthUser';
+import { resolveAdminUserId } from '@/lib/resolveAdminUserId';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,14 +40,15 @@ export async function POST(request: Request) {
   // house market is exactly the thing that hole was made of.
   const sessionUser = await getAuthUser(supabaseAdmin, request);
   const submittedBy = sessionUser?.id
-    || String(b?.submittedBy || '')
+    || (await resolveAdminUserId(supabaseAdmin, b?.submittedBy))
     || process.env.ADMIN_REVIEWER_USER_ID
     || '';
   if (!submittedBy) {
     return NextResponse.json({
-      error: 'No submitter identity. Sign in, or set ADMIN_REVIEWER_USER_ID.',
+      error: 'No submitter identity. Sign in, enter your email/UUID, or set ADMIN_REVIEWER_USER_ID.',
     }, { status: 400 });
   }
+  const createdBy = await resolveAdminUserId(supabaseAdmin, b?.createdBy);
   const outcomes = Array.isArray(b?.outcomes)
     ? b.outcomes.map((o: unknown) => String(o))
     : [];
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
   }
 
   const { data, error } = await supabaseAdmin.rpc('submit_open_market', {
-    p_created_by: b?.createdBy || null,
+    p_created_by: createdBy,
     p_question: String(b?.question || ''),
     p_description: b?.description ? String(b.description) : null,
     p_category: String(b?.category || ''),

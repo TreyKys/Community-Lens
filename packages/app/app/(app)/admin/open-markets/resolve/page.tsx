@@ -388,7 +388,7 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
 
                 <div>
                   <p className="text-[10px] text-muted-foreground">
-                    Your user ID — the resolver
+                    Your identity — the resolver
                   </p>
                   <Input value={resolvedBy}
                          onChange={e => {
@@ -396,15 +396,15 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
                            setResolvedBy(v); setPreview(null);
                            try { localStorage.setItem('opinionsng_admin_reviewer_id', v.trim()); } catch {}
                          }}
-                         placeholder="uuid" className="text-xs h-8 font-mono" />
+                         placeholder="email or uuid" className="text-xs h-8 font-mono" />
                 </div>
 
                 <div>
                   <p className="text-[10px] text-muted-foreground">
-                    Confirmer&rsquo;s user ID — must be a different person, and never the creator
+                    Confirmer&rsquo;s identity — must be a different person, and never the creator
                   </p>
                   <Input value={confirmedBy} onChange={e => { setConfirmedBy(e.target.value); setPreview(null); }}
-                         placeholder="uuid" className="text-xs h-8 font-mono" />
+                         placeholder="email or uuid" className="text-xs h-8 font-mono" />
                 </div>
 
                 {preview && (

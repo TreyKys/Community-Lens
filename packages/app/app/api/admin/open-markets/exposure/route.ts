@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { isAdminRequest } from '@/lib/adminAuth';
+import { resolveAdminUserId } from '@/lib/resolveAdminUserId';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -137,6 +138,9 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({} as any));
   const action = String(body?.action || '');
+  const adminId = (await resolveAdminUserId(supabaseAdmin, body?.adminId))
+    || process.env.ADMIN_REVIEWER_USER_ID
+    || null;
 
   switch (action) {
     // Engine-wide kill switch. Blocks new trades and new approvals; does NOT
@@ -162,7 +166,7 @@ export async function POST(request: Request) {
     case 'halt': {
       const { data, error } = await supabaseAdmin.rpc('halt_open_market', {
         p_market_id: String(body?.marketId || ''),
-        p_admin_id: body?.adminId || process.env.ADMIN_REVIEWER_USER_ID || null,
+        p_admin_id: adminId,
         p_reason: String(body?.reason || '').trim() || 'halted by admin',
       });
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -171,7 +175,7 @@ export async function POST(request: Request) {
     case 'resume_market': {
       const { data, error } = await supabaseAdmin.rpc('resume_open_market', {
         p_market_id: String(body?.marketId || ''),
-        p_admin_id: body?.adminId || process.env.ADMIN_REVIEWER_USER_ID || null,
+        p_admin_id: adminId,
         p_to_status: String(body?.toStatus || 'open'),
       });
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -195,9 +199,8 @@ export async function POST(request: Request) {
     // than a bare UPDATE (see that function) so switching this on is its own
     // recorded event, not indistinguishable from every other config tweak.
     case 'set_solo_mode': {
-      const adminId = String(body?.adminId || '').trim();
       if (!adminId) {
-        return NextResponse.json({ error: 'Your user ID is required to change this' }, { status: 400 });
+        return NextResponse.json({ error: 'Could not identify you — enter your email or UUID' }, { status: 400 });
       }
       const enabled = !!body?.enabled;
       const { error } = await supabaseAdmin.rpc('set_open_markets_solo_mode', {
