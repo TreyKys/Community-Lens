@@ -25,9 +25,10 @@ export default function MarketsPage() {
           <Suspense fallback={null}>
             <CategoryTabs />
           </Suspense>
-          {/* Trade markets for whichever category tab is selected — politics,
-              economy, etc. Renders nothing for tabs with no open_markets
-              equivalent (Trending, New, Crypto), so this is a no-op there. */}
+          {/* Trade markets for whichever category tab is selected — Trending
+              (by volume) and New (newest first) pull across every category,
+              politics/economy match their own, and it's a no-op on tabs with
+              no open_markets equivalent (Crypto, the sport/BBN hubs). */}
           <Suspense fallback={null}>
             <CategoryTradingMarkets />
           </Suspense>

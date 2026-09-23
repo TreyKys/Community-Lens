@@ -24,6 +24,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category');
   const eventTag = searchParams.get('eventTag');
+  const sort = searchParams.get('sort'); // 'volume' | default (newest first)
   const limit = Math.min(Number(searchParams.get('limit') || 40), 100);
 
   let base = supabaseAdmin
@@ -48,8 +49,14 @@ export async function GET(request: Request) {
   // league_code mechanism this table doesn't have.
   if (eventTag) base = base.eq('event_tag', eventTag.toLowerCase());
 
+  // 'volume' is the same lifetime-fees proxy PopularMarketsScroll uses for
+  // locked-odds "popular now" — no recency weighting there either, so this
+  // stays consistent rather than inventing a second trending definition.
+  base = sort === 'volume'
+    ? base.order('fees_collected', { ascending: false, nullsFirst: false })
+    : base.order('opened_at', { ascending: false, nullsFirst: false });
+
   const { data, error } = await base
-    .order('opened_at', { ascending: false, nullsFirst: false })
     .limit(limit)
     .returns<OpenMarketListRow[]>();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
