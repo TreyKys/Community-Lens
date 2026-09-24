@@ -65,6 +65,11 @@ export default function OpenMarketsControlPage() {
   const [deleteReason, setDeleteReason] = useState('');
   const [retagOpenId, setRetagOpenId] = useState<string | null>(null);
   const [retagValue, setRetagValue] = useState('');
+  const [addOutcomeOpenId, setAddOutcomeOpenId] = useState<string | null>(null);
+  const [newOutcomeLabel, setNewOutcomeLabel] = useState('');
+  const [newOutcomePricePct, setNewOutcomePricePct] = useState('');
+  const [newOutcomeReason, setNewOutcomeReason] = useState('');
+  const [addOutcomePreview, setAddOutcomePreview] = useState<{ outcomes: string[]; prices: number[] } | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/auth').then(r => { if (r.ok) setIsAdmin(true); }).finally(() => setChecking(false));
@@ -138,6 +143,38 @@ export default function OpenMarketsControlPage() {
     } catch (e: any) {
       toast({ title: 'Failed', description: e.message, variant: 'destructive' });
       return false;
+    } finally { setBusy(null); }
+  };
+
+  // Separate endpoint from actControl (not the reschedule/delete/retag
+  // grab-bag): this reshapes the book's own math, not just a metadata field,
+  // and needs its own preview step before an admin commits to it.
+  const addOutcome = async (marketId: string, dryRun: boolean, outcomes: string[]) => {
+    setBusy(dryRun ? 'preview-outcome' : 'add-outcome');
+    try {
+      const r = await fetch('/api/admin/open-markets/add-outcome', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          marketId, label: newOutcomeLabel.trim(),
+          initialPricePct: Number(newOutcomePricePct),
+          reason: newOutcomeReason.trim() || undefined,
+          adminId: adminId.trim(), dryRun,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if (dryRun) {
+        setAddOutcomePreview({ outcomes: [...outcomes, newOutcomeLabel.trim()], prices: d.newPrices });
+      } else {
+        toast({ title: `${newOutcomeLabel.trim()} added` });
+        setAddOutcomeOpenId(null);
+        setAddOutcomePreview(null);
+        setNewOutcomeLabel(''); setNewOutcomePricePct(''); setNewOutcomeReason('');
+        load();
+      }
+    } catch (e: any) {
+      toast({ title: 'Failed', description: e.message, variant: 'destructive' });
     } finally { setBusy(null); }
   };
 
@@ -388,6 +425,17 @@ export default function OpenMarketsControlPage() {
                         Close trading now
                       </button>
                     )}
+                    {m.status === 'open' && (
+                      <button className="text-sky-400 hover:underline inline-flex items-center gap-1"
+                              onClick={() => {
+                                const next = addOutcomeOpenId === m.id ? null : m.id;
+                                setAddOutcomeOpenId(next);
+                                setNewOutcomeLabel(''); setNewOutcomePricePct(''); setNewOutcomeReason('');
+                                setAddOutcomePreview(null);
+                              }}>
+                        <Plus className="w-3 h-3" /> Add outcome
+                      </button>
+                    )}
                     {(m.status === 'open' || m.status === 'horizon_window') && (
                       <button className="text-muted-foreground hover:underline inline-flex items-center gap-1"
                               onClick={() => { setExpanded(isOpen ? null : m.id); setRescheduleClose(''); setRescheduleHorizon(''); }}>
@@ -470,6 +518,50 @@ export default function OpenMarketsControlPage() {
                               }}>
                         Save hub tag
                       </Button>
+                    </div>
+                  )}
+
+                  {addOutcomeOpenId === m.id && (
+                    <div className="pt-2 border-t border-border/60 space-y-2">
+                      <p className="text-[10px] text-muted-foreground">
+                        A new candidate enters the race, a new team qualifies — add it without
+                        closing this book and losing every existing trader&rsquo;s position.
+                        Everyone else&rsquo;s relative odds stay exactly as they are; the new
+                        outcome opens at the price you set here and carves that share out of them.
+                      </p>
+                      <Input value={newOutcomeLabel} onChange={e => { setNewOutcomeLabel(e.target.value); setAddOutcomePreview(null); }}
+                             placeholder="Outcome name" className="text-xs h-8" />
+                      <div className="flex items-center gap-2">
+                        <Input type="number" min={0} max={100} step={0.5}
+                               value={newOutcomePricePct}
+                               onChange={e => { setNewOutcomePricePct(e.target.value); setAddOutcomePreview(null); }}
+                               placeholder="Opening price" className="text-xs h-8 w-28" />
+                        <span className="text-[11px] text-muted-foreground">%</span>
+                      </div>
+                      <Input value={newOutcomeReason} onChange={e => setNewOutcomeReason(e.target.value)}
+                             placeholder="Reason (optional, shown in the audit log)" className="text-xs h-8" />
+
+                      {addOutcomePreview ? (
+                        <div className="rounded-md border border-border/60 p-2 space-y-1">
+                          <p className="text-[10px] text-muted-foreground">Resulting prices:</p>
+                          {addOutcomePreview.outcomes.map((o, i) => (
+                            <div key={i} className="flex justify-between text-[11px]">
+                              <span className={i === addOutcomePreview.outcomes.length - 1 ? 'text-sky-400' : ''}>{o}</span>
+                              <span className="tabular">{pct(addOutcomePreview.prices[i] ?? 0)}</span>
+                            </div>
+                          ))}
+                          <Button size="sm" className="w-full mt-1" disabled={!!busy || !adminId.trim()}
+                                  onClick={() => addOutcome(m.id, false, m.outcomes)}>
+                            {busy === 'add-outcome' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm — lock in these prices'}
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="outline" className="w-full"
+                                disabled={!!busy || !adminId.trim() || !newOutcomeLabel.trim() || !newOutcomePricePct}
+                                onClick={() => addOutcome(m.id, true, m.outcomes)}>
+                          {busy === 'preview-outcome' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Preview'}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </CardContent>
