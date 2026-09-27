@@ -86,6 +86,7 @@ function BettingInterface({
   session,
   onSuccess,
   onCancel,
+  onAddToMultiplier,
   prefillOutcomeIndex,
   prefillStakeTngn,
   prefillFromShareId,
@@ -94,6 +95,10 @@ function BettingInterface({
   session: any;
   onSuccess: (betId?: string) => void;
   onCancel?: () => void;
+  /** Fires right after a leg is added/updated in the Multiplier slip.
+   *  On mobile this is what closes the "Tap to Predict" drawer — see
+   *  the Add to Multiplier button below for why that's not optional. */
+  onAddToMultiplier?: () => void;
   /** OPx Picks "Stake as is" / "Make It Yours" prefill */
   prefillOutcomeIndex?: number;
   prefillStakeTngn?: number;
@@ -601,7 +606,18 @@ function BettingInterface({
           rejects parimutuel legs). Soft violet so it reads as a distinct
           path from the single-bet "Lock Prediction" above. Adds the
           currently-selected outcome as a leg; one leg per market, so
-          re-adding swaps the pick. */}
+          re-adding swaps the pick.
+
+          onAddToMultiplier fires alongside setSlipOpen(true) so the
+          caller can close whatever surface this button is sitting in
+          (the mobile "Tap to Predict" drawer) BEFORE the Multiplier
+          slip drawer opens on top of it. Without that, two Vaul
+          drawers end up open at once — each one saves/restores the
+          page's scroll position independently via body.style.top, and
+          the second one's restore stomps the first one's, so the final
+          close snaps the page back to scrollY=0 instead of wherever the
+          user actually was. Closing the first drawer keeps exactly one
+          drawer's scroll lock active at a time. */}
       {isLockedMarket && (
         <button
           type="button"
@@ -616,6 +632,7 @@ function BettingInterface({
               optionLabel: market.options[idx],
             });
             setSlipOpen(true);
+            onAddToMultiplier?.();
           }}
           className={cn(
             'w-full flex items-center justify-center gap-2 h-10 rounded-lg text-sm font-semibold transition-colors',
@@ -957,6 +974,7 @@ function MarketCard({
                 onBetPlaced(market.id, betId);
               }}
               onCancel={() => setIsExpanded(false)}
+              onAddToMultiplier={() => setIsExpanded(false)}
               prefillOutcomeIndex={pickedOutcome ?? prefillOutcomeIndex}
               prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
               prefillFromShareId={prefillFromShareId}
@@ -1020,6 +1038,7 @@ function MarketCard({
                         setIsExpanded(false);
                         onBetPlaced(market.id, betId);
                       }}
+                      onAddToMultiplier={() => setIsExpanded(false)}
                       prefillOutcomeIndex={pickedOutcome ?? prefillOutcomeIndex}
                       prefillStakeTngn={prefillEditStake ? undefined : prefillStakeTngn}
                       prefillFromShareId={prefillFromShareId}
