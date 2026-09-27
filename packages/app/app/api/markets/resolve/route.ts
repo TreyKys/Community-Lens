@@ -8,6 +8,7 @@ import {
 } from '@/lib/lockedSettlement';
 import { displayFloorPayout } from '@/lib/displayMultiplier';
 import { safeSecretMatch } from '@/lib/safeCompare';
+import { sendAdminAlert } from '@/lib/adminAlert';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -47,9 +48,20 @@ function applyBonusSplit(payout: number, bonusProportion: number): { tngn: numbe
 // settlement hiccup surfaces somewhere a human will actually see it,
 // instead of living only in server logs where it's invisible until a
 // user complains that their bet is "stuck".
+//
+// resolve-due re-POSTs this same resolve request every 5 minutes for
+// any market that keeps failing to fully settle, and every one of the
+// 9 call sites below used to fire unconditionally on each retry — the
+// same unbounded-spam pattern found and fixed in resolve-due's own
+// max-attempts alert and cron/open-markets' health-check alert (see
+// lib/adminAlert.ts). Keying the cooldown on the message text itself
+// means an identical, still-unresolved failure goes quiet after the
+// first alert, while any message that actually CHANGES (a different
+// market, a different failure reason, the count of stuck bets
+// shrinking or growing) is treated as new and alerts immediately.
 async function alertAdmins(message: string) {
   try {
-    await supabaseAdmin.from('notifications').insert({ user_id: null, type: 'admin_alert', message });
+    await sendAdminAlert(supabaseAdmin, message, message, 6);
   } catch { /* best-effort */ }
 }
 
