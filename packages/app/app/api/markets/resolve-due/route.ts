@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, getBaseUrl, cronHeaders, lookupMarketResult } from '@/lib/oracle';
 import { safeSecretMatch } from '@/lib/safeCompare';
+import { sendAdminAlert } from '@/lib/adminAlert';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,11 +43,15 @@ export async function POST(request: Request) {
     const attempts = (m as any).resolution_attempts || 0;
     if (attempts > 576) {
       try {
-        await supabaseAdmin.from('notifications').insert({
-          user_id: null,
-          type: 'admin_alert',
-          message: `⚠️ Market ${m.id} (${m.title}) unresolved after 48h. Manual resolution required.`,
-        });
+        // This branch re-fires every 5 minutes for as long as the market
+        // stays stuck — once per 12h is enough to keep it visible without
+        // writing a fresh row on every single tick (see lib/adminAlert.ts).
+        await sendAdminAlert(
+          supabaseAdmin,
+          `⚠️ Market ${m.id} (${m.title}) unresolved after 48h. Manual resolution required.`,
+          `stuck_market_${m.id}`,
+          12,
+        );
       } catch {}
       results.push({ marketId: m.id, success: false, reason: 'max_attempts' });
       continue;
