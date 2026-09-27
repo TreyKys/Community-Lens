@@ -275,7 +275,14 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
 
       toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
       setIsOpen(false);
-      window.location.href = '/markets';
+      // Reload the CURRENT page, not a hardcoded '/markets' redirect — this
+      // modal opens from anywhere (Navbar, BottomTabBar, the home page), so
+      // a fixed destination silently dropped whatever the user was actually
+      // doing (a market detail, an in-progress trade, /bets) the moment they
+      // signed in. Still a full reload, not router.push: needed so
+      // server-rendered/auth-gated content on this exact page picks up the
+      // new session.
+      window.location.reload();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -353,7 +360,8 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
 
       toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
       setIsOpen(false);
-      window.location.href = '/markets';
+      // See handlePasswordAuth's comment: reload in place, don't redirect away.
+      window.location.reload();
     } catch (error: any) {
       toast({
         title: 'Verification failed',
@@ -384,7 +392,8 @@ export function AuthModal({ variant = 'default', trigger }: AuthModalProps) {
 
       toast({ title: 'Welcome to Opinions.ng', description: 'You are signed in.' });
       setIsOpen(false);
-      window.location.href = '/markets';
+      // See handlePasswordAuth's comment: reload in place, don't redirect away.
+      window.location.reload();
     } catch (error: any) {
       toast({
         title: 'Verification failed',

@@ -173,6 +173,7 @@ export function OnboardingIntercept() {
         className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto"
         onInteractOutside={e => e.preventDefault()}
         onEscapeKeyDown={e => e.preventDefault()}
+        hideClose
       >
         <DialogHeader>
           <DialogTitle className="text-xl">
