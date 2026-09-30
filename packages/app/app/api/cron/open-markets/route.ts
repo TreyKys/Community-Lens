@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { safeSecretMatch } from '@/lib/safeCompare';
+import { sendAdminAlert } from '@/lib/adminAlert';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -250,12 +251,19 @@ export async function POST(request: Request) {
     if (error) throw new Error(error.message);
     critical = (data || []).filter((h: any) => h.severity === 'critical');
     if (critical.length > 0) {
-      await supabaseAdmin.from('notifications').insert({
-        user_id: null,
-        type: 'admin_alert',
-        message: `Trading health: ${critical.length} critical — `
+      // Keyed on the actual set of failing checks, not just "something's
+      // critical" — so a NEW distinct failure alerts immediately even
+      // while an old one is still inside its cooldown, and this branch
+      // stops re-firing every 15 minutes for the exact same unresolved
+      // issue (see lib/adminAlert.ts).
+      const checkNames = critical.map((c: any) => c.check_name).sort();
+      await sendAdminAlert(
+        supabaseAdmin,
+        `Trading health: ${critical.length} critical — `
           + critical.slice(0, 3).map((c: any) => c.check_name).join(', '),
-      });
+        `open_markets_health:${checkNames.join(',')}`,
+        1,
+      );
     }
   } catch {
     // A failed scan must not fail the tick — the money steps above already ran.
