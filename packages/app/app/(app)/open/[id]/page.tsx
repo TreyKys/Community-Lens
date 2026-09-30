@@ -896,7 +896,7 @@ function PriceHistory({ history, outcomeIdx, label, current }: {
         )}
       </div>
       <p className="text-[10px] text-muted-foreground">
-        {points.length} trade{points.length === 1 ? '' : 's'} · flat stretches are real, not missing data
+        Flat stretches are real, not missing data
       </p>
     </div>
   );
