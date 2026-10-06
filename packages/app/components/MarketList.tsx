@@ -1082,7 +1082,7 @@ function MarketCard({
 type CategoryFilter = {
   category: string | null;
   sport: string | null;
-  excludeSport: string | null;
+  excludeSport: string[] | null;
   leagueCode: string | null;
   questionFilter: string | null;
   trendingOnly: boolean;
@@ -1103,7 +1103,11 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
   // Top-tab model:
   //   trending -> only is_trending=true markets (admin-curated, ~5 hot ones)
   //   new      -> everything EXCEPT trending, newest first
-  //   ball     -> sports excluding fight (UFC/boxing has its own tab)
+  //   ball     -> sports excluding fight AND football — football has its
+  //               own dedicated hub (/football, FootballHub) same as
+  //               basketball/tennis/esports/fight do, so this is what's
+  //               left: basketball, esports, motorsport, and anything
+  //               without its own sport tag
   //   fight    -> sports.sport='fight' (boxing, MMA, UFC)
   //   politics -> politics + geo (world events)
   //   economy  -> economics + finance + crypto + tech (everything money-adjacent)
@@ -1140,9 +1144,9 @@ function buildCategoryFilter(category: string, subcategory: string | null): Cate
 
   if (category === 'ball') {
     base.category = 'sports';
-    // Combat sports get their own tab — exclude here so UFC/boxing
-    // markets don't bleed into football / basketball / esports views.
-    base.excludeSport = 'fight';
+    // Combat sports and football both get their own tab — exclude here so
+    // neither bleeds into this catch-all view.
+    base.excludeSport = ['fight', 'football'];
     base.sport = subcategory && SUBCATEGORY_TO_SPORT[subcategory] ? SUBCATEGORY_TO_SPORT[subcategory] : null;
     if (subcategory && LEAGUE_CODE_MAP[subcategory]) {
       base.leagueCode = LEAGUE_CODE_MAP[subcategory];
@@ -1408,7 +1412,7 @@ export function MarketList({ filterExactMarketId, filterChildrenOfParentId, leag
           query = query.eq('category', filter.category);
         }
         if (filter.sport) query = query.eq('sport', filter.sport);
-        if (filter.excludeSport) query = query.not('sport', 'eq', filter.excludeSport);
+        if (filter.excludeSport?.length) query = query.not('sport', 'in', `(${filter.excludeSport.join(',')})`);
         if (filter.leagueCode) query = query.eq('league_code', filter.leagueCode);
         if (filter.questionFilter) query = query.ilike('question', `%${filter.questionFilter}%`);
         if (filter.trendingOnly) query = query.eq('is_trending', true);

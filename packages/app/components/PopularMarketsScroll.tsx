@@ -33,6 +33,7 @@ export function PopularMarketsScroll() {
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [markets, setMarkets] = useState<PopularMarket[]>([]);
+  const [totalWithActivity, setTotalWithActivity] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -45,7 +46,10 @@ export function PopularMarketsScroll() {
       try {
         const r = await fetch('/api/markets/popular');
         const d = await r.json();
-        if (!cancelled) setMarkets(d.markets || []);
+        if (!cancelled) {
+          setMarkets(d.markets || []);
+          setTotalWithActivity(d.totalWithActivity || 0);
+        }
       } catch {
         if (!cancelled) setMarkets([]);
       } finally {
@@ -177,6 +181,15 @@ export function PopularMarketsScroll() {
             </button>
           );
         })}
+        {totalWithActivity > markets.length && (
+          <button
+            onClick={() => router.push('/markets?category=trending')}
+            className="snap-start shrink-0 w-[78vw] max-w-[18rem] md:w-72 flex flex-col items-center justify-center gap-1 p-3 rounded-xl border border-dashed border-border/60 text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
+          >
+            <span className="text-lg font-semibold">+{totalWithActivity - markets.length}</span>
+            <span className="text-xs">more trending now</span>
+          </button>
+        )}
       </div>
     </div>
   );
