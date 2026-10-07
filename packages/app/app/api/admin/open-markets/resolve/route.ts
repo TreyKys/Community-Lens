@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     .select('id, question, category, outcomes, q, b, status, resolution_source, ' +
             'resolution_detail, resolved_outcome, resolved_by, resolution_confirmed_by, ' +
             'resolution_evidence_url, trading_closes_at, horizon_at, horizon_count, ' +
-            'dispute_window_hours, settlement_locked_until, payout_phase, pending_kind, ' +
+            'horizon_window_closes_at, dispute_window_hours, settlement_locked_until, payout_phase, pending_kind, ' +
             'created_by, halted_reason, max_hold_until, opened_at, self_reviewed')
     .in('status', ['open', 'closed', 'halted', 'pending_payout', 'horizon_window'])
     .order('trading_closes_at', { ascending: true, nullsFirst: false });
@@ -95,6 +95,7 @@ export async function GET(request: Request) {
       tradingClosesAt: m.trading_closes_at,
       horizonAt: m.horizon_at,
       horizonCount: m.horizon_count,
+      horizonWindowClosesAt: m.horizon_window_closes_at,
       disputeWindowHours: m.dispute_window_hours,
       settlementLockedUntil: m.settlement_locked_until,
       payoutPhase: m.payout_phase,
@@ -150,6 +151,33 @@ export async function POST(request: Request) {
         .eq('status', 'open');
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ status: 'closed' });
+    }
+
+    // A horizon window blocks resolution by design (you can't settle until
+    // trading is 'closed', and the window has to lapse to get back to
+    // 'open') — but the 72h wait has no escape hatch for an admin who
+    // already knows the review period served no purpose. This forces the
+    // TIME gate only; every payout-safety guard inside close_horizon_window
+    // still runs untouched.
+    case 'force_close_horizon': {
+      const { data, error } = await supabaseAdmin.rpc('close_horizon_window', {
+        p_market_id: marketId,
+        p_next_horizon_at: null,
+        p_dry_run: body?.dryRun !== false,
+        p_force: true,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.applied && row?.reason !== 'dry_run') {
+        return NextResponse.json({ error: row?.reason || 'Could not close the window' }, { status: 400 });
+      }
+      return NextResponse.json({
+        preview: row?.reason === 'dry_run',
+        rolled: Number(row?.rolled || 0),
+        cashedOut: Number(row?.cashed_out || 0),
+        blockTngn: Number(row?.block_tngn || 0),
+        nextStatus: row?.next_status || null,
+      });
     }
 
     case 'settle': {

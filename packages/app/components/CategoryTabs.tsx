@@ -5,7 +5,7 @@ import { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Sparkles, Clock, Trophy, Swords, Landmark, Coins,
-  Eye, TrendingUp, Gamepad2, CircleDot, Zap,
+  Eye, TrendingUp, Gamepad2, CircleDot, Zap, Dribbble,
 } from 'lucide-react';
 
 // Tab model: Trending = admin-curated featured set (a few hot ones);
@@ -31,7 +31,13 @@ const TABS = [
   { id: 'new',      label: 'New',      Icon: Clock },
   { id: 'open',     label: 'Trade',    Icon: TrendingUp, href: '/open',       accent: 'text-emerald-400' },
   { id: 'bbn',      label: 'BBN',      Icon: Eye,        href: '/bbn',        accent: 'text-fuchsia-400' },
-  { id: 'ball',     label: 'Ball',     Icon: Trophy },
+  // FootballHub already existed as a full hub page — it just wasn't in this
+  // rail, so in practice nobody found it (same gap basketball/tennis/esports
+  // had before they were added here). Surfacing it here is also what lets
+  // "Ball" stop being the dumping ground for football on top of everything
+  // else — see the excludeSport comment in buildCategoryFilter.
+  { id: 'football', label: 'Football', Icon: Trophy,   href: '/football', accent: 'text-sky-400' },
+  { id: 'ball',     label: 'Ball',     Icon: Dribbble },
   { id: 'basketball', label: 'Basketball', Icon: CircleDot, href: '/basketball', accent: 'text-orange-400' },
   { id: 'tennis',   label: 'Tennis',   Icon: Zap,        href: '/tennis',     accent: 'text-lime-400' },
   { id: 'esports',  label: 'Esports',  Icon: Gamepad2,   href: '/esports',    accent: 'text-violet-400' },

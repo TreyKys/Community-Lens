@@ -63,11 +63,20 @@ export async function GET() {
     activity.set(r.market_id, (activity.get(r.market_id) || 0) + 1);
   }
 
-  const markets = (eligibleRes.data || [])
+  const ranked = (eligibleRes.data || [])
     .map(m => ({ market: m, hits: activity.get(m.id) || 0 }))
-    .sort((a, b) => b.hits - a.hits || Number(b.market.total_pool) - Number(a.market.total_pool))
-    .slice(0, 12)
-    .map(({ market }) => market);
+    .sort((a, b) => b.hits - a.hits || Number(b.market.total_pool) - Number(a.market.total_pool));
 
-  return NextResponse.json({ markets }, { headers: { 'Cache-Control': 'no-store' } });
+  // Raised from 12 — the rail was quietly dropping anything ranked 13th+
+  // with no indication that more existed. totalWithActivity lets the rail
+  // show "+N more" for whatever still doesn't fit, instead of pretending
+  // the cut-off list is the whole trending picture.
+  const RAIL_LIMIT = 24;
+  const markets = ranked.slice(0, RAIL_LIMIT).map(({ market }) => market);
+  const totalWithActivity = ranked.filter(r => r.hits > 0).length;
+
+  return NextResponse.json(
+    { markets, totalWithActivity },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }

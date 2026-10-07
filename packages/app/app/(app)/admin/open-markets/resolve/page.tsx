@@ -34,6 +34,7 @@ type Market = {
   openHolders: number; openShares: number; unreleasedRows: number;
   awaitingResolution: boolean; overdueClose: boolean; releaseUnlocked: boolean;
   horizonCount: number; disputeWindowHours: number;
+  horizonWindowClosesAt: string | null;
 };
 
 export default function ResolveOpenMarketsPage() {
@@ -99,10 +100,15 @@ export default function ResolveOpenMarketsPage() {
   // Anything whose cut-off has passed while the book is still live is the most
   // urgent thing on this page: the house is the counterparty to every trade
   // placed after the answer became knowable.
-  const overdue = markets.filter(m => m.overdueClose);
-  const waiting = markets.filter(m => m.awaitingResolution && !m.overdueClose);
-  const stuck   = markets.filter(m => m.status === 'pending_payout' && m.unreleasedRows > 0);
-  const rest    = markets.filter(m => !m.awaitingResolution && !m.overdueClose
+  const overdue  = markets.filter(m => m.overdueClose);
+  const waiting  = markets.filter(m => m.awaitingResolution && !m.overdueClose);
+  const stuck    = markets.filter(m => m.status === 'pending_payout' && m.unreleasedRows > 0);
+  // A market in a horizon window has no resolve path until the window
+  // lapses — it used to blend silently into "Live" with no button and no
+  // explanation, which read as broken rather than merely time-gated.
+  const horizon  = markets.filter(m => m.status === 'horizon_window');
+  const rest     = markets.filter(m => !m.awaitingResolution && !m.overdueClose
+                                   && m.status !== 'horizon_window'
                                    && !(m.status === 'pending_payout' && m.unreleasedRows > 0));
 
   return (
@@ -147,6 +153,7 @@ export default function ResolveOpenMarketsPage() {
       {[
         { label: 'Past cut-off — close trading', rows: overdue },
         { label: 'Awaiting resolution', rows: waiting },
+        { label: 'In a horizon window', rows: horizon },
         { label: 'Payout not finished', rows: stuck },
         { label: 'Live', rows: rest },
       ].filter(g => g.rows.length > 0).map(g => (
@@ -186,6 +193,7 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
   const [voidKind, setVoidKind] = useState<'operational' | 'house_fault'>('operational');
   const [preview, setPreview] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [horizonPreview, setHorizonPreview] = useState<any>(null);
 
   const call = async (body: any, label: string) => {
     setBusy(label);
@@ -297,6 +305,56 @@ function MarketCard({ m, expanded, onToggle, onDone }: {
                   Resolution is only reachable once trading is shut. Otherwise the book is live
                   while the answer is already knowable.
                 </p>
+              </div>
+            )}
+
+            {m.status === 'horizon_window' && (
+              <div className="space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Holders have until{' '}
+                  {m.horizonWindowClosesAt ? new Date(m.horizonWindowClosesAt).toLocaleString() : 'the window closes'}{' '}
+                  to roll or cash out (review #{m.horizonCount}). Resolution isn&rsquo;t reachable until this
+                  window closes and trading is shut — if the event is already over, force it closed now
+                  instead of waiting out the clock.
+                </p>
+
+                {horizonPreview && (
+                  <Card className="border-emerald-500/30 bg-emerald-500/[0.04]">
+                    <CardContent className="p-3 space-y-1 text-[11px]">
+                      <p className="font-medium text-emerald-300">Preview — nothing has moved</p>
+                      <p>{horizonPreview.cashedOut} cashing out, {horizonPreview.rolled} rolling over</p>
+                      {horizonPreview.blockTngn > 0 && (
+                        <p>Paid out to leavers: <span className="tabular">{ngn(horizonPreview.blockTngn)}</span></p>
+                      )}
+                      <p className="text-muted-foreground">
+                        {horizonPreview.nextStatus === 'retired'
+                          ? 'This is review #4 — closing retires the market and refunds everyone instead of reopening it.'
+                          : 'Reopens as a normal "open" market afterward — close trading, then resolve as usual.'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button size="sm" variant="outline" disabled={!!busy}
+                          onClick={async () => {
+                            const d = await call({ action: 'force_close_horizon', dryRun: true }, 'horizon-preview');
+                            if (d) setHorizonPreview(d);
+                          }}>
+                    {busy === 'horizon-preview' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Preview'}
+                  </Button>
+                  <Button size="sm" disabled={!!busy || !horizonPreview}
+                          className="bg-amber-600 hover:bg-amber-500"
+                          onClick={async () => {
+                            const d = await call({ action: 'force_close_horizon', dryRun: false }, 'horizon-apply');
+                            if (d) {
+                              toast({ title: d.nextStatus === 'retired' ? 'Window closed — market retired' : 'Window closed — back to open' });
+                              setHorizonPreview(null); onDone();
+                            }
+                          }}>
+                    {busy === 'horizon-apply' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Force close now'}
+                  </Button>
+                </div>
               </div>
             )}
 
