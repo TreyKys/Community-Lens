@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { MULT_MIN_LEG_ODDS } from '@/lib/multiplier';
 import { useSlip } from './SlipProvider';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
@@ -94,35 +95,65 @@ export function MultiplierSlip() {
       .catch(() => {});
   }, [isOpen, session?.access_token]);
 
+  // One live re-price. Returns the fresh quote so callers (placeSlip) can
+  // gate on the CURRENT price, not a stale one.
+  const runQuote = useCallback(async (): Promise<QuoteResponse | null> => {
+    if (legs.length === 0) { setQuote(null); return null; }
+    const s = stakeNum >= 100 ? stakeNum : 100; // preview at min if blank
+    setQuoting(true);
+    try {
+      const res = await fetch('/api/multiplier/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slipStake: s, legs: legs.map(l => ({ marketId: l.marketId, outcomeIndex: l.outcomeIndex })) }),
+      });
+      const data = await res.json();
+      setQuote(data);
+      return data;
+    } catch {
+      setQuote(null);
+      return null;
+    } finally {
+      setQuoting(false);
+    }
+  }, [legs, stakeNum]);
+
   // Live quote — debounced on legs / stake change.
   useEffect(() => {
     if (legs.length === 0) { setQuote(null); return; }
-    const s = stakeNum >= 100 ? stakeNum : 100; // preview at min if blank
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      setQuoting(true);
-      try {
-        const res = await fetch('/api/multiplier/quote', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slipStake: s, legs: legs.map(l => ({ marketId: l.marketId, outcomeIndex: l.outcomeIndex })) }),
-        });
-        const data = await res.json();
-        setQuote(data);
-      } catch {
-        setQuote(null);
-      } finally {
-        setQuoting(false);
-      }
-    }, 400);
+    debounceRef.current = setTimeout(() => { runQuote(); }, 400);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [legs, stakeNum]);
+  }, [legs, stakeNum, runQuote]);
+
+  // Keep the price fresh while the drawer sits open. Locked-odds favourites
+  // shorten as the crowd piles in, and a leg quoted a minute ago can slip
+  // under the per-leg minimum without the user touching anything — which is
+  // exactly how a slip that looks fine fails at placement. Re-pricing on a
+  // timer means the odds (and the "too short-priced" flag) stay honest.
+  useEffect(() => {
+    if (!isOpen || legs.length === 0) return;
+    const id = setInterval(() => { runQuote(); }, 12000);
+    return () => clearInterval(id);
+  }, [isOpen, legs.length, runQuote]);
 
   // Merge the live leg odds into the displayed legs.
   const legOddsById = useMemo(() => {
     const m: Record<number, number> = {};
     (quote?.legs || []).forEach(l => { m[l.marketId] = l.lockedOdds; });
     return m;
+  }, [quote]);
+
+  // Which picks are now priced below the per-leg minimum — the ones that make
+  // a slip fail with "too short-priced." Read from the live quote so the flag
+  // tracks the current price, letting us point at the exact offending pick
+  // instead of a vague "one of your picks."
+  const offendingLegIds = useMemo(() => {
+    const s = new Set<number>();
+    (quote?.legs || []).forEach(l => {
+      if (Number.isFinite(l.lockedOdds) && l.lockedOdds < MULT_MIN_LEG_ODDS) s.add(l.marketId);
+    });
+    return s;
   }, [quote]);
 
   const validStake = Number.isFinite(stakeNum) && stakeNum >= 100;
@@ -136,6 +167,24 @@ export function MultiplierSlip() {
     }
     setPlacing(true);
     try {
+      // Re-price against the CURRENT line before locking. A slip quoted a
+      // minute ago can have a favourite that has since shortened under the
+      // per-leg minimum; catching it here points at the exact pick (now
+      // flagged red) instead of letting placement fail with a vague error.
+      const fresh = await runQuote();
+      if (fresh && !fresh.ok) {
+        const bad = (fresh.legs || []).filter(l => l.lockedOdds < MULT_MIN_LEG_ODDS);
+        toast({
+          title: 'Odds moved',
+          description: fresh.error === 'leg_below_min_odds' && bad.length
+            ? `A pick just dropped below ${MULT_MIN_LEG_ODDS.toFixed(2)}× — it's flagged in red. Remove it to place.`
+            : (REASON_COPY[fresh.error || ''] || 'Your slip needs adjusting before it can be placed.'),
+          variant: 'destructive',
+        });
+        setPlacing(false);
+        return;
+      }
+
       const res = await fetch('/api/multiplier/slip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
@@ -164,6 +213,10 @@ export function MultiplierSlip() {
       if (data?.slipId) setAutoShareSlipId(String(data.slipId));
     } catch (e: any) {
       toast({ title: 'Multiplier failed', description: e.message, variant: 'destructive' });
+      // A sub-second race can still slip a leg under the line between our
+      // pre-check and placement. Re-price so whichever pick is now too short
+      // gets flagged red in the slip, turning a dead-end into a clear fix.
+      runQuote();
     } finally {
       setPlacing(false);
     }
@@ -237,26 +290,47 @@ export function MultiplierSlip() {
             <div data-vaul-no-drag className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 space-y-3">
               {/* Legs */}
               <div className="space-y-2">
-                {legs.map(leg => (
-                  <div key={leg.marketId} className="flex items-center gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.04] p-2.5">
+                {legs.map(leg => {
+                  const tooShort = offendingLegIds.has(leg.marketId);
+                  return (
+                  <div
+                    key={leg.marketId}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg border p-2.5 transition-colors',
+                      tooShort
+                        ? 'border-red-500/50 bg-red-500/[0.07]'
+                        : 'border-violet-500/15 bg-violet-500/[0.04]',
+                    )}
+                  >
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium truncate">{leg.marketQuestion}</p>
-                      <p className="text-[11px] text-violet-300/90 mt-0.5">
+                      <p className={cn('text-[11px] mt-0.5', tooShort ? 'text-red-300' : 'text-violet-300/90')}>
                         {leg.optionLabel}
                         {legOddsById[leg.marketId] && (
                           <span className="tabular-nums text-muted-foreground"> · {legOddsById[leg.marketId].toFixed(2)}×</span>
                         )}
                       </p>
+                      {tooShort && (
+                        <p className="text-[11px] text-red-400 mt-1 font-medium">
+                          Too short-priced (min {MULT_MIN_LEG_ODDS.toFixed(2)}×) — remove this pick.
+                        </p>
+                      )}
                     </div>
                     <button
                       onClick={() => removeLeg(leg.marketId)}
-                      className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      className={cn(
+                        'shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-colors',
+                        tooShort
+                          ? 'text-red-400 bg-red-500/10 hover:bg-red-500/20'
+                          : 'text-muted-foreground hover:text-red-400 hover:bg-red-500/10',
+                      )}
                       aria-label="Remove pick"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {legs.length > 1 && (
