@@ -34,15 +34,19 @@ export const MULT_MAX_LEGS_TIER1 = 5;
 export const MULT_MAX_LEGS_TIER2 = 10;
 
 /**
- * A leg must price at least this to be eligible. Stops users stuffing a
- * slip with 1.05× near-certainties to farm Boosts / grind a guaranteed
- * combined return. 1.15× still permits "strong favourite" picks
- * (Champions-League side vs Conference side, top-of-the-table at home)
- * while excluding trivial filler. Lowered from 1.20 once the combined
- * floor (MULT_MIN_COMBINED_ODDS) proved to be doing most of the
- * sure-thing-farming defence on its own.
+ * Per-leg odds floor. Effectively OFF — set just below the pricing floor
+ * (locked odds never resolve under ~1.02 in calculateLockedOdds), so a
+ * short-priced favourite is allowed on a slip exactly like any other book.
+ *
+ * It used to be 1.15 here while the placement RPC's own constant was never
+ * lowered from 1.20 — so a leg priced between the two (e.g. 1.16×) passed
+ * the live quote, lit up the Place button, and then failed placement every
+ * time with "too short-priced." The combined floor (MULT_MIN_COMBINED_ODDS)
+ * is the real sure-thing-farming defence and stays; this per-leg gate was
+ * removed at the operator's request. Keep this value and the RPC's
+ * c_min_leg_odds in lockstep.
  */
-export const MULT_MIN_LEG_ODDS = 1.15;
+export const MULT_MIN_LEG_ODDS = 1.01;
 
 /**
  * The combined product must clear this. Blocks risk-free arbitrage and

@@ -102,10 +102,18 @@ describe('validateSlip', () => {
     expect(r.error).toBe('duplicate_event');
   });
 
-  it('rejects a leg below the minimum odds (1.15×)', () => {
-    const r = validateSlip([leg(1, 0, 1.10), leg(2, 0, 3.0), leg(3, 0, 2.0)], 200);
+  it('rejects a leg below the minimum odds (1.01×)', () => {
+    // The per-leg floor is effectively off (set just under the ~1.02 pricing
+    // floor), so only a sub-even-money odd trips it. Short-priced favourites
+    // like 1.10× are now allowed — the combined floor is the real defence.
+    const r = validateSlip([leg(1, 0, 1.00), leg(2, 0, 3.0), leg(3, 0, 2.0)], 200);
     expect(r.ok).toBe(false);
     expect(r.error).toBe('leg_below_min_odds');
+  });
+
+  it('accepts a short-priced favourite leg (1.10×) above the floor', () => {
+    const r = validateSlip([leg(1, 0, 1.10), leg(2, 0, 3.0), leg(3, 0, 2.0)], 200);
+    expect(r.ok).toBe(true);
   });
 
   it('rejects a combined product below 3.0×', () => {
