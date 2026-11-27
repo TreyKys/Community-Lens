@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Gift, Loader2, Check, Clock, Phone, ExternalLink } from 'lucide-react';
+import { Gift, Loader2, Check, Clock, Phone, ExternalLink, ArrowRight } from 'lucide-react';
 
 // One-off profile rewards: phone number and four social follows.
 //
@@ -149,11 +149,30 @@ export function RewardsCard() {
                   {/* Opening the profile first, then asking for the handle,
                       mirrors the order the user actually does it in. */}
                   {rw.url && (
-                    <a href={rw.url} target="_blank" rel="noopener noreferrer"
-                       className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:underline">
-                      Open the profile <ExternalLink className="w-3 h-3" />
-                    </a>
+                    rw.url.startsWith('/') ? (
+                      <a href={rw.url}
+                         className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:underline">
+                        Go and play <ArrowRight className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <a href={rw.url} target="_blank" rel="noopener noreferrer"
+                         className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:underline">
+                        Open the profile <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )
                   )}
+                  {/* Earned rewards need nothing typed — the database checks
+                      whether it was actually done. Showing a handle box here
+                      would be asking for something we neither want nor use,
+                      and the Claim button would sit disabled forever. */}
+                  {!rw.needsHandle && rw.id !== 'phone' ? (
+                    <Button size="sm" className="h-8 text-[11px] w-full"
+                            disabled={busy === rw.id}
+                            onClick={() => claim(rw)}>
+                      {busy === rw.id ? <Loader2 className="w-3 h-3 animate-spin" />
+                                      : `Claim ₦${rw.rewardTngn}`}
+                    </Button>
+                  ) : (
                   <div className="flex gap-1.5">
                     <Input
                       value={value}
@@ -168,6 +187,7 @@ export function RewardsCard() {
                       {busy === rw.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Claim'}
                     </Button>
                   </div>
+                  )}
                   {rw.id === 'phone' && (
                     <p className="text-[10px] text-muted-foreground">
                       Used to get your account back if you&rsquo;re locked out, and to

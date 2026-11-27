@@ -5,7 +5,7 @@ import { useRef, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Sparkles, Clock, Trophy, Swords, Landmark, Coins,
-  Eye, TrendingUp, Gamepad2, CircleDot, Zap, Dribbble,
+  Eye, TrendingUp, Gamepad2, CircleDot, Zap, Dribbble, Flame,
 } from 'lucide-react';
 
 // Tab model: Trending = admin-curated featured set (a few hot ones);
@@ -30,6 +30,9 @@ const TABS = [
   { id: 'trending', label: 'Trending', Icon: Sparkles },
   { id: 'new',      label: 'New',      Icon: Clock },
   { id: 'open',     label: 'Trade',    Icon: TrendingUp, href: '/open',       accent: 'text-emerald-400' },
+  // Sits this high deliberately: it is the newest product and nothing finds
+  // a hub that is buried, which is exactly how FootballHub went unused.
+  { id: 'runs',     label: 'The Run',  Icon: Flame,      href: '/runs',       accent: 'text-amber-400' },
   { id: 'bbn',      label: 'BBN',      Icon: Eye,        href: '/bbn',        accent: 'text-fuchsia-400' },
   // FootballHub already existed as a full hub page — it just wasn't in this
   // rail, so in practice nobody found it (same gap basketball/tennis/esports
