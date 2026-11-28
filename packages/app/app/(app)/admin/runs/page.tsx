@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, ChevronLeft, ShieldAlert, RefreshCw, Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Admin surface for The Run.
 //
@@ -34,7 +35,7 @@ type Run = {
 const BLANK_LEG: Leg = { fixture: '', kickoff_at: null, odds_w: '', odds_d: '', odds_l: '' };
 const CONFIG_FIELDS: { key: string; label: string; hint: string }[] = [
   { key: 'rtp_target',              label: 'Return to player', hint: '0.90 = you keep ~10%' },
-  { key: 'decay',                   label: 'Miss decay',       hint: 'position kept per missed leg' },
+  { key: 'decay',                   label: 'Miss decay',       hint: 'fallback only — the curve overrides it' },
   { key: 'cashout_spread_pct',      label: 'Cash-out spread',  hint: 'your cut on an early exit' },
   { key: 'min_stake_tngn',          label: 'Min stake',        hint: '' },
   { key: 'max_stake_tngn',          label: 'Max stake',        hint: 'per player, per card' },
@@ -49,17 +50,12 @@ const overround = (l: Leg) => {
   if (w <= 1 || d <= 1 || s <= 1) return 0;
   return 1 / w + 1 / d + 1 / s;
 };
-// Same formula as run_coefficient() in the database — shown here so an admin
-// can see the price before publishing, not so anything is priced client-side.
-function coefficient(odds: number[], ors: number[], rtp: number, decay: number) {
-  let f = 1;
-  for (let i = 0; i < odds.length; i++) {
-    if (odds[i] <= 1 || ors[i] <= 0) return 0;
-    const p = (1 / odds[i]) / ors[i];
-    f *= p * odds[i] + (1 - p) * decay;
-  }
-  return f > 0 ? rtp / f : 0;
-}
+// NOTE: the client no longer re-derives the coefficient. It used to carry a
+// copy of run_coefficient()'s closed form, which was only correct while the
+// decay was a single flat number — the decay CURVE couples the legs, so the
+// value depends on the total miss count and no per-leg product gives it. The
+// preview now comes from the `ladder` action, which calls the same RPC
+// placement does. One implementation, no drift.
 
 export default function AdminRunsPage() {
   const { toast } = useToast();
@@ -90,8 +86,11 @@ export default function AdminRunsPage() {
 
   useEffect(() => { if (isAdmin) load(); }, [isAdmin, load]);
 
-  const call = async (body: any, label: string) => {
-    setBusy(label);
+  // label === null means "quiet": no spinner, no error toast. Used by the live
+  // ladder preview, which fires on every keystroke and would otherwise throw a
+  // toast each time a half-typed price makes the card briefly invalid.
+  const call = async (body: any, label: string | null) => {
+    if (label !== null) setBusy(label);
     try {
       const r = await fetch('/api/admin/runs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -101,9 +100,11 @@ export default function AdminRunsPage() {
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       return d;
     } catch (e: any) {
-      toast({ title: 'Not applied', description: e.message, variant: 'destructive' });
+      if (label !== null) {
+        toast({ title: 'Not applied', description: e.message, variant: 'destructive' });
+      }
       return null;
-    } finally { setBusy(null); }
+    } finally { if (label !== null) setBusy(null); }
   };
 
   if (checking) return <div className="flex items-center justify-center min-h-[60vh]">
@@ -183,28 +184,27 @@ function RunEditor({ editing, setEditing, presets, busy, call, reload }: any) {
     const legs = editing.legs.slice(); legs[i] = { ...legs[i], ...patch }; set({ legs });
   };
 
-  const rtp = num(editing.config.rtp_target), decay = num(editing.config.decay);
-  const ors = editing.legs.map((l: Leg) => overround(l));
-  const ready = editing.legs.every((l: Leg) => overround(l) > 0);
+  const ready = editing.legs.every((l: Leg) => overround(l) > 0)
+    && editing.legs.every((l: Leg) => String(l.fixture || '').trim().length >= 3);
 
-  // What the card actually pays, shown live. Favourite = shortest price on
-  // each leg; longshot = longest. This is the sanity check that stops a card
-  // going out with a 900x worst case nobody noticed.
-  let example: null | { favK: number; favMax: number; longK: number; longMax: number } = null;
-  if (ready) {
-    const stake = num(editing.config.max_stake_tngn) || 1000;
-    const net = stake * 0.985;
-    const favOdds = editing.legs.map((l: Leg) => Math.min(num(l.odds_w), num(l.odds_d), num(l.odds_l)));
-    const lngOdds = editing.legs.map((l: Leg) => Math.max(num(l.odds_w), num(l.odds_d), num(l.odds_l)));
-    const favK = coefficient(favOdds, ors, rtp, decay);
-    const lngK = coefficient(lngOdds, ors, rtp, decay);
-    const cap = Math.min(num(editing.config.payout_cap_tngn), net * num(editing.config.payout_cap_multiple));
-    example = {
-      favK, longK: lngK,
-      favMax: Math.min(net * favK * favOdds.reduce((a: number, b: number) => a * b, 1), cap),
-      longMax: Math.min(net * lngK * lngOdds.reduce((a: number, b: number) => a * b, 1), cap),
-    };
-  }
+  // The full payout ladder, fetched from the server as the admin types. This
+  // is the sanity check that stops a card going out with a 900x worst case
+  // nobody noticed — and the answer to "what does a player get for three?",
+  // which is the question an admin actually has.
+  const [ladder, setLadder] = useState<any>(null);
+  const stakeForPreview = num(editing.config.max_stake_tngn) || 1000;
+  useEffect(() => {
+    if (!ready) { setLadder(null); return; }
+    const t = setTimeout(async () => {
+      const d = await call({
+        action: 'ladder', kind: editing.kind, legs: editing.legs,
+        config: editing.config, stake: stakeForPreview,
+      }, null);
+      setLadder(d || null);
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(editing.legs), JSON.stringify(editing.config), editing.kind, ready]);
 
   const save = async () => {
     const d = await call({
@@ -267,7 +267,7 @@ function RunEditor({ editing, setEditing, presets, busy, call, reload }: any) {
           </div>
 
           {editing.legs.map((l: Leg, i: number) => {
-            const or = ors[i];
+            const or = overround(l);
             const bad = or > 0 && or < 1.0;
             const steep = or > 1.15;
             return (
@@ -314,23 +314,51 @@ function RunEditor({ editing, setEditing, presets, busy, call, reload }: any) {
           </p>
         </div>
 
-        {/* What it actually pays */}
-        {example && (
-          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5">
+        {/* What it actually pays, rung by rung */}
+        {ladder?.ladder && (
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-              What this card pays — max stake {ngn(num(editing.config.max_stake_tngn))}
+              What this card pays on a {ngn(ladder.stake)} stake
             </p>
-            <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground">All five favourites land</span>
-              <span className="tabular-nums font-semibold">{ngn(example.favMax)}</span>
+
+            <div className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 text-[11px]">
+              <span />
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground text-right">
+                backs favourites
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground text-right">
+                backs longshots
+              </span>
+              {[5, 4, 3, 2, 1, 0].map(h => {
+                const f = ladder.ladder.favourites.rows[h];
+                const l = ladder.ladder.longshots.rows[h];
+                const fmt = (r: any) => r.low === r.high
+                  ? ngn(r.high) : `${ngn(r.low)}–${ngn(r.high)}`;
+                return (
+                  <div key={h} className="contents">
+                    <span className="text-muted-foreground">{h} of 5</span>
+                    <span className={cn('tabular-nums text-right',
+                      f.low >= ladder.stake ? 'text-emerald-300 font-semibold'
+                        : f.high < ladder.stake ? 'text-muted-foreground/60' : 'font-medium')}>
+                      {fmt(f)}{f.capped && <span className="text-amber-400"> *</span>}
+                    </span>
+                    <span className={cn('tabular-nums text-right',
+                      l.low >= ladder.stake ? 'text-amber-300 font-semibold'
+                        : l.high < ladder.stake ? 'text-muted-foreground/60' : 'font-medium')}>
+                      {fmt(l)}{l.capped && <span className="text-amber-400"> *</span>}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-            <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground">All five longshots land</span>
-              <span className="tabular-nums font-semibold text-amber-300">{ngn(example.longMax)}</span>
-            </div>
-            <p className="text-[10px] text-muted-foreground pt-1">
-              Worst case for the house is the longshot row. Your per-card ceiling is{' '}
-              {ngn(num(editing.config.card_liability_cap_tngn))} — the card stops selling there.
+
+            <p className="text-[10px] text-muted-foreground leading-relaxed pt-1">
+              Green/amber rows are a profit for the player; grey rows are a loss. A range means it
+              depends which legs land. <span className="text-amber-400">*</span> means the payout
+              cap of {ngn(ladder.capTngn)} is clipping it — raise the cap, or you are advertising a
+              win you do not pay. Worst case for the house is the longshot column; your per-card
+              ceiling is {ngn(num(editing.config.card_liability_cap_tngn))}, where the card stops
+              selling.
             </p>
           </div>
         )}
@@ -356,6 +384,30 @@ function RunEditor({ editing, setEditing, presets, busy, call, reload }: any) {
                       onClick={() => set({ config: { ...(presets[editing.kind] || {}) } })}>
                 Reset to {editing.kind.replace('_', ' ')} preset
               </button>
+
+              {/* The curve is the researched shape, not a dial to spin. Shown
+                  so it is never invisible, and read-only so nobody reshapes
+                  the whole ladder by accident. */}
+              {ladder?.decayCurve && (
+                <div className="col-span-2 rounded-md border border-border/60 bg-muted/20 p-2.5 mt-1">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">
+                    Miss curve — what the player keeps
+                  </p>
+                  <div className="flex gap-2">
+                    {ladder.decayCurve.map((v: number, i: number) => (
+                      <div key={i} className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground">{i + 1} miss{i ? 'es' : ''}</p>
+                        <p className="text-[11px] font-bold tabular-nums">{(Number(v) * 100).toFixed(1)}%</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1.5 leading-relaxed">
+                    Steeper at the deep end so bad cards pay less and the full house pays more,
+                    without moving where break-even sits. The return-to-player figure above is
+                    unaffected — this only changes how that return is spread across the rungs.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -147,7 +147,7 @@ export async function POST(request: Request) {
     }
 
     const { data: run } = await supabaseAdmin
-      .from('runs').select('rtp_target, decay, payout_cap_multiple, payout_cap_tngn')
+      .from('runs').select('rtp_target, decay, decay_curve, payout_cap_multiple, payout_cap_tngn')
       .eq('id', runId).maybeSingle();
     if (!run) return NextResponse.json({ error: 'Run not found' }, { status: 404 });
 
@@ -166,21 +166,46 @@ export async function POST(request: Request) {
       ors.push(1 / Number(leg.odds_w) + 1 / Number(leg.odds_d) + 1 / Number(leg.odds_l));
     }
 
-    const { data: k, error } = await supabaseAdmin.rpc('run_coefficient', {
+    // The decay curve, expanded by the database so the flat-decay cards still
+    // price exactly as they did. D[m] is what an entry keeps after m misses.
+    const { data: curveRaw, error: cErr } = await supabaseAdmin.rpc('run_decay_curve', {
+      p_decay: run.decay, p_curve: run.decay_curve,
+    });
+    if (cErr) return NextResponse.json({ error: 'Could not price that' }, { status: 400 });
+    const D = [1, ...(curveRaw as number[]).map(Number)];
+
+    const { data: k, error } = await supabaseAdmin.rpc('run_coefficient_curve', {
       p_odds: odds, p_overrounds: ors,
-      p_rtp_target: run.rtp_target, p_decay: run.decay,
+      p_rtp_target: run.rtp_target, p_curve: curveRaw,
     });
     if (error) return NextResponse.json({ error: 'Could not price that' }, { status: 400 });
 
     const net = stake * 0.985;
     const cap = Math.min(Number(run.payout_cap_tngn), net * Number(run.payout_cap_multiple));
-    const allFive = Math.min(net * Number(k) * odds.reduce((a, b) => a * b, 1), cap);
+    const prodAll = odds.reduce((a, b) => a * b, 1);
+    const allFive = Math.min(net * Number(k) * prodAll, cap);
 
-    // What four-of-five looks like — the realistic good outcome, and the
-    // number that makes partial credit legible instead of theoretical.
-    const worstDrop = Math.min(...odds);
-    const fourOfFive = Math.min(
-      net * Number(k) * (odds.reduce((a, b) => a * b, 1) / worstDrop) * Number(run.decay), cap);
+    // The whole ladder, not just the headline. With the curve the shape of
+    // this is the product — losses below the hinge are deliberately steep and
+    // the full house is deliberately big, and a player who only sees "all five
+    // pays X" has been shown the least informative number on the card.
+    //
+    // Each rung is a range because it depends WHICH legs land: dropping the
+    // 1.80 favourite costs less than dropping the 4.20 shot.
+    const rungs = Array.from({ length: 6 }, () => ({ low: Infinity, high: 0 }));
+    for (let mask = 0; mask < 32; mask++) {
+      let hits = 0, prod = 1;
+      for (let i = 0; i < 5; i++) if ((mask >> i) & 1) { hits++; prod *= odds[i]; }
+      const paid = Math.min(net * Number(k) * prod * D[5 - hits], cap);
+      rungs[hits].low = Math.min(rungs[hits].low, paid);
+      rungs[hits].high = Math.max(rungs[hits].high, paid);
+    }
+    const ladder = rungs.map((r, hits) => ({
+      hits, low: r.low === Infinity ? 0 : r.low, high: r.high,
+    }));
+
+    // Kept for the headline row: the realistic good outcome.
+    const fourOfFive = ladder[4].high;
 
     // If this stake would dip into bonus credit far enough to trigger the
     // split, say so BEFORE they enter. A player who stakes ₦1,000 of bonus,
@@ -202,7 +227,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       coefficient: Number(k), perLegOdds: odds,
       allFiveTngn: allFive, fourOfFiveTngn: fourOfFive, capTngn: cap,
-      funding,
+      ladder, funding,
     });
   }
 

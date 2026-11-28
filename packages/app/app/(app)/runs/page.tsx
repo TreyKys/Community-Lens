@@ -429,15 +429,38 @@ function RunCard({ run, session, open, onToggle, reload, alreadyIn }: any) {
                           {ngn(quote.allFiveTngn)}
                         </span>
                       </div>
-                      <div className="flex items-baseline justify-between mt-2 pt-2 border-t border-amber-500/15">
-                        <span className="text-[11px] text-muted-foreground">Four of five</span>
-                        <span className="text-sm font-bold tabular-nums text-foreground/70">
-                          {ngn(quote.fourOfFiveTngn)}
-                        </span>
-                      </div>
+                      {/* The whole ladder. "All five pays X" is the least
+                          informative number on the card — the shape is the
+                          product, and a player deciding whether to enter is
+                          really asking "what if I get three?". Rungs are
+                          ranges because it depends which legs land. */}
+                      {Array.isArray(quote.ladder) && (
+                        <div className="mt-2.5 pt-2.5 border-t border-amber-500/15 space-y-1">
+                          {quote.ladder.slice().reverse().filter((r: any) => r.hits < 5).map((r: any) => {
+                            const win = r.low >= stakeNum;
+                            const loss = r.high < stakeNum;
+                            return (
+                              <div key={r.hits} className="flex items-baseline justify-between gap-2">
+                                <span className="text-[11px] text-muted-foreground">
+                                  {r.hits} of five
+                                </span>
+                                <span className={cn('text-[11px] font-bold tabular-nums',
+                                  win ? 'text-amber-300/90'
+                                      : loss ? 'text-muted-foreground/60'
+                                             : 'text-foreground/70')}>
+                                  {r.low === r.high || r.hits === 0
+                                    ? ngn(r.high)
+                                    : `${ngn(r.low)} – ${ngn(r.high)}`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       <p className="text-[10px] text-muted-foreground mt-2.5 leading-relaxed">
-                        Every fixture you call right multiplies your position. Miss one and it
-                        shrinks — <span className="text-amber-300/90">you still keep something.</span>
+                        Everything pays something — but it takes{' '}
+                        <span className="text-amber-300/90">three right just to get your stake
+                        back</span>, and the whole card to be paid properly.
                       </p>
 
                       {/* Shown only when this stake would actually trigger the split,

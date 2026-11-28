@@ -20,20 +20,69 @@ const supabaseAdmin = createClient(
 // independent legs: form carries several results together, and at mixed-card
 // pricing that correlation measured the house edge at -24%. Prefer erratic
 // teams, whose form predicts little.
+// THE DECAY CURVE. decay_curve[m] is the fraction of the full-house value an
+// entry keeps after m misses. This replaced the single flat 0.80 so the ladder
+// could be reshaped without moving break-even: crushing 3+ misses pushes the
+// coefficient up, which would lift the whole ladder, so 1 and 2 misses are
+// pulled down by exactly that lift. Measured against the flat curve:
+//
+//   0/5, 1/5, 2/5   -40%        (losses get worse)
+//   3/5             +-2%        (the break-even hinge, deliberately unmoved)
+//   4/5             +-1.5%      (unmoved)
+//   5/5             +48%        (the full house pays properly)
+//
+// Theoretical RTP is unchanged — this is a redistribution, not a margin
+// change. Verified against run_coefficient_curve on live data.
+const DECAY_CURVE = [0.54, 0.43, 0.205, 0.164, 0.131] as const;
+
 const PRESETS = {
   mixed: {
     rtp_target: 0.90, decay: 0.80, cashout_spread_pct: 0.08,
     min_stake_tngn: 100, max_stake_tngn: 2000,
-    payout_cap_multiple: 25, payout_cap_tngn: 50000,
+    // Raised from 25x alongside the curve. The curve makes the full house pay
+    // ~48% more, and at 25x the cap simply confiscated the difference — which
+    // is margin earned by not paying the win people were chasing, the worst
+    // possible place to earn it. At 50x the measured edge lands within a point
+    // of where it was before the curve. Aggregate exposure is unchanged: the
+    // card liability cap, not the per-entry cap, is the real guardrail.
+    payout_cap_multiple: 50, payout_cap_tngn: 50000,
     card_liability_cap_tngn: 300000,
+    decay_curve: DECAY_CURVE,
   },
   single_team: {
     rtp_target: 0.65, decay: 0.80, cashout_spread_pct: 0.08,
     min_stake_tngn: 100, max_stake_tngn: 2000,
-    payout_cap_multiple: 15, payout_cap_tngn: 30000,
+    payout_cap_multiple: 30, payout_cap_tngn: 30000,
     card_liability_cap_tngn: 150000,
+    decay_curve: DECAY_CURVE,
   },
 } as const;
+
+// A curve has to strictly decrease, or an extra miss could be worth more than
+// fewer misses — the database rejects that too, but an admin deserves the
+// error before they hit save rather than as a failed write.
+function validateCurve(c: any): { ok: true; curve: number[] | null } | { ok: false; error: string } {
+  if (c === null || c === undefined) return { ok: true, curve: null };
+  if (!Array.isArray(c) || c.length !== 5) {
+    return { ok: false, error: 'The decay curve needs exactly 5 values (one per miss count)' };
+  }
+  const out: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const v = Number(c[i]);
+    if (!Number.isFinite(v) || v <= 0 || v > 1) {
+      return { ok: false, error: `Decay curve value ${i + 1} must be between 0 and 1` };
+    }
+    if (i > 0 && v >= out[i - 1]) {
+      return {
+        ok: false,
+        error: `Decay curve must get smaller with each miss — value ${i + 1} (${v}) ` +
+               `is not below value ${i} (${out[i - 1]}).`,
+      };
+    }
+    out.push(v);
+  }
+  return { ok: true, curve: out };
+}
 
 type LegInput = {
   fixture: string; kickoff_at?: string | null;
@@ -140,6 +189,79 @@ export async function POST(request: Request) {
   const action = String(body?.action || '');
 
   switch (action) {
+    // ── ladder: what this card actually pays, before publishing it ───
+    //
+    // An admin types five sets of odds and a target RTP and has no way to tell
+    // what a player gets for 3 right. This answers that in naira, computed
+    // through the SAME coefficient RPC placement uses, so the preview cannot
+    // drift from the real price. Shown for the two tickets that bracket every
+    // real one: all favourites (the modal player) and all longshots.
+    case 'ladder': {
+      const v = validateLegs(body?.legs);
+      if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
+
+      const kind = body?.kind === 'single_team' ? 'single_team' : 'mixed';
+      const { decay_curve: presetCurve, ...numericPreset } = PRESETS[kind];
+      const cfg: Record<string, number> = { ...numericPreset };
+      for (const k of Object.keys(numericPreset)) {
+        const raw = body?.config?.[k];
+        if (raw !== undefined && raw !== null && raw !== '') {
+          const n = Number(raw);
+          if (Number.isFinite(n)) cfg[k] = n;
+        }
+      }
+      const cv = validateCurve(
+        body?.config?.decay_curve === undefined ? [...presetCurve] : body.config.decay_curve);
+      if (!cv.ok) return NextResponse.json({ error: cv.error }, { status: 400 });
+
+      const stake = Number(body?.stake) > 0 ? Number(body.stake) : 500;
+      const net = stake * 0.985;
+      const cap = Math.min(cfg.payout_cap_tngn, net * cfg.payout_cap_multiple);
+
+      const { data: curve, error: cErr } = await supabaseAdmin.rpc('run_decay_curve', {
+        p_decay: cfg.decay, p_curve: cv.curve,
+      });
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+      const D = [1, ...(curve as number[]).map(Number)];
+
+      const shapes: Record<string, number[]> = {
+        favourites: v.legs.map(l => Math.min(l.odds_w, l.odds_d, l.odds_l)),
+        longshots: v.legs.map(l => Math.max(l.odds_w, l.odds_d, l.odds_l)),
+      };
+      const ors = v.legs.map(overround);
+
+      const out: Record<string, any> = {};
+      for (const [name, odds] of Object.entries(shapes)) {
+        const { data: k, error } = await supabaseAdmin.rpc('run_coefficient_curve', {
+          p_odds: odds, p_overrounds: ors, p_rtp_target: cfg.rtp_target, p_curve: curve,
+        });
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+        // Every hit pattern, bucketed by how many landed. 32 of them.
+        const rows: { hits: number; low: number; high: number; capped: boolean }[] = [];
+        for (let h = 0; h <= 5; h++) rows.push({ hits: h, low: Infinity, high: 0, capped: false });
+        for (let mask = 0; mask < 32; mask++) {
+          let hits = 0, prod = 1;
+          for (let i = 0; i < 5; i++) {
+            if ((mask >> i) & 1) { hits++; prod *= odds[i]; }
+          }
+          const raw = net * Number(k) * prod * D[5 - hits];
+          const paid = Math.min(raw, cap);
+          const r = rows[hits];
+          r.low = Math.min(r.low, paid); r.high = Math.max(r.high, paid);
+          if (raw > cap) r.capped = true;
+        }
+        out[name] = {
+          coefficient: Number(k),
+          rows: rows.map(r => ({ ...r, low: r.low === Infinity ? 0 : r.low })),
+        };
+      }
+
+      return NextResponse.json({
+        stake, netStake: net, capTngn: cap, decayCurve: D.slice(1), ladder: out,
+      });
+    }
+
     // ── create / edit a draft ────────────────────────────────────────
     case 'save': {
       const kind = body?.kind === 'single_team' ? 'single_team' : 'mixed';
@@ -153,16 +275,22 @@ export async function POST(request: Request) {
       const v = validateLegs(body?.legs);
       if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 });
 
-      // Preset first, explicit overrides second.
-      const cfg: Record<string, number> = { ...PRESETS[kind] };
-      for (const k of Object.keys(PRESETS[kind])) {
+      // Preset first, explicit overrides second. decay_curve is handled apart
+      // from the rest because it is an array, and Number() on an array is NaN.
+      const { decay_curve: presetCurve, ...numericPreset } = PRESETS[kind];
+      const cfg: Record<string, number> = { ...numericPreset };
+      for (const k of Object.keys(numericPreset)) {
         if (body?.config && body.config[k] !== undefined && body.config[k] !== null && body.config[k] !== '') {
           const n = Number(body.config[k]);
           if (Number.isFinite(n)) cfg[k] = n;
         }
       }
 
-      const runRow = { title, kind, closes_at: body.closes_at, ...cfg };
+      const cv = validateCurve(
+        body?.config?.decay_curve === undefined ? [...presetCurve] : body.config.decay_curve);
+      if (!cv.ok) return NextResponse.json({ error: cv.error }, { status: 400 });
+
+      const runRow = { title, kind, closes_at: body.closes_at, ...cfg, decay_curve: cv.curve };
       let runId: string = String(body?.id || '');
 
       if (runId) {
