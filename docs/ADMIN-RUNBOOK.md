@@ -605,6 +605,58 @@ nobody else confirmed it.
 
 ---
 
+# 3f. The Run — reading the payout ladder
+
+`/admin/runs`. Pick a preset, type five fixtures and their three prices. Two
+things on that screen are worth understanding before you publish a card.
+
+## The ladder table
+
+As you type, the editor shows what the card pays at every rung — 0 through 5
+correct — for the two tickets that bracket every real one: a player who backs
+all five favourites, and one who backs all five longshots. It is computed by
+the same database function that prices a real entry, so it cannot drift from
+what a player is actually given.
+
+Read it like this:
+
+- **Grey rows are a loss for the player, coloured rows a profit.** The rung
+  where it changes is break-even. On a mixed card that is normally 3 of 5 for
+  a favourite-backer and 2–3 of 5 for a longshot-backer.
+- **A range means it depends which legs land.** Dropping a 1.80 favourite
+  costs less than dropping a 4.20 shot — that is intended, the payout follows
+  the odds of the fixtures actually called.
+- **The longshot column is the house's worst case.** If that number alarms
+  you, the per-card liability cap is what stops it compounding: the card stops
+  selling when total exposure reaches it.
+
+## An asterisk means you are advertising a win you do not pay
+
+`*` on a rung means the payout cap is clipping it. On a ₦2,000 max stake the
+₦50,000 per-entry ceiling clips the longshot full house, which otherwise pays
+more. That is a legitimate risk choice, but know you are making it — a capped
+jackpot is the single most trust-damaging way to earn margin. If the asterisk
+appears on a rung you actually want to pay, raise `Payout cap (₦)` rather than
+leaving it.
+
+## The miss curve
+
+Under "pricing controls" you will see five percentages: what a player keeps
+after 1, 2, 3, 4 and 5 misses. It is shown read-only because it is a
+researched shape, not a dial.
+
+What it does: the deep end (3+ misses) is deliberately steep, which pushes the
+coefficient up and would lift the whole ladder, so the shallow end (1–2
+misses) is pulled down by exactly that lift. Net effect against the old flat
+0.80 decay: **0/5, 1/5 and 2/5 pay about 40% less, 5/5 pays about 48% more,
+and 3/5 and 4/5 are unchanged.**
+
+It does **not** change your margin. Return-to-player is unchanged — the curve
+only changes how that return is spread across the rungs. If you want to change
+the margin, change "Return to player".
+
+---
+
 # 4. Other tools
 
 | Screen | What it is for |

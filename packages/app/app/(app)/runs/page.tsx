@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Clock, Lock, Flame, ArrowRight, Check, X as XIcon } from 'lucide-react';
+import { Loader2, Clock, Lock, Flame, ArrowRight, Check, X as XIcon, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // The Run — player surface.
@@ -191,7 +191,14 @@ function LiveEntry({ entry, run, session, reload }: any) {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      toast({ title: 'Cashed out', description: `${ngn(d.valueTngn)} is in your balance.` });
+      toast({
+        title: 'Cashed out',
+        description: d.bonusTngn > 0
+          // Bonus-funded entries pay out mostly as bonus. Saying only the
+          // total here would read as money missing from the wallet.
+          ? `${ngn(d.cashTngn)} withdrawable, ${ngn(d.bonusTngn)} back as bonus credit.`
+          : `${ngn(d.valueTngn)} is in your balance.`,
+      });
       reload();
     } catch (e: any) {
       toast({ title: 'Could not cash out', description: e.message, variant: 'destructive' });
@@ -281,7 +288,13 @@ function RunCard({ run, session, open, onToggle, reload, alreadyIn }: any) {
       setQuoting(true);
       try {
         const r = await fetch('/api/runs', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          // Signed so the quote can tell us whether this stake would come out
+          // of bonus credit, which changes what the payout is actually worth.
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
           body: JSON.stringify({
             action: 'quote', runId: run.id, stake: stakeNum,
             picks: Object.entries(picks).map(([i, p]) => ({ leg_index: Number(i), pick: p })),
@@ -292,7 +305,7 @@ function RunCard({ run, session, open, onToggle, reload, alreadyIn }: any) {
       } catch { setQuote(null); } finally { setQuoting(false); }
     }, 350);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [picks, stakeNum, complete, validStake, run.id]);
+  }, [picks, stakeNum, complete, validStake, run.id, session?.access_token]);
 
   const place = async () => {
     if (!session?.access_token) { toast({ title: 'Sign in to play', variant: 'destructive' }); return; }
@@ -416,16 +429,58 @@ function RunCard({ run, session, open, onToggle, reload, alreadyIn }: any) {
                           {ngn(quote.allFiveTngn)}
                         </span>
                       </div>
-                      <div className="flex items-baseline justify-between mt-2 pt-2 border-t border-amber-500/15">
-                        <span className="text-[11px] text-muted-foreground">Four of five</span>
-                        <span className="text-sm font-bold tabular-nums text-foreground/70">
-                          {ngn(quote.fourOfFiveTngn)}
-                        </span>
-                      </div>
+                      {/* The whole ladder. "All five pays X" is the least
+                          informative number on the card — the shape is the
+                          product, and a player deciding whether to enter is
+                          really asking "what if I get three?". Rungs are
+                          ranges because it depends which legs land. */}
+                      {Array.isArray(quote.ladder) && (
+                        <div className="mt-2.5 pt-2.5 border-t border-amber-500/15 space-y-1">
+                          {quote.ladder.slice().reverse().filter((r: any) => r.hits < 5).map((r: any) => {
+                            const win = r.low >= stakeNum;
+                            const loss = r.high < stakeNum;
+                            return (
+                              <div key={r.hits} className="flex items-baseline justify-between gap-2">
+                                <span className="text-[11px] text-muted-foreground">
+                                  {r.hits} of five
+                                </span>
+                                <span className={cn('text-[11px] font-bold tabular-nums',
+                                  win ? 'text-amber-300/90'
+                                      : loss ? 'text-muted-foreground/60'
+                                             : 'text-foreground/70')}>
+                                  {r.low === r.high || r.hits === 0
+                                    ? ngn(r.high)
+                                    : `${ngn(r.low)} – ${ngn(r.high)}`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       <p className="text-[10px] text-muted-foreground mt-2.5 leading-relaxed">
-                        Every fixture you call right multiplies your position. Miss one and it
-                        shrinks — <span className="text-amber-300/90">you still keep something.</span>
+                        Everything pays something — but it takes{' '}
+                        <span className="text-amber-300/90">three right just to get your stake
+                        back</span>, and the whole card to be paid properly.
                       </p>
+
+                      {/* Shown only when this stake would actually trigger the split,
+                          and stated as the two numbers rather than as a percentage
+                          rule — "₦740 withdrawable" is understood, "10% cash share"
+                          is not. Same rule as single bets and Multiplier. */}
+                      {quote.funding && quote.funding.cashShareOfWinnings < 1 && (
+                        <div className="mt-2.5 pt-2.5 border-t border-amber-500/15 flex gap-2">
+                          <Info className="w-3 h-3 text-amber-400/80 shrink-0 mt-[2px]" />
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">
+                            {Math.round(quote.funding.bonusProportion * 100)}% of this stake comes
+                            from bonus credit, so of a winning payout{' '}
+                            <span className="text-amber-200/90 font-medium">
+                              {ngn(quote.allFiveTngn * quote.funding.cashShareOfWinnings)}
+                            </span>{' '}
+                            would be withdrawable cash and the rest returns as bonus. Stake more of
+                            your own balance to keep all of it.
+                          </p>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <p className="text-xs text-muted-foreground">

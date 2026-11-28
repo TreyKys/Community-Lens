@@ -99,8 +99,11 @@ export default function TermsPage() {
           <p>
             This split applies to the full winnings amount, not just the profit portion, and is
             calculated independently for each prediction (and, for a Multiplier, at the ticket
-            level — see Section 5). It does not apply to a stake refunded on a voided prediction,
-            which is returned in the same proportion of actual/bonus balance it was placed with.
+            level — see Section 5). For a Run entry it is calculated at the entry level and
+            applies both to a settled payout and to any amount you take as a cash-out, so cashing
+            out early does not convert bonus credit into withdrawable balance. It does not apply
+            to a stake refunded on a voided prediction or a voided Run, which is returned in the
+            same proportion of actual/bonus balance it was placed with.
           </p>
         </Section>
 
