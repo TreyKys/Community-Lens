@@ -1,0 +1,32 @@
+name: Cron — The Run
+
+# Settles any Run whose five fixtures have all been graded.
+#
+# Grading a fixture is the human step; paying for it should not be. Without
+# this a finished card sits unpaid until somebody opens the admin page, which
+# on a product whose whole promise is "your position pays out" is the worst
+# kind of failure — silent, and from the player's side indistinguishable from
+# simply not paying.
+#
+# Every 15 minutes is plenty: fixtures finish on a weekly cadence, and
+# settle_run refuses a card it has already settled, so an overlapping or
+# retried tick cannot pay twice.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-runs
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Settle finished Runs
+        run: |
+          curl -sSf -X POST "${{ secrets.API_BASE_URL }}/api/cron/runs" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

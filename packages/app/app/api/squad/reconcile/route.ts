@@ -154,5 +154,29 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, ...results });
+  // ── Creator bounties ──────────────────────────────────────────────────
+  // A bounty qualifies on a referred user having BOTH deposited and wagered,
+  // so the deposit reconciler is its natural trigger — it already runs every
+  // 5 minutes and is the thing that knows a deposit just landed. Kept out of
+  // the bet and deposit hot paths on purpose: money-moving code has no place
+  // mid-placement, and a bounty is in no hurry.
+  //
+  // Wrapped so a bounty failure can never fail deposit reconciliation, which
+  // is the job that actually matters on this route.
+  let bounties: { checked: number; awarded: number; paidTngn: number } | { error: string };
+  try {
+    const { data, error } = await supabaseAdmin.rpc('sweep_referral_bounties', { p_limit: 200 });
+    if (error) throw new Error(error.message);
+    const row = Array.isArray(data) ? data[0] : data;
+    bounties = {
+      checked: Number(row?.checked || 0),
+      awarded: Number(row?.awarded || 0),
+      paidTngn: Number(row?.paid_tngn || 0),
+    };
+  } catch (e: any) {
+    console.error('reconcile: bounty sweep failed', e?.message || e);
+    bounties = { error: e?.message || String(e) };
+  }
+
+  return NextResponse.json({ ok: true, ...results, bounties });
 }

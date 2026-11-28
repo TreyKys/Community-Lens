@@ -35,6 +35,8 @@ interface ReferralCode {
   is_vip_code: boolean;
   rake_share_pct: number;
   uses_count: number;
+  deposit_bounty_tngn: number;
+  is_founding_creator: boolean;
 }
 
 interface ActiveStake {
@@ -59,6 +61,8 @@ export default function DashboardPage() {
   const [code, setCode] = useState<ReferralCode | null>(null);
   const [stakes, setStakes] = useState<ActiveStake[]>([]);
   const [vipEarnings, setVipEarnings] = useState<number>(0);
+  const [bountyEarnings, setBountyEarnings] = useState<number>(0);
+  const [bountyCount, setBountyCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
@@ -76,12 +80,12 @@ export default function DashboardPage() {
       }
       const uid = session.user.id;
 
-      const [{ data: prof }, { data: codeRow }, { data: stakeRows }, { data: earnings }] = await Promise.all([
+      const [{ data: prof }, { data: codeRow }, { data: stakeRows }, { data: earnings }, { data: bountyRows }] = await Promise.all([
         supabase.from('users')
           .select('id, tngn_balance, bonus_balance, points, is_vip, bonus_expires_at')
           .eq('id', uid).single(),
         supabase.from('referral_codes')
-          .select('code, is_vip_code, rake_share_pct, uses_count')
+          .select('code, is_vip_code, rake_share_pct, uses_count, deposit_bounty_tngn, is_founding_creator')
           .eq('owner_user_id', uid)
           .order('is_vip_code', { ascending: false })
           .limit(1).maybeSingle(),
@@ -94,6 +98,9 @@ export default function DashboardPage() {
         supabase.from('vip_referral_earnings')
           .select('rake_share_amount')
           .eq('vip_user_id', uid),
+        supabase.from('referral_bounties')
+          .select('amount_tngn')
+          .eq('referrer_user_id', uid),
       ]);
 
       if (cancelled) return;
@@ -105,6 +112,12 @@ export default function DashboardPage() {
           ? earnings.reduce((s, e: any) => s + Number(e.rake_share_amount || 0), 0)
           : 0
       );
+      setBountyEarnings(
+        Array.isArray(bountyRows)
+          ? bountyRows.reduce((s, b: any) => s + Number(b.amount_tngn || 0), 0)
+          : 0
+      );
+      setBountyCount(Array.isArray(bountyRows) ? bountyRows.length : 0);
       setIsLoading(false);
 
       // Realtime — balance + points
@@ -312,7 +325,37 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Creator bounty. Only shown once a bounty is actually configured on
+            this person's code — a ₦0 bounty card would just advertise that
+            there's nothing to earn. */}
+        {(code?.deposit_bounty_tngn ?? 0) > 0 && (
+          <Card className="border-violet-500/25">
+            <CardContent className="p-4">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-violet-400" /> Creator Bounties
+              </p>
+              <p className="text-2xl font-bold tabular-nums mt-1 text-violet-300">
+                ₦<AnimatedNumber value={bountyEarnings} />
+              </p>
+              <p className="text-[10px] text-muted-foreground/70 mt-1">
+                ₦{Math.round(code!.deposit_bounty_tngn).toLocaleString()} per qualified referral
+                {bountyCount > 0 && ` · ${bountyCount} paid`}
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
+
+      {code?.is_founding_creator && (
+        <div className="flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/[0.06] px-3 py-2">
+          <Sparkles className="w-4 h-4 text-violet-400 shrink-0" />
+          <p className="text-xs font-semibold text-violet-200">
+            Founding Creator
+            <span className="font-normal text-muted-foreground/80"> · you were one of the first on Opinions.ng</span>
+          </p>
+        </div>
+      )}
 
       {/* Referral card.
           Replaces the bare-code box with the full invite link
