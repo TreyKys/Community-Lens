@@ -14,6 +14,7 @@ type Category = {
   icon: any;
   color: string;
   href?: string;
+  hot?: boolean;
   subcategories?: Subcategory[];
 };
 
@@ -24,6 +25,10 @@ type Category = {
 // silently included UFC under "Ball". Politics + Crypto are top-level
 // again per the latest board call.
 const CATEGORIES: Category[] = [
+  // Sits first because it is the newest product and this sheet is how most
+  // of mobile navigates. Carries `hot` so it is distinguishable from
+  // Trending, which shares the flame.
+  { id: 'runs', label: 'The Run', icon: Flame, color: 'text-amber-400', href: '/runs', hot: true },
   { id: 'trending', label: 'Trending', icon: Flame, color: 'text-orange-500' },
   { id: 'new', label: 'New', icon: Clock, color: 'text-sky-400' },
   {
@@ -197,6 +202,13 @@ export function Sidebar() {
           >
             {Icon && <Icon className={cn('h-4 w-4 drop-shadow-[0_0_8px_currentColor]', category.color)} />}
             <span className={!Icon ? 'ml-6' : ''}>{category.label}</span>
+            {category.hot && (
+              <span className="ml-auto relative inline-flex items-center px-1.5 py-[1px] rounded-full
+                               bg-gradient-to-r from-orange-500 to-red-500">
+                <span className="absolute inset-0 rounded-full bg-orange-500/50 animate-ping" />
+                <span className="relative text-[8px] font-black tracking-wider text-white">HOT</span>
+              </span>
+            )}
           </Button>
         );
       })}

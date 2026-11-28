@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Compass, Receipt, User, Menu, LayoutDashboard } from 'lucide-react';
+import { Home, Compass, Receipt, User, Menu, LayoutDashboard, Flame } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -140,6 +140,13 @@ export function BottomTabBar() {
         <DockButton icon={Compass} label="Explore"
                     active={pathname.startsWith('/markets')} onClick={() => go('/markets')} />
 
+        {/* The Run earns a slot rather than living only in the Menu sheet.
+            A new product reachable solely by opening a drawer is a product
+            nobody opens — which is exactly how the football hub sat unused
+            for months. Comes back out of the dock once it stops being new. */}
+        <DockButton icon={Flame} label="Run" hot
+                    active={pathname.startsWith('/runs')} onClick={() => go('/runs')} />
+
         {session ? (
           <DockButton icon={Receipt} label="Picks"
                       active={pathname.startsWith('/bets')} onClick={() => go('/bets')} />
@@ -160,9 +167,9 @@ export function BottomTabBar() {
   );
 }
 
-const DockButton = ({ icon: Icon, label, active, onClick, disabled }: {
+const DockButton = ({ icon: Icon, label, active, onClick, disabled, hot }: {
   icon: typeof Home; label: string; active: boolean;
-  onClick?: () => void; disabled?: boolean;
+  onClick?: () => void; disabled?: boolean; hot?: boolean;
 }) => (
   <button
     type="button"
@@ -186,7 +193,18 @@ const DockButton = ({ icon: Icon, label, active, onClick, disabled }: {
       <span aria-hidden
             className="absolute inset-x-3 top-1 h-6 rounded-full bg-emerald-500/20 blur-md" />
     )}
-    <Icon className="relative w-5 h-5" />
-    <span className="relative text-[10px] font-medium leading-none">{label}</span>
+    <span className="relative">
+      <Icon className={cn('w-5 h-5', hot && !active && 'text-amber-400')} />
+      {/* A dot, not a word: at this size "HOT" is unreadable and a label
+          that cannot be read is just noise on the icon. */}
+      {hot && (
+        <span className="absolute -top-0.5 -right-1 flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-orange-500 opacity-75 animate-ping" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-gradient-to-br from-orange-400 to-red-500" />
+        </span>
+      )}
+    </span>
+    <span className={cn('relative text-[10px] font-medium leading-none',
+      hot && !active && 'text-amber-300/90')}>{label}</span>
   </button>
 );
