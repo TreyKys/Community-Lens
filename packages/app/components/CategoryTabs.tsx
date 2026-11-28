@@ -32,7 +32,7 @@ const TABS = [
   { id: 'open',     label: 'Trade',    Icon: TrendingUp, href: '/open',       accent: 'text-emerald-400' },
   // Sits this high deliberately: it is the newest product and nothing finds
   // a hub that is buried, which is exactly how FootballHub went unused.
-  { id: 'runs',     label: 'The Run',  Icon: Flame,      href: '/runs',       accent: 'text-amber-400' },
+  { id: 'runs',     label: 'The Run',  Icon: Flame,      href: '/runs',       accent: 'text-amber-400', tag: 'HOT' },
   { id: 'bbn',      label: 'BBN',      Icon: Eye,        href: '/bbn',        accent: 'text-fuchsia-400' },
   // FootballHub already existed as a full hub page — it just wasn't in this
   // rail, so in practice nobody found it (same gap basketball/tennis/esports
@@ -109,6 +109,7 @@ export function CategoryTabs() {
           const { id, label, Icon } = tab;
           const href = 'href' in tab ? tab.href : undefined;
           const accent = 'accent' in tab ? tab.accent : undefined;
+          const tag = 'tag' in tab ? tab.tag : undefined;
           const isActive = !href && active === id;
           return (
             <button
@@ -127,6 +128,15 @@ export function CategoryTabs() {
                   somewhere else"; without it they read as more filters. */}
               <Icon className={cn('w-4 h-4', !isActive && accent)} />
               {label}
+              {/* Only ever on the newest thing. A rail where several tabs
+                  shout is a rail where none of them do. */}
+              {tag && (
+                <span className="relative inline-flex items-center px-1.5 py-[1px] rounded-full
+                                 bg-gradient-to-r from-orange-500 to-red-500">
+                  <span className="absolute inset-0 rounded-full bg-orange-500/50 animate-ping" />
+                  <span className="relative text-[8px] font-black tracking-wider text-white">{tag}</span>
+                </span>
+              )}
             </button>
           );
         })}

@@ -67,13 +67,29 @@ export default function RunsPage() {
                       bg-gradient-to-br from-amber-500/[0.16] via-orange-500/[0.07] to-transparent px-5 pt-7 pb-6">
         <div className="absolute -top-16 -right-10 w-48 h-48 rounded-full bg-amber-500/10 blur-3xl" />
         <div className="relative">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center justify-center w-9 h-9 rounded-xl
-                             bg-gradient-to-br from-amber-400 to-orange-500 shadow-lg shadow-amber-500/25">
-              <Flame className="w-5 h-5 text-[#1a1206]" />
+          {/* Wordmark. "The" recedes so "Run" carries the name — the product is
+              "a Run", and the article is just grammar. The italic and the tight
+              tracking are doing the same job the product does: motion. */}
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex items-center justify-center w-10 h-10 rounded-xl shrink-0
+                             bg-gradient-to-br from-amber-300 via-amber-400 to-orange-500
+                             shadow-lg shadow-amber-500/30">
+              <Flame className="w-5 h-5 text-[#1a1206]" strokeWidth={2.5} />
             </span>
-            <h1 className="text-2xl font-black tracking-tight">The Run</h1>
-            <Badge className="text-[9px] bg-amber-500 text-amber-950 font-bold">NEW</Badge>
+            <h1 className="flex items-baseline gap-1.5 leading-none">
+              <span className="text-base font-semibold tracking-tight text-amber-100/45">The</span>
+              <span className="text-[34px] font-black italic tracking-[-0.045em]
+                               bg-gradient-to-br from-amber-100 via-amber-300 to-orange-500
+                               bg-clip-text text-transparent drop-shadow-[0_2px_12px_rgba(251,191,36,0.25)]">
+                Run
+              </span>
+            </h1>
+            <span className="relative inline-flex items-center gap-1 self-start mt-1 px-2 py-0.5 rounded-full
+                             bg-gradient-to-r from-orange-500 to-red-500 shadow-md shadow-orange-500/30">
+              <span className="absolute inset-0 rounded-full bg-orange-500/50 animate-ping" />
+              <Flame className="relative w-2.5 h-2.5 text-white" strokeWidth={3} />
+              <span className="relative text-[9px] font-black tracking-wider text-white">HOT</span>
+            </span>
           </div>
           <p className="text-[13px] text-muted-foreground mt-2.5 leading-relaxed">
             Five fixtures. <span className="text-amber-200/90 font-medium">One stake.</span> Call them
