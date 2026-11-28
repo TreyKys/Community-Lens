@@ -249,32 +249,65 @@ function RunEditor({ editing, setEditing, presets, busy, call, reload }: any) {
           </div>
         </div>
 
-        {/* The 5x3 grid */}
+        {/* The five fixtures.
+            Was a 5-column desktop table, which squeezed the fixture name to
+            about 40px on a phone — you could type into it and see nothing.
+            One stacked block per fixture instead: name on its own full-width
+            row, the three prices under it. */}
         <div className="space-y-2">
-          <div className="grid grid-cols-[1fr_60px_60px_60px_70px] gap-1.5 text-[10px] text-muted-foreground px-1">
-            <span>Fixture</span><span className="text-center">Win</span><span className="text-center">Draw</span>
-            <span className="text-center">Loss</span><span className="text-center">Margin</span>
+          <div className="rounded-lg bg-muted/30 px-3 py-2">
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              For each fixture, set the odds you&rsquo;re offering on the home team
+              to <span className="text-foreground font-medium">Win</span>,{' '}
+              <span className="text-foreground font-medium">Draw</span>, or{' '}
+              <span className="text-foreground font-medium">Lose</span>.
+              You set these yourself — <span className="text-foreground">they stay fixed</span> and
+              do not move as people stake.
+            </p>
           </div>
+
           {editing.legs.map((l: Leg, i: number) => {
             const or = ors[i];
             const bad = or > 0 && or < 1.0;
+            const steep = or > 1.15;
             return (
-              <div key={i} className="grid grid-cols-[1fr_60px_60px_60px_70px] gap-1.5 items-center">
-                <Input value={l.fixture} placeholder={`Fixture ${i + 1}`}
-                       onChange={e => setLeg(i, { fixture: e.target.value })} className="h-8 text-xs" />
-                {(['odds_w', 'odds_d', 'odds_l'] as const).map(k => (
-                  <Input key={k} value={l[k] as any} inputMode="decimal" placeholder="—"
-                         onChange={e => setLeg(i, { [k]: e.target.value })}
-                         className="h-8 text-xs text-center tabular-nums" />
-                ))}
-                <span className={`text-[11px] text-center tabular-nums font-semibold ${
-                  !or ? 'text-muted-foreground/40' : bad ? 'text-red-400' : or > 1.15 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                  {or ? `${(or * 100).toFixed(0)}%` : '—'}
-                </span>
+              <div key={i} className="rounded-xl border border-border p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    Fixture {i + 1}
+                  </span>
+                  <span className={`text-[11px] tabular-nums font-bold ${
+                    !or ? 'text-muted-foreground/40' : bad ? 'text-red-400'
+                      : steep ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {or ? `margin ${(or * 100).toFixed(0)}%` : 'margin —'}
+                  </span>
+                </div>
+
+                <Input value={l.fixture} placeholder="e.g. Arsenal vs Everton"
+                       onChange={e => setLeg(i, { fixture: e.target.value })}
+                       className="h-10 text-sm" />
+
+                <div className="grid grid-cols-3 gap-2">
+                  {([['odds_w', 'Win'], ['odds_d', 'Draw'], ['odds_l', 'Loss']] as const).map(([k, label]) => (
+                    <div key={k}>
+                      <p className="text-[10px] text-muted-foreground mb-1 text-center">{label}</p>
+                      <Input value={l[k] as any} inputMode="decimal" placeholder="0.00"
+                             onChange={e => setLeg(i, { [k]: e.target.value })}
+                             className="h-10 text-sm text-center tabular-nums font-semibold" />
+                    </div>
+                  ))}
+                </div>
+
+                {bad && (
+                  <p className="text-[10px] text-red-400">
+                    Under 100% — you lose money on this fixture whatever the result. Shorten the odds.
+                  </p>
+                )}
               </div>
             );
           })}
-          <p className="text-[10px] text-muted-foreground px-1">
+
+          <p className="text-[10px] text-muted-foreground px-1 leading-relaxed">
             Margin is the three prices added up. <span className="text-emerald-400">100–115%</span> is healthy,
             <span className="text-red-400"> under 100%</span> loses money whatever happens, and
             <span className="text-amber-400"> over 115%</span> is steep enough that players will notice.
